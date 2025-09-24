@@ -166,8 +166,8 @@ def export_csv_json(fit_path: Path, out_dir: Path):
 
 if __name__ == "__main__":
     # Repo-Root (anpassen falls Struktur anders ist)
-    repo = Path(__file__).resolve().parents[3]
-    FIT_NAME = "rouvy_test.fit"  # <--- hier deinen Dateinamen setzen
+    repo = Path(__file__).resolve().parents[2]
+    FIT_NAME = "garmin_test.fit"  # <--- hier deinen Dateinamen setzen
     fit_file = repo / "data" / FIT_NAME
     out_dir = repo / "data" / "exports"
     export_csv_json(fit_file, out_dir)
