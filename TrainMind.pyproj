@@ -30,7 +30,17 @@
     <Content Include="requirements.txt" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\**\*.py" />
+    <Content Include="data\**\*.*" />
+  </ItemGroup>
+  <ItemGroup>
     <InterpreterReference Include="Global|VisualStudio|Scripts" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="data\" />
+    <Folder Include="data\exports\" />
+    <Folder Include="src\" />
+    <Folder Include="src\trainmind\" />
   </ItemGroup>
   <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
   <!-- Uncomment the CoreCompile target to enable the Build command in
