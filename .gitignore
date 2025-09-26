@@ -6,9 +6,11 @@ __pycache__/
 *.pyd
 *.egg-info/
 .eggs/
+*.bak
 
 # Environment variables
 .env
+.ngrok2/
 
 # Visual Studio / VS Code
 .vs/
