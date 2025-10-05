@@ -67,3 +67,19 @@ data/exports/<name>_laps.csv
 data/exports/<name>.json
 
 
+
+Pushen zu Github
+
+# 1. Ignorierte Dateien prüfen (optional)
+git status
+
+# 2. Alles hinzufügen, was nicht ignoriert wird
+git add .
+
+# 3. Commit mit einer passenden Nachricht
+git commit -m "Add Garmin integration, venv setup and project updates"
+
+# 4. Ins Remote Repository pushen
+git push origin main
+
+

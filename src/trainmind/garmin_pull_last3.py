@@ -46,7 +46,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[2]  # .../TrainMind
 EXPORT_DIR = REPO_ROOT / "data" / "exports"
 MANIFEST_PATH = EXPORT_DIR / "_index.json"
-MAX_TO_FETCH = 3  # user requirement
+MAX_TO_FETCH = 40  # user requirement
 
 
 # -------------------- Helpers --------------------
@@ -128,7 +128,7 @@ def login_garmin() -> Garmin:
         g.login()
     return g
 
-def fetch_last_activities(client: Garmin, limit: int = 10) -> List[Dict[str, Any]]:
+def fetch_last_activities(client: Garmin, limit: int = 100) -> List[Dict[str, Any]]:
     """
     Pulls the latest 'limit' activities metadata. We'll then pick the first 3 new ones.
     """
@@ -165,7 +165,7 @@ def main():
     client = login_garmin()
 
     # Get a bunch, we will filter to "new" and cap at 3 actually saved
-    all_recent = fetch_last_activities(client, limit=15)
+    all_recent = fetch_last_activities(client, limit=100)
 
     saved = 0
     downloaded_ids = set(map(str, manifest.get("downloaded_ids", [])))
