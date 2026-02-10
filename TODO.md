@@ -7,6 +7,14 @@
 - [x] `__init__.py` in allen relevanten Python-Paketordnern gesetzt
 - [x] README auf neue Struktur aktualisiert
 
+## Datenmodell FIT (Entwurf v1)
+- [x] Zieltabellen fuer FIT-Daten definiert: `fit_files`, `activities`, `activity_sessions`, `activity_laps`, `activity_records`, `fit_raw_messages`
+- [x] Trennung von normalisierten Metriken und Rohdaten festgelegt
+- [x] Schluessel fuer Deduplizierung festgelegt (`provider` + `external_id`)
+- [x] Erste Indizes/Unique-Constraints im ORM vorgesehen
+- [ ] Alembic-Revision fuer das neue Schema erzeugen
+- [ ] Seed auf neues Schema erweitern (Demo-Aktivitaet + Samples)
+
 ## Backend/API
 - [ ] Auth-Konzept festlegen (lokal zuerst, spaeter OAuth/JWT)
 - [ ] API-Endpoints fuer Activities bauen (CRUD + List/Filter)
@@ -23,7 +31,6 @@
 - [x] Alembic-Migrationen eingerichtet
 - [x] Seed-Workflow eingerichtet
 - [ ] Indizes fuer haeufige Queries ergaenzen
-- [ ] Eindeutigkeit fuer provider/external_id absichern
 - [ ] Historisierung/Versionierung fuer eingehende Rohdaten pruefen
 
 ## Frontend
