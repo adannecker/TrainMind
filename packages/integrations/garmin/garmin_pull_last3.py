@@ -1,4 +1,4 @@
-# src/trainmind/garmin_pull_last3.py
+# packages/integrations/garmin/garmin_pull_last3.py
 # -*- coding: utf-8 -*-
 """
 Pull the last 3 new Garmin activities and store both JSON and FIT files.
@@ -43,7 +43,7 @@ except ImportError:
 
 
 # -------------------- Configuration --------------------
-REPO_ROOT = Path(__file__).resolve().parents[2]  # .../TrainMind
+REPO_ROOT = Path(__file__).resolve().parents[4]  # .../TrainMind
 EXPORT_DIR = REPO_ROOT / "data" / "exports"
 MANIFEST_PATH = EXPORT_DIR / "_index.json"
 MAX_TO_FETCH = 40  # user requirement

@@ -1,85 +1,86 @@
-﻿# TrainMind
+# TrainMind
 
-**TrainMind** ist ein Python-Projekt, um FIT-Dateien (z. B. von Rouvy oder Garmin) auszulesen und Trainingsdaten in **CSV** und **JSON** zu exportieren.  
-Langfristig soll TrainMind als zentrale Plattform dienen, in der verschiedene Datenquellen (Radfahren, Waagen, Ernährungstracker usw.) integriert werden können.  
+TrainMind ist jetzt in eine modulare Monorepo-Struktur aufgeteilt:
+- `apps/api`: FastAPI-Service
+- `apps/web`: Platzhalter fuer Frontend
+- `apps/worker`: Platzhalter fuer Worker-Jobs
+- `packages/db`: SQLAlchemy-Modelle, Session, Alembic, Seed
+- `packages/fit`: FIT-Utilities
+- `packages/integrations`: Garmin- und Withings-Integrationen
+- `infra`: Docker- und Datenbank-Skripte
+- `data`: lokale Daten, Exporte und Tokens
 
----
+## Voraussetzungen
+- Python 3.11+
+- Docker Desktop
+- PowerShell (Windows)
 
-## 1. 📂 Projektstruktur
-
-TrainMind/
-│
-├─ .gitignore
-├─ README.md
-├─ requirements.txt
-├─ TrainMind.sln # Visual Studio Solution
-│
-├─ data/ # Input & Output Daten
-│ ├─ rouvy_test.fit # Beispiel-FIT-Datei (nicht im Repo)
-│ └─ exports/ # Output: CSV + JSON
-│
-└─ src/trainmind/ # Python Code
-├─ init.py
-├─ fit_export.py # FIT → CSV/JSON Export
-└─ ... weitere Module
-
-
-
----
-
-## ⚙️ Einrichtung auf einem neuen Rechner
-
-### 1. Repository klonen
-```bash
-git clone git@github.com:<dein-user>/TrainMind.git
-cd TrainMind
-
-2. Virtuelle Umgebung erstellen
-
+## Setup
+1. Virtuelle Umgebung erstellen und aktivieren
+```powershell
 python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+```
 
-
-3. Virtuelle Umgebung aktivieren
-
-Windows (PowerShell):
-.\.venv\Scripts\activate
-
-4. Abhängigkeiten installieren
-
+2. Abhaengigkeiten installieren
+```powershell
 pip install -r requirements.txt
+```
 
+3. `.env` anlegen
+```powershell
+Copy-Item .env.example .env
+```
 
-▶️ Nutzung
+## PostgreSQL lokal
+DB starten:
+```powershell
+.\infra\scripts\db_up.ps1
+```
 
-Lege deine FIT-Dateien in den Ordner data/.
-Beispiel: data/rouvy_test.fit
+Migrationen anwenden:
+```powershell
+.\infra\scripts\db_migrate.ps1
+```
 
-Starte den Export:
+Seed-Daten schreiben:
+```powershell
+.\infra\scripts\db_seed.ps1
+```
 
-python -m src.trainmind.fit_export
+Komplett-Reset (DB neu aufsetzen, migrieren, seeden):
+```powershell
+.\infra\scripts\db_reset.ps1
+```
 
-Ergebnisse:
+DB stoppen:
+```powershell
+.\infra\scripts\db_down.ps1
+```
 
-data/exports/<name>_records.csv
+## Neue Migration
+Nach Aenderungen in `packages/db/models.py`:
+```powershell
+.\infra\scripts\db_revision.ps1 -Message "describe change"
+.\infra\scripts\db_migrate.ps1
+```
 
-data/exports/<name>_laps.csv
+## API starten
+```powershell
+uvicorn apps.api.main:app --reload
+```
 
-data/exports/<name>.json
+Healthcheck:
+- `GET http://127.0.0.1:8000/health`
 
+## Wichtige Pfade
+- API: `apps/api/main.py`
+- DB-Modelle: `packages/db/models.py`
+- Alembic: `packages/db/alembic.ini`
+- Docker Compose: `infra/docker/docker-compose.yml`
 
-
-Pushen zu Github
-
-# 1. Ignorierte Dateien prüfen (optional)
-git status
-
-# 2. Alles hinzufügen, was nicht ignoriert wird
-git add .
-
-# 3. Commit mit einer passenden Nachricht
-git commit -m "Add Garmin integration, venv setup and project updates"
-
-# 4. Ins Remote Repository pushen
-git push origin main
-
-
+## Status (Stand: 11.02.2026)
+- Projektstruktur von `src/trainmind` nach `apps/` und `packages/` umgestellt
+- Alte Solution-/Project-Dateien entfernt (`TrainMind.sln`, `TrainMind.pyproj`)
+- Integrationsskripte auf neue Pfade angepasst
+- Datenbank-Grundsetup mit Docker + Alembic + Seed vorhanden

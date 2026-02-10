@@ -20,7 +20,8 @@ def inspect_fit(path: Path):
         break  # nur den ersten Record anzeigen
 
 if __name__ == "__main__":
-    base_dir = Path(__file__).resolve().parents[3]  # zurück bis Repo-Root
+    base_dir = Path(__file__).resolve().parents[2]  # zurück bis Repo-Root
     fit_path = base_dir / "data" / "rouvy_test.fit"
     inspect_fit(fit_path)
+
 

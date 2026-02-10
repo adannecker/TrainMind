@@ -1,4 +1,4 @@
-﻿# src/trainmind/withings_test_flask.py
+# packages/integrations/withings/withings_test_flask.py
 # Minimal Withings + Flask test for TrainMind
 
 import os
@@ -26,12 +26,12 @@ SCOPES_RAW = os.getenv("WITHINGS_SCOPES", "user.activity,user.metrics")
 # Leerzeichen oder mehrere Kommas sauber in Kommas umwandeln:
 SCOPES = ",".join([s.strip() for s in re.split(r"[,\s]+", SCOPES_RAW) if s.strip()])
 
-# Project root = TrainMind (this file is src/trainmind/...)
-BASE_DIR = Path(__file__).resolve().parents[2]
+# Project root = TrainMind (new package layout)
+BASE_DIR = Path(__file__).resolve().parents[4]
 EXPORTS_DIR = BASE_DIR / "data" / "exports"
 EXPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-TOKENS_FILE = BASE_DIR / "withings_tokens.json"
+TOKENS_FILE = BASE_DIR / "data" / "withings_tokens.json"
 
 AUTH_URL = "https://account.withings.com/oauth2_user/authorize2"
 TOKEN_URL = "https://wbsapi.withings.net/v2/oauth2"
@@ -112,7 +112,7 @@ def login():
 
 @app.route("/callback", methods=["GET", "HEAD"])
 def callback():
-    # Withings "Test" button often sends HEAD → always OK
+    # Withings "Test" button often sends HEAD ? always OK
     if request.method == "HEAD":
         return ("", 200)
 
@@ -183,3 +183,4 @@ def export():
 if __name__ == "__main__":
     # debug=False avoids auto-reload glitches with tunnels
     app.run(host="0.0.0.0", port=8000, debug=False)
+
