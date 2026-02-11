@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
+import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { HomePage } from "./pages/HomePage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 
@@ -20,21 +22,24 @@ const navGroups: NavGroup[] = [
     label: "Setup",
     items: [
       { label: "Einstellungen", to: "/setup/settings" },
-      { label: "Neue Rides prüfen", to: "/setup/check-rides" }
-    ]
+      { label: "Neue Rides prüfen", to: "/setup/check-rides" },
+    ],
   },
   {
     key: "activities",
     label: "Aktivitäten",
-    items: [{ label: "Alle Aktivitäten", to: "/activities/all" }]
-  }
+    items: [
+      { label: "Wochenansicht", to: "/activities/week" },
+      { label: "Alle Aktivitäten", to: "/activities/all" },
+    ],
+  },
 ];
 
 function SidebarGroup({
   label,
   open,
   onToggle,
-  items
+  items,
 }: {
   label: string;
   open: boolean;
@@ -68,7 +73,7 @@ function Layout() {
   const location = useLocation();
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     setup: true,
-    activities: true
+    activities: true,
   });
 
   const isHomeActive = useMemo(() => location.pathname === "/", [location.pathname]);
@@ -97,7 +102,7 @@ function Layout() {
               onToggle={() =>
                 setOpenGroups((prev) => ({
                   ...prev,
-                  [group.key]: !prev[group.key]
+                  [group.key]: !prev[group.key],
                 }))
               }
               items={group.items}
@@ -119,16 +124,8 @@ function Layout() {
               />
             }
           />
-          <Route
-            path="/setup/check-rides"
-            element={
-              <PlaceholderPage
-                badge="Setup"
-                title="Neue Rides prüfen"
-                description="Hier siehst du später, wie viele Garmin-Rides noch importiert werden können."
-              />
-            }
-          />
+          <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+          <Route path="/activities/week" element={<ActivitiesWeekPage />} />
           <Route
             path="/activities/all"
             element={

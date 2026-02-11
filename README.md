@@ -93,9 +93,33 @@ Connection values:
 - Password: `trainmind`
 - Database: `trainmind`
 
+## Garmin Import Workflow
+- Configure credentials in `.env`:
+  - `GARMIN_EMAIL`
+  - `GARMIN_PASSWORD`
+- Use the frontend page `Setup > Neue Rides prüfen` to:
+  - compare latest Garmin rides with already stored rides
+  - select single/all rides
+  - import selected rides into DB (including FIT payload)
+- Import stores:
+  - `activities`
+  - `fit_files`
+  - `fit_file_payloads`
+  - `activity_laps` (when Garmin split data exists)
+
+## Weekly Activities View
+- Open `Aktivitäten > Wochenansicht`
+- Features:
+  - week selector with available weeks containing data
+  - week and month navigation (`<`, `>`, `<<`, `>>`)
+  - day cards (Mon-Sun) with activity bundles and per-day summaries
+  - right-side weekly summary + performance visualizer
+    - reference target for ambitious amateurs: `250 km / 10 h` per week
+
 ## Key Files
 - API entrypoint: `apps/api/main.py`
 - Frontend entrypoint: `apps/web/src/main.tsx`
+- Activity services: `apps/api/activity_service.py`, `apps/api/garmin_service.py`
 - DB models: `packages/db/models.py`
 - Alembic config: `packages/db/alembic.ini`
 - Docker Compose: `infra/docker/docker-compose.yml`
@@ -106,4 +130,6 @@ Connection values:
 - Integration scripts updated to new paths
 - PostgreSQL + Alembic + seed workflow running
 - FIT schema v1 tables created (including raw FIT payload storage)
-- First frontend shell implemented with sidebar navigation and placeholder pages
+- Garmin compare/import flow implemented in API + frontend
+- Garmin data repair/backfill for summaryDTO-based fields added
+- Weekly activities board implemented with navigation, summaries, and visualizer

@@ -18,12 +18,12 @@
 
 ## Backend / API
 - [ ] Define auth concept (local first, then OAuth/JWT)
-- [ ] Build activity endpoints (CRUD + list/filter)
+- [x] Build activity read endpoints for weekly view and Garmin compare/import
 - [ ] Build food entry endpoints (CRUD + daily view)
 - [ ] Build dashboard summary endpoints
 
 ## Integrations
-- [ ] Integrate Garmin pull as a worker job
+- [x] Integrate Garmin pull/import flow via API endpoints and frontend selection UI
 - [ ] Integrate Withings OAuth flow in API
 - [ ] Build normalization layer for provider data
 
@@ -34,12 +34,18 @@
 - [x] Add TrainMind-specific Postgres image (`trainmind-postgres:16`)
 - [ ] Add indexes for common query patterns
 - [ ] Evaluate historization/versioning for inbound raw data
+- [x] Repair/backfill Garmin activity metrics from stored raw payloads (`summaryDTO`)
+- [x] Populate `activity_laps` from Garmin split summaries when available
 
 ## Frontend
 - [x] Create initial web app scaffold in `apps/web` (React + Vite + TypeScript)
 - [x] Implement modern layout with left navigation and collapsible sections
 - [x] Add Start page and placeholder pages for first submenu routes
-- [ ] Connect "Check new rides" UI to real Garmin backlog API
+- [x] Connect "Check new rides" UI to real Garmin backlog API
+- [x] Add import progress overlay with live counter and circular progress
+- [x] Build weekly activities board (Mon-first bundles + per-day summary)
+- [x] Add weekly navigation controls and "weeks with data" selector
+- [x] Add weekly performance visualizer (distance/time target progress)
 - [ ] Build food tracking views
 - [ ] Build training comparison visualizations (time range/provider)
 
