@@ -1,86 +1,109 @@
 # TrainMind
 
-TrainMind ist jetzt in eine modulare Monorepo-Struktur aufgeteilt:
-- `apps/api`: FastAPI-Service
-- `apps/web`: Platzhalter fuer Frontend
-- `apps/worker`: Platzhalter fuer Worker-Jobs
-- `packages/db`: SQLAlchemy-Modelle, Session, Alembic, Seed
-- `packages/fit`: FIT-Utilities
-- `packages/integrations`: Garmin- und Withings-Integrationen
-- `infra`: Docker- und Datenbank-Skripte
-- `data`: lokale Daten, Exporte und Tokens
+TrainMind is organized as a modular monorepo:
+- `apps/api`: FastAPI service
+- `apps/web`: React + Vite frontend
+- `apps/worker`: worker/service placeholder
+- `packages/db`: SQLAlchemy models, session, Alembic, seed
+- `packages/fit`: FIT parsing/utilities
+- `packages/integrations`: Garmin and Withings integrations
+- `infra`: Docker and database scripts
+- `data`: local data, exports, and tokens
 
-## Voraussetzungen
+## Prerequisites
 - Python 3.11+
+- Node.js 20+ (with npm)
 - Docker Desktop
 - PowerShell (Windows)
 
-## Setup
-1. Virtuelle Umgebung erstellen und aktivieren
+## Backend Setup
+1. Create and initialize virtual environment:
 ```powershell
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-2. Abhaengigkeiten installieren
-```powershell
-pip install -r requirements.txt
-```
-
-3. `.env` anlegen
+2. Create local environment file:
 ```powershell
 Copy-Item .env.example .env
 ```
 
-## PostgreSQL lokal
-DB starten:
+3. Start PostgreSQL:
 ```powershell
-.\infra\scripts\db_up.ps1
+.\infra\scripts\db_up.ps1 -Build
 ```
 
-Migrationen anwenden:
+4. Apply migrations:
 ```powershell
 .\infra\scripts\db_migrate.ps1
 ```
 
-Seed-Daten schreiben:
+5. Seed demo data:
 ```powershell
 .\infra\scripts\db_seed.ps1
 ```
 
-Komplett-Reset (DB neu aufsetzen, migrieren, seeden):
+6. Start API:
 ```powershell
-.\infra\scripts\db_reset.ps1
+.\.venv\Scripts\python.exe -m uvicorn apps.api.main:app --reload
 ```
 
-DB stoppen:
+Health endpoint:
+- `GET http://127.0.0.1:8000/health`
+
+## Frontend Setup
+```powershell
+cd apps/web
+npm install
+npm run dev
+```
+
+Frontend URL:
+- `http://127.0.0.1:5173`
+
+## Database Helpers
+Stop DB:
 ```powershell
 .\infra\scripts\db_down.ps1
 ```
 
-## Neue Migration
-Nach Aenderungen in `packages/db/models.py`:
+Full reset (drop volume, recreate, migrate, seed):
+```powershell
+.\infra\scripts\db_reset.ps1
+```
+
+Create a new migration after changing `packages/db/models.py`:
 ```powershell
 .\infra\scripts\db_revision.ps1 -Message "describe change"
 .\infra\scripts\db_migrate.ps1
 ```
 
-## API starten
+## Optional: Adminer (Browser DB UI)
 ```powershell
-uvicorn apps.api.main:app --reload
+docker run --name trainmind-adminer -d -p 8081:8080 --network trainmind_default adminer
 ```
 
-Healthcheck:
-- `GET http://127.0.0.1:8000/health`
+Open:
+- `http://localhost:8081`
 
-## Wichtige Pfade
-- API: `apps/api/main.py`
-- DB-Modelle: `packages/db/models.py`
-- Alembic: `packages/db/alembic.ini`
+Connection values:
+- System: `PostgreSQL`
+- Server: `trainmind-postgres`
+- Username: `trainmind`
+- Password: `trainmind`
+- Database: `trainmind`
+
+## Key Files
+- API entrypoint: `apps/api/main.py`
+- Frontend entrypoint: `apps/web/src/main.tsx`
+- DB models: `packages/db/models.py`
+- Alembic config: `packages/db/alembic.ini`
 - Docker Compose: `infra/docker/docker-compose.yml`
 
-## Status (Stand: 11.02.2026)
-- Projektstruktur von `src/trainmind` nach `apps/` und `packages/` umgestellt
-- Alte Solution-/Project-Dateien entfernt (`TrainMind.sln`, `TrainMind.pyproj`)
-- Integrationsskripte auf neue Pfade angepasst
-- Datenbank-Grundsetup mit Docker + Alembic + Seed vorhanden
+## Current Status (2026-02-11)
+- Monorepo layout migrated from `src/trainmind` to `apps/` and `packages/`
+- Project/solution legacy files removed
+- Integration scripts updated to new paths
+- PostgreSQL + Alembic + seed workflow running
+- FIT schema v1 tables created (including raw FIT payload storage)
+- First frontend shell implemented with sidebar navigation and placeholder pages

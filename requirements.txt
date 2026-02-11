@@ -1,15 +1,17 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
+# TrainMind Python dependencies (API, DB, integrations, data tooling).
+# Frontend dependencies are managed separately in apps/web/package.json.
+
 alembic
+fastapi
+flask
+fit-tool
+fitparse
+garminconnect
+matplotlib
+numpy
+pandas
 psycopg2-binary
 python-dotenv
 requests
-flask
-
-fitparse
-fit-tool
-garminconnect
-pandas
-numpy
-matplotlib
+sqlalchemy
+uvicorn[standard]

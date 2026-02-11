@@ -40,6 +40,29 @@ class FitFile(Base):
 
     user: Mapped[User] = relationship(back_populates="fit_files")
     activities: Mapped[list["Activity"]] = relationship(back_populates="fit_file")
+    payload: Mapped["FitFilePayload | None"] = relationship(
+        back_populates="fit_file",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class FitFilePayload(Base):
+    __tablename__ = "fit_file_payloads"
+    __table_args__ = (
+        UniqueConstraint("fit_file_id", name="uq_fit_file_payloads_fit_file_id"),
+        Index("ix_fit_file_payloads_content_sha256", "content_sha256"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fit_file_id: Mapped[int] = mapped_column(ForeignKey("fit_files.id", ondelete="CASCADE"), nullable=False)
+    content: Mapped[bytes] = mapped_column(nullable=False)
+    content_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    compression: Mapped[str] = mapped_column(String(20), default="none", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    fit_file: Mapped[FitFile] = relationship(back_populates="payload")
 
 
 class Activity(Base):

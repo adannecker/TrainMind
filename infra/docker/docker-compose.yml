@@ -1,6 +1,11 @@
+name: trainmind
+
 services:
   postgres:
-    image: postgres:16
+    build:
+      context: .
+      dockerfile: postgres/Dockerfile
+    image: trainmind-postgres:16
     container_name: trainmind-postgres
     restart: unless-stopped
     environment:
@@ -19,3 +24,4 @@ services:
 
 volumes:
   trainmind_pg_data:
+    name: trainmind_pg_data

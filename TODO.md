@@ -1,44 +1,50 @@
-# TODO TrainMind
+# TrainMind TODO
 
-## Aufraeumen/Struktur
-- [x] Projektstruktur auf `apps/`, `packages/`, `infra/`, `data/` umgestellt
-- [x] Alte `src/trainmind`-Dateien entfernt/verschoben
-- [x] Legacy-Projektdateien entfernt (`TrainMind.sln`, `TrainMind.pyproj`)
-- [x] `__init__.py` in allen relevanten Python-Paketordnern gesetzt
-- [x] README auf neue Struktur aktualisiert
+## Cleanup / Structure
+- [x] Migrate project layout to `apps/`, `packages/`, `infra/`, `data/`
+- [x] Remove/move old `src/trainmind` files
+- [x] Remove legacy project files (`TrainMind.sln`, `TrainMind.pyproj`)
+- [x] Ensure `__init__.py` in relevant Python package folders
+- [x] Update README to match new structure and workflows
 
-## Datenmodell FIT (Entwurf v1)
-- [x] Zieltabellen fuer FIT-Daten definiert: `fit_files`, `activities`, `activity_sessions`, `activity_laps`, `activity_records`, `fit_raw_messages`
-- [x] Trennung von normalisierten Metriken und Rohdaten festgelegt
-- [x] Schluessel fuer Deduplizierung festgelegt (`provider` + `external_id`)
-- [x] Erste Indizes/Unique-Constraints im ORM vorgesehen
-- [ ] Alembic-Revision fuer das neue Schema erzeugen
-- [ ] Seed auf neues Schema erweitern (Demo-Aktivitaet + Samples)
+## FIT Data Model (v1)
+- [x] Define target FIT tables: `fit_files`, `fit_file_payloads`, `activities`, `activity_sessions`, `activity_laps`, `activity_records`, `fit_raw_messages`
+- [x] Separate normalized metrics and raw provider payloads
+- [x] Define dedup keys (`provider` + `external_id`)
+- [x] Add first indexes and unique constraints in ORM
+- [x] Generate Alembic revision for FIT schema v1
+- [x] Extend seed workflow for demo FIT payload/activity
+- [ ] Store parsed raw FIT messages in `fit_raw_messages` during import
 
-## Backend/API
-- [ ] Auth-Konzept festlegen (lokal zuerst, spaeter OAuth/JWT)
-- [ ] API-Endpoints fuer Activities bauen (CRUD + List/Filter)
-- [ ] API-Endpoints fuer Food Entries bauen (CRUD + Tagesansicht)
-- [ ] API-Endpoints fuer Dashboard-Summary bauen
+## Backend / API
+- [ ] Define auth concept (local first, then OAuth/JWT)
+- [ ] Build activity endpoints (CRUD + list/filter)
+- [ ] Build food entry endpoints (CRUD + daily view)
+- [ ] Build dashboard summary endpoints
 
-## Integrationen
-- [ ] Garmin Pull als Worker-Job integrieren
-- [ ] Withings OAuth Flow in API integrieren
-- [ ] Normalisierungsschicht fuer Providerdaten bauen
+## Integrations
+- [ ] Integrate Garmin pull as a worker job
+- [ ] Integrate Withings OAuth flow in API
+- [ ] Build normalization layer for provider data
 
-## Datenbank
-- [x] PostgreSQL lokal via Docker Compose vorbereiten
-- [x] Alembic-Migrationen eingerichtet
-- [x] Seed-Workflow eingerichtet
-- [ ] Indizes fuer haeufige Queries ergaenzen
-- [ ] Historisierung/Versionierung fuer eingehende Rohdaten pruefen
+## Database
+- [x] Prepare local PostgreSQL via Docker Compose
+- [x] Configure Alembic migrations
+- [x] Configure seed workflow
+- [x] Add TrainMind-specific Postgres image (`trainmind-postgres:16`)
+- [ ] Add indexes for common query patterns
+- [ ] Evaluate historization/versioning for inbound raw data
 
 ## Frontend
-- [ ] Web-App Grundgeruest anlegen
-- [ ] Food-Tracking Views bauen
-- [ ] Trainingsvergleich (Zeitraeume/Provider) visualisieren
+- [x] Create initial web app scaffold in `apps/web` (React + Vite + TypeScript)
+- [x] Implement modern layout with left navigation and collapsible sections
+- [x] Add Start page and placeholder pages for first submenu routes
+- [ ] Connect "Check new rides" UI to real Garmin backlog API
+- [ ] Build food tracking views
+- [ ] Build training comparison visualizations (time range/provider)
 
 ## Ops
-- [ ] CI fuer Tests + Lint einrichten
-- [ ] Deployment-Ziel festlegen (z. B. Render/Railway/Fly)
-- [ ] Backup-Strategie fuer PostgreSQL dokumentieren
+- [ ] Add CI for tests + lint
+- [ ] Decide deployment target (e.g. Render/Railway/Fly)
+- [ ] Document PostgreSQL backup strategy
+- [ ] Add frontend lint/test/build pipeline

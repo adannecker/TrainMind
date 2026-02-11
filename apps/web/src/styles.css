@@ -1,0 +1,239 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&family=Sora:wght@500;600;700&display=swap");
+
+:root {
+  --bg: #f3f8f6;
+  --bg-panel: #ffffffcc;
+  --bg-accent: #e2f4ec;
+  --surface: #ffffff;
+  --surface-strong: #0f3a33;
+  --text: #16322e;
+  --text-soft: #4f6863;
+  --text-on-strong: #f3fffb;
+  --line: #d4e5df;
+  --line-strong: #8ac8b5;
+  --highlight: #f39f5a;
+  --highlight-soft: #ffe5d0;
+  --shadow: 0 24px 70px rgba(14, 42, 38, 0.15);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Manrope", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at 10% 10%, #d7efe6 0%, transparent 40%),
+    radial-gradient(circle at 90% 95%, #fbe5cf 0%, transparent 30%),
+    var(--bg);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 290px 1fr;
+}
+
+.sidebar {
+  border-right: 1px solid var(--line);
+  padding: 1.2rem;
+  background: linear-gradient(180deg, #f8fffb 0%, #edf7f3 100%);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1.5rem;
+}
+
+.brand-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: linear-gradient(120deg, #0c8a68, #24b08e);
+  box-shadow: 0 0 0 4px #b8e8d7;
+}
+
+.brand-name {
+  font-family: "Sora", "Segoe UI", sans-serif;
+  font-weight: 700;
+  margin: 0;
+}
+
+.brand-sub {
+  margin: 0.2rem 0 0;
+  color: var(--text-soft);
+  font-size: 0.82rem;
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.nav-link {
+  text-decoration: none;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid transparent;
+  padding: 0.68rem 0.8rem;
+  border-radius: 0.8rem;
+  font-weight: 700;
+}
+
+.nav-link:hover {
+  background: var(--bg-accent);
+  border-color: var(--line);
+}
+
+.nav-link.active {
+  background: var(--surface-strong);
+  color: var(--text-on-strong);
+}
+
+.nav-group {
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  overflow: hidden;
+  background: #ffffffa5;
+}
+
+.nav-group-button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: transparent;
+  border: 0;
+  padding: 0.7rem 0.8rem;
+  color: var(--text);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nav-sub-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0 0.5rem 0.6rem;
+  gap: 0.35rem;
+}
+
+.nav-sub-link {
+  text-decoration: none;
+  color: var(--text-soft);
+  font-size: 0.95rem;
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.nav-sub-link:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
+}
+
+.nav-sub-link.active {
+  background: var(--highlight-soft);
+  border-color: #f6c797;
+  color: #7b4317;
+}
+
+.chevron {
+  display: inline-block;
+  transition: transform 170ms ease;
+}
+
+.chevron.open {
+  transform: rotate(180deg);
+}
+
+.content {
+  padding: 1.4rem;
+}
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.hero {
+  padding: 1.4rem 1.5rem;
+  border-radius: 1.2rem;
+  border: 1px solid #dcebe5;
+  background: var(--bg-panel);
+  backdrop-filter: blur(8px);
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.72rem;
+  color: #35796d;
+  font-weight: 800;
+}
+
+h1 {
+  margin: 0.35rem 0 0.45rem;
+  font-family: "Sora", "Segoe UI", sans-serif;
+  font-size: clamp(1.6rem, 2.5vw, 2.2rem);
+}
+
+.lead {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 1.02rem;
+}
+
+.grid {
+  display: grid;
+  gap: 0.95rem;
+  margin-top: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+  padding: 1rem;
+}
+
+.card h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.card p {
+  margin: 0.45rem 0 0;
+  color: var(--text-soft);
+}
+
+.card-highlight {
+  border-color: #f4bc87;
+  background: linear-gradient(160deg, #fff6ec 0%, #fff 70%);
+}
+
+@media (max-width: 900px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}

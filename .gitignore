@@ -24,3 +24,7 @@ Thumbs.db
 
 # Daten
 /data/
+
+# Node
+node_modules/
+dist/
