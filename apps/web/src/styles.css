@@ -445,7 +445,7 @@ h1 {
 
 .week-hero-summary {
   box-shadow: none;
-  background: #f9fcfb;
+  background: #d9f0e3;
 }
 
 .week-title-line {
@@ -619,7 +619,7 @@ h1 {
 .week-activity-item {
   border: 1px solid var(--line);
   border-radius: 0.8rem;
-  background: #f9fcfb;
+  background: #d9f0e3;
   padding: 0.65rem 0.7rem;
 }
 
@@ -666,3 +666,5 @@ h1 {
     grid-template-columns: 1fr;
   }
 }
+
+
