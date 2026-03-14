@@ -6,7 +6,7 @@ import numpy as np
 
 from typing import Iterable, List, Optional, Tuple
 
-from fitparse import FitFile as FitReader          # für Lesen
+from fitparse import FitFile as FitReader          # fÃ¼r Lesen
 from fit_tool.fit_file import FitFile as FitWriter, FitFileHeader  # schreiben
 
 from fit_tool.profile.messages.record_message import RecordMessage
@@ -56,7 +56,7 @@ SEGMENTS = [
     ("CD",  10*60, 124),
 ]
 
-# Variation um den Zielwert (für realistischere Kurve)
+# Variation um den Zielwert (fÃ¼r realistischere Kurve)
 POWER_JITTER_W = 3
 # =========================================================================
 
@@ -81,7 +81,7 @@ def load_hr_cad_speed(fit_path: Path):
 
 
 def build_power_series(rows, start_ts):
-    """Erzeugt für jeden vorhandenen Timestamp eine Power gemäß Segmentplan."""
+    """Erzeugt fÃ¼r jeden vorhandenen Timestamp eine Power gemÃ¤ÃŸ Segmentplan."""
     # Baue eine Liste (sekundengenau) vom ersten bis letzten Timestamp
     if not rows:
         raise RuntimeError("In der Originaldatei wurden keine Record-Daten gefunden.")
@@ -90,7 +90,7 @@ def build_power_series(rows, start_ts):
     last  = rows[-1][0]
     total_secs = int((last - first).total_seconds()) + 1
 
-    # Falls die Aktivität länger/kürzer ist als dein Plan, nehmen wir min()
+    # Falls die AktivitÃ¤t lÃ¤nger/kÃ¼rzer ist als dein Plan, nehmen wir min()
     planned_secs = sum(d for _, d, _ in SEGMENTS)
     usable_secs  = min(total_secs, planned_secs)
 
@@ -106,7 +106,7 @@ def build_power_series(rows, start_ts):
         if offset >= usable_secs:
             break
 
-    # Mappe zurück auf die echten Fit-Records (es gibt nicht zwingend jede Sekunde einen Record)
+    # Mappe zurÃ¼ck auf die echten Fit-Records (es gibt nicht zwingend jede Sekunde einen Record)
     # Wir nehmen den Sekundenindex relativ zum Start_ts
     time_to_power = {}
     for (ts, *_ ) in rows:
@@ -114,7 +114,7 @@ def build_power_series(rows, start_ts):
         if 0 <= sec_idx < usable_secs:
             time_to_power[ts] = float(pw[sec_idx])
         else:
-            # Falls die Originaldatei länger ist als der Plan: setze letzten bekannten Wert/GA1
+            # Falls die Originaldatei lÃ¤nger ist als der Plan: setze letzten bekannten Wert/GA1
             time_to_power[ts] = float(SEGMENTS[-1][2])
 
     return time_to_power, usable_secs
@@ -124,20 +124,20 @@ def _interp_with_jitter(values: Iterable[Optional[float]],
                         bounds: Tuple[float, float] | None = None,
                         seed: int | None = None) -> List[int]:
     """
-    Füllt None-Lücken linear zwischen bekannten Punkten und fügt pro Punkt
-    einen kleinen ±jitter_amp Jitter hinzu. Führt an den Rändern (vor erstem /
-    nach letztem Wert) eine 'Hold'-Füllung mit Jitter durch.
-    Gibt gerundete int-Werte zurück (für HR/Cadence ideal).
+    FÃ¼llt None-LÃ¼cken linear zwischen bekannten Punkten und fÃ¼gt pro Punkt
+    einen kleinen Â±jitter_amp Jitter hinzu. FÃ¼hrt an den RÃ¤ndern (vor erstem /
+    nach letztem Wert) eine 'Hold'-FÃ¼llung mit Jitter durch.
+    Gibt gerundete int-Werte zurÃ¼ck (fÃ¼r HR/Cadence ideal).
 
     values     : Liste mit float|int oder None (z. B. HR oder Cadence)
     jitter_amp : maximale Abweichung (z. B. 1 bpm)
     bounds     : (min, max) zur Begrenzung; None -> keine Begrenzung
-    seed       : RNG-Seed für reproduzierbares Ergebnis
+    seed       : RNG-Seed fÃ¼r reproduzierbares Ergebnis
     """
     rng = random.Random(seed)
     vals = list(values)
     n = len(vals)
-    out: List[Optional[float]] = list(vals)  # wird überschrieben
+    out: List[Optional[float]] = list(vals)  # wird Ã¼berschrieben
 
     # Indizes mit echten Werten
     known = [i for i, v in enumerate(vals) if v is not None]
@@ -157,7 +157,7 @@ def _interp_with_jitter(values: Iterable[Optional[float]],
         base = float(vals[first])
         out[i] = clamp(base + rng.uniform(-jitter_amp, jitter_amp))
 
-    # Zwischenräume: linear + Jitter
+    # ZwischenrÃ¤ume: linear + Jitter
     for a, b in zip(known, known[1:]):
         va = float(vals[a])
         vb = float(vals[b])
@@ -176,7 +176,7 @@ def _interp_with_jitter(values: Iterable[Optional[float]],
         base = float(vals[last])
         out[i] = clamp(base + rng.uniform(-jitter_amp, jitter_amp))
 
-    # ints zurückgeben
+    # ints zurÃ¼ckgeben
     return [int(round(x if x is not None else 0)) for x in out]
 
 
@@ -188,8 +188,8 @@ def fill_missing_hr_and_cadence(
     seed: int = 42,
 ) -> list[tuple]:
     """
-    Füllt HR- und Cadence-Lücken mit _interp_with_jitter.
-    Optional: kleine Variation auch für vorhandene Cadence-Werte (cad_extra_jitter_everywhere).
+    FÃ¼llt HR- und Cadence-LÃ¼cken mit _interp_with_jitter.
+    Optional: kleine Variation auch fÃ¼r vorhandene Cadence-Werte (cad_extra_jitter_everywhere).
 
     rows: [(ts, hr, cad, spd), ...]
     """
@@ -208,10 +208,10 @@ def fill_missing_hr_and_cadence(
         cad_list, jitter_amp=cad_jitter_rpm, bounds=(0, 200), seed=seed + 1
     )
 
-    # Optional: vorhandene Cadence zusätzlich minimal variieren (z. B. ±1 rpm)
+    # Optional: vorhandene Cadence zusÃ¤tzlich minimal variieren (z. B. Â±1 rpm)
     if cad_extra_jitter_everywhere > 0:
         for i, c in enumerate(cad_filled):
-            if cad_list[i] is not None:  # nur dort, wo ursprünglich ein Wert war
+            if cad_list[i] is not None:  # nur dort, wo ursprÃ¼nglich ein Wert war
                 j = rng.uniform(-cad_extra_jitter_everywhere, cad_extra_jitter_everywhere)
                 cad_filled[i] = int(max(0, min(200, round(c + j))))
 
@@ -225,21 +225,21 @@ import math
 
 def power_to_speed_flat(p_w: float,
                         mass_kg: float = 80.0,     # Fahrer+Rad
-                        cda_m2: float = 0.32,      # Aerodynamik (Hoods ~0.32–0.36)
-                        crr: float = 0.004,        # Rollwiderstand (Straße)
-                        rho: float = 1.225,        # Luftdichte (Meereshöhe, 15°C)
+                        cda_m2: float = 0.32,      # Aerodynamik (Hoods ~0.32â€“0.36)
+                        crr: float = 0.004,        # Rollwiderstand (StraÃŸe)
+                        rho: float = 1.225,        # Luftdichte (MeereshÃ¶he, 15Â°C)
                         drivetrain_eff: float = 0.975,  # Antriebswirkungsgrad
                         grade: float = 0.0,        # Steigung (z.B. 0.01 = 1%)
                         v_max: float = 25.0        # obere Klammer (m/s ~ 90 km/h)
                        ) -> float:
     """
-    Liefert stationäre Geschwindigkeit v (m/s) auf flacher Strecke für gegebene Leistung p_w.
+    Liefert stationÃ¤re Geschwindigkeit v (m/s) auf flacher Strecke fÃ¼r gegebene Leistung p_w.
     Nutzt Bisektion (monoton), robust auch bei p=0.
     """
     if p_w <= 0:
         return 0.0
     g = 9.80665
-    # Näherungen für kleine Steigungen:
+    # NÃ¤herungen fÃ¼r kleine Steigungen:
     sin_th = grade
     cos_th = 1.0
     # Radleistungsabgabe am Rad (Verluste abgezogen)
@@ -273,8 +273,8 @@ def apply_speed_from_power(rows, time_to_power,
                            rho=1.225, drivetrain_eff=0.975, grade=0.0,
                            smooth_window_s=5):
     """
-    rows: [(ts, hr, cad, spd)], spd wird überschrieben durch aus Power berechnete m/s.
-    Glättung: gleitendes Mittel (Sekundenfenster).
+    rows: [(ts, hr, cad, spd)], spd wird Ã¼berschrieben durch aus Power berechnete m/s.
+    GlÃ¤ttung: gleitendes Mittel (Sekundenfenster).
     """
     # 1) rohe v aus Power
     v_raw = []
@@ -284,7 +284,7 @@ def apply_speed_from_power(rows, time_to_power,
         v = power_to_speed_flat(p, mass_kg, cda_m2, crr, rho, drivetrain_eff, grade)
         v_raw.append(v)
 
-    # 2) gleichmäßig auf Zeit glätten (moving average über ~smooth_window_s)
+    # 2) gleichmÃ¤ÃŸig auf Zeit glÃ¤tten (moving average Ã¼ber ~smooth_window_s)
     v_smooth = []
     buf = deque()
     last_t = ts_list[0]
@@ -313,7 +313,7 @@ def apply_speed_from_power(rows, time_to_power,
         else:
             v_smooth.append(v_raw[i])
 
-    # 3) rows mit neuer speed zurückgeben
+    # 3) rows mit neuer speed zurÃ¼ckgeben
     new_rows = []
     for (v, (ts, hr, cad, _spd)) in zip(v_smooth, rows):
         new_rows.append((ts, hr, cad, float(v)))
@@ -323,7 +323,7 @@ def estimate_kcal(time_to_power, eff_metabolic=0.24):
     """
     Rechnet mechanische Arbeit (kJ) in kcal um (metabolisch, ~24% Effizienz).
     """
-    # einfache Summation über Zeitdifferenzen
+    # einfache Summation Ã¼ber Zeitdifferenzen
     items = sorted(time_to_power.items(), key=lambda x: x[0])
     if not items:
         return 0
@@ -369,7 +369,7 @@ def write_fit(OUT_FIT, rows, start_ts, time_to_power):
     def set_dt_encoded(msg, field_name: str, ts_val):
         """
         Setzt ein date_time-Feld so, dass der encodierte Wert korrekt ist.
-        Nutzt Offset/Scale des Feldtyps ? keine doppelten Epoch-Abzüge.
+        Nutzt Offset/Scale des Feldtyps ? keine doppelten Epoch-AbzÃ¼ge.
         """
         raw = to_fit_seconds(ts_val)
 
@@ -508,7 +508,7 @@ def generate_flat_route(start_lat, start_lon, total_distance_m, points=2000, bea
 
 
 def interpolate_positions(route_lat, route_lon, route_cum, activity_cum):
-    # Map jede Aktivitätsdistanz auf Längenparameter der Route
+    # Map jede AktivitÃ¤tsdistanz auf LÃ¤ngenparameter der Route
     pos=[]
     j=0
     for s in activity_cum:
@@ -558,7 +558,7 @@ def _cum_dist_from_rows(rows):
         vv = float(v or 0.0)
         dist += max(0.0, vv) * max(0.0, dt)
         v_max = max(v_max, vv)
-        if vv > 0.5:               # >0.5 m/s = “in Bewegung”
+        if vv > 0.5:               # >0.5 m/s = â€œin Bewegungâ€
             moving_time += dt
     total_time = (rows[-1][0] - rows[0][0]).total_seconds()
     return dist, total_time, moving_time, v_max
@@ -570,7 +570,7 @@ def _power_1s_array(time_to_power):
     t0, tN = items[0][0], items[-1][0]
     n = int((tN - t0).total_seconds()) + 1
     P = np.zeros(n, dtype=float)
-    # piecewise constant bis zum nächsten Timestamp
+    # piecewise constant bis zum nÃ¤chsten Timestamp
     for (t, p), (t2, _p2) in zip(items, items[1:] + [(tN, 0)]):
         i = int((t - t0).total_seconds())
         j = int((t2 - t0).total_seconds())
@@ -583,7 +583,7 @@ def compute_np_if_tss_and_p20(time_to_power, ftp_w):
     P, _ = _power_1s_array(time_to_power)
     if P.size == 0:
         return 0.0, 0.0, 0.0, 0.0
-    # 30-s glättung (moving average)
+    # 30-s glÃ¤ttung (moving average)
     win = np.ones(30) / 30.0
     P30 = np.convolve(P, win, mode="same")
     NP = float(np.mean(P30**4) ** 0.25)
@@ -627,18 +627,18 @@ def write_tcx(out_fit_path,
               time_to_power,
               calories_override=None,
               positions=None,            # None = keine GPS-Positionen
-              altitude_override=None,    # z.B. 100.0 für flach; None = weglassen
+              altitude_override=None,    # z.B. 100.0 fÃ¼r flach; None = weglassen
               summary=None,              # dict von summarize_for_connect(...)
-              notes_text=None):          # zusätzlicher Text (z.B. "Indoor | TE 3.4")
+              notes_text=None):          # zusÃ¤tzlicher Text (z.B. "Indoor | TE 3.4")
     """
     Schreibt eine Garmin-kompatible TCX.
     - rows: [(ts, hr, cad, spd[m/s])...]
     - time_to_power: {ts: watt}
     - calories_override: int/None  -> <Calories> in Lap
     - positions: [(lat,lon)] oder None
-    - altitude_override: konstante Höhe (m) oder None
-    - summary: Ergebnis von summarize_for_connect(...) für Lap-Distanz/MaxSpeed & Notes
-    - notes_text: optionaler Zusatztext für <Notes>
+    - altitude_override: konstante HÃ¶he (m) oder None
+    - summary: Ergebnis von summarize_for_connect(...) fÃ¼r Lap-Distanz/MaxSpeed & Notes
+    - notes_text: optionaler Zusatztext fÃ¼r <Notes>
     """
     def iso8601(ts):
         if ts.tzinfo is None:
@@ -678,7 +678,7 @@ def write_tcx(out_fit_path,
 
     track = ET.SubElement(lap, "{%s}Track" % NS["tcx"])
 
-    # --- Trackpoints: Zeit, (Höhe), (Position), Distanz, HR, Cad, Power ---
+    # --- Trackpoints: Zeit, (HÃ¶he), (Position), Distanz, HR, Cad, Power ---
     dist_m = 0.0
     last_ts = rows[0][0]
     for i, (ts, hr, cad, spd) in enumerate(rows):
@@ -728,7 +728,7 @@ def write_tcx(out_fit_path,
     ET.SubElement(ver, "{%s}VersionMajor" % NS["tcx"]).text = "1"
     ET.SubElement(ver, "{%s}VersionMinor" % NS["tcx"]).text = "0"
 
-    # --- Notes: Kennzahlen als Text anhängen ---
+    # --- Notes: Kennzahlen als Text anhÃ¤ngen ---
     if summary is not None:
         avg_kmh = summary['avg_v'] * 3.6
         mov_kmh = summary['avg_v_moving'] * 3.6
@@ -753,9 +753,9 @@ def write_tcx(out_fit_path,
 
 def main():
     # === Parameter (gerne anpassen) ===
-    FTP_W = 225                 # dein FTP für IF/TSS
+    FTP_W = 225                 # dein FTP fÃ¼r IF/TSS
     SYSTEM_MASS_KG = 80.0       # Fahrer+Bike+Flaschen
-    CDA_M2 = 0.33               # Aerofläche (Hoods ~0.32–0.36)
+    CDA_M2 = 0.33               # AeroflÃ¤che (Hoods ~0.32â€“0.36)
     CRR = 0.004                 # Rollwiderstand
     RHO = 1.225                 # Luftdichte
     DRIVE_EFF = 0.975           # Antriebswirkungsgrad
@@ -766,10 +766,10 @@ def main():
     CAD_JITTER_RPM = 2.0
     CAD_EXTRA_JITTER = 1.0      # 0.0 = aus
 
-    # Optional: konstante Höhe (None = keine Höhe schreiben)
-    ALT_FLAT = None             # z.B. 100.0 für "flach"
+    # Optional: konstante HÃ¶he (None = keine HÃ¶he schreiben)
+    ALT_FLAT = None             # z.B. 100.0 fÃ¼r "flach"
 
-    # Optional: Zusatznotiz (hier könntest du z.B. TE notieren)
+    # Optional: Zusatznotiz (hier kÃ¶nntest du z.B. TE notieren)
     NOTES = "Indoor Ride | TE 3.4"
 
     print(f"IN_FIT:  {IN_FIT}")
@@ -778,7 +778,7 @@ def main():
     # 1) Originaldaten lesen
     start_ts, rows = load_hr_cad_speed(IN_FIT)
 
-    # 2) HR-/Cadence-Lücken füllen + leichte Variation
+    # 2) HR-/Cadence-LÃ¼cken fÃ¼llen + leichte Variation
     rows = fill_missing_hr_and_cadence(
         rows,
         hr_jitter_bpm=HR_JITTER_BPM,
@@ -787,10 +787,10 @@ def main():
         seed=SEED,
     )
 
-    # 3) Power-Serie gemäß Segmentplan bauen (auf die gefüllten rows gemappt)
+    # 3) Power-Serie gemÃ¤ÃŸ Segmentplan bauen (auf die gefÃ¼llten rows gemappt)
     time_to_power, _ = build_power_series(rows, start_ts)
 
-    # 4) Geschwindigkeit aus Leistung (flach) ableiten und glätten
+    # 4) Geschwindigkeit aus Leistung (flach) ableiten und glÃ¤tten
     rows = apply_speed_from_power(
         rows,
         time_to_power,
@@ -803,10 +803,10 @@ def main():
         smooth_window_s=5,
     )
 
-    # 5) Zusammenfassung/Metriken (Distanz/Ø-Speed, NP/IF/TSS, 20-min-Power)
+    # 5) Zusammenfassung/Metriken (Distanz/Ã˜-Speed, NP/IF/TSS, 20-min-Power)
     summary = summarize_for_connect(rows, time_to_power, ftp_w=FTP_W)
 
-    # 6) Kalorien grob schätzen
+    # 6) Kalorien grob schÃ¤tzen
     kcal = estimate_kcal(time_to_power, eff_metabolic=0.24)
 
     # 7) TCX schreiben (ohne GPS), inkl. Distanz/MaxSpeed/Notes

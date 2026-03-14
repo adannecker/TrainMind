@@ -4,7 +4,7 @@ param(
 
 $composeFile = "infra/docker/docker-compose.yml"
 if ($Build) {
-  docker compose -f $composeFile up -d --build
+  docker compose -f $composeFile up -d --build postgres
 } else {
-  docker compose -f $composeFile up -d
+  docker compose -f $composeFile up -d postgres
 }

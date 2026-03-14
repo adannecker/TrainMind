@@ -2,6 +2,7 @@
 # Frontend dependencies are managed separately in apps/web/package.json.
 
 alembic
+cryptography
 fastapi
 flask
 fit-tool

@@ -44,7 +44,7 @@ def _to_week_start(target_day: date) -> date:
     return target_day - timedelta(days=target_day.weekday())
 
 
-def get_weekly_activities(reference_date: str | None = None) -> dict[str, Any]:
+def get_weekly_activities(user_id: int, reference_date: str | None = None) -> dict[str, Any]:
     if reference_date:
         ref_day = date.fromisoformat(reference_date)
     else:
@@ -59,6 +59,7 @@ def get_weekly_activities(reference_date: str | None = None) -> dict[str, Any]:
         rows = session.scalars(
             select(Activity)
             .where(Activity.started_at.is_not(None))
+            .where(Activity.user_id == user_id)
             .where(Activity.started_at >= range_start)
             .where(Activity.started_at < range_end)
             .order_by(Activity.started_at.asc())
@@ -151,10 +152,13 @@ def get_weekly_activities(reference_date: str | None = None) -> dict[str, Any]:
     }
 
 
-def get_available_activity_weeks() -> dict[str, Any]:
+def get_available_activity_weeks(user_id: int) -> dict[str, Any]:
     with SessionLocal() as session:
         rows = session.scalars(
-            select(Activity.started_at).where(Activity.started_at.is_not(None)).order_by(Activity.started_at.desc())
+            select(Activity.started_at)
+            .where(Activity.started_at.is_not(None))
+            .where(Activity.user_id == user_id)
+            .order_by(Activity.started_at.desc())
         ).all()
 
     week_counts: dict[date, int] = {}

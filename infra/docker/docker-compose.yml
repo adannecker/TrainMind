@@ -22,6 +22,96 @@ services:
       timeout: 5s
       retries: 5
 
+  db-migrate:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python-service.Dockerfile
+    container_name: trainmind-db-migrate
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-trainmind}:${POSTGRES_PASSWORD:-trainmind}@postgres:5432/${POSTGRES_DB:-trainmind}
+    command: ["alembic", "-c", "packages/db/alembic.ini", "upgrade", "head"]
+    restart: "no"
+
+  garmin-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python-service.Dockerfile
+    container_name: trainmind-garmin-api
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-trainmind}:${POSTGRES_PASSWORD:-trainmind}@postgres:5432/${POSTGRES_DB:-trainmind}
+    ports:
+      - "8010:8010"
+    command: ["uvicorn", "apps.api.main:app", "--host", "0.0.0.0", "--port", "8010"]
+    restart: unless-stopped
+
+  hub-web:
+    image: node:20-alpine
+    container_name: trainmind-hub-web
+    working_dir: /app/apps/web
+    depends_on:
+      garmin-api:
+        condition: service_started
+    volumes:
+      - ../..:/app
+    environment:
+      VITE_API_BASE_URL: /api
+      VITE_API_PROXY_TARGET: http://garmin-api:8010
+      CHOKIDAR_USEPOLLING: "true"
+    ports:
+      - "8000:8000"
+    command: ["sh", "-c", "npm install && npm run dev -- --host 0.0.0.0 --port 8000"]
+    restart: unless-stopped
+
+  withings-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python-service.Dockerfile
+    container_name: trainmind-withings-api
+    profiles: ["optional"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-trainmind}:${POSTGRES_PASSWORD:-trainmind}@postgres:5432/${POSTGRES_DB:-trainmind}
+      WITHINGS_CLIENT_ID: ${WITHINGS_CLIENT_ID:-}
+      WITHINGS_CLIENT_SECRET: ${WITHINGS_CLIENT_SECRET:-}
+      WITHINGS_REDIRECT_URI: ${WITHINGS_REDIRECT_URI:-}
+      WITHINGS_SCOPES: ${WITHINGS_SCOPES:-user.activity,user.metrics}
+    ports:
+      - "8001:8001"
+    command: ["uvicorn", "apps.worker.withings_api:app", "--host", "0.0.0.0", "--port", "8001"]
+    restart: unless-stopped
+
+  nutrition-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/python-service.Dockerfile
+    container_name: trainmind-nutrition-api
+    profiles: ["optional"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-trainmind}:${POSTGRES_PASSWORD:-trainmind}@postgres:5432/${POSTGRES_DB:-trainmind}
+    ports:
+      - "8002:8002"
+    command: ["uvicorn", "apps.worker.nutrition_api:app", "--host", "0.0.0.0", "--port", "8002"]
+    restart: unless-stopped
+
 volumes:
   trainmind_pg_data:
     name: trainmind_pg_data

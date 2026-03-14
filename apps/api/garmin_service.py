@@ -13,7 +13,8 @@ from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnec
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, User
+from apps.api.credential_service import get_service_credentials
+from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload
 from packages.db.session import SessionLocal
 
 
@@ -144,14 +145,14 @@ def _upsert_laps_for_activity(session, activity_id: int, summary_payload: dict[s
         )
 
 
-def _collect_loaded_ids() -> set[str]:
+def _collect_loaded_ids(user_id: int) -> set[str]:
     loaded_ids: set[str] = set()
     with SessionLocal() as session:
         activity_ids = session.scalars(
-            select(Activity.external_id).where(Activity.provider == "garmin")
+            select(Activity.external_id).where(Activity.provider == "garmin", Activity.user_id == user_id)
         ).all()
         fit_file_ids = session.scalars(
-            select(FitFile.external_activity_id).where(FitFile.provider == "garmin")
+            select(FitFile.external_activity_id).where(FitFile.provider == "garmin", FitFile.user_id == user_id)
         ).all()
 
     for value in activity_ids:
@@ -163,10 +164,14 @@ def _collect_loaded_ids() -> set[str]:
     return loaded_ids
 
 
-def _build_client() -> Garmin:
+def _build_client(user_id: int) -> Garmin:
     load_dotenv(dotenv_path=REPO_ROOT / ".env")
-    email = os.getenv("GARMIN_EMAIL")
-    password = os.getenv("GARMIN_PASSWORD")
+    stored = get_service_credentials("garmin", user_id=user_id)
+    if stored is not None:
+        email, password = stored
+    else:
+        email = os.getenv("GARMIN_EMAIL")
+        password = os.getenv("GARMIN_PASSWORD")
     if not email or not password:
         raise ValueError("GARMIN_EMAIL and GARMIN_PASSWORD must be set in environment or .env")
 
@@ -188,21 +193,11 @@ def _download_fit_bytes(client: Garmin, activity_id: int) -> bytes:
     return client.download_activity_original(activity_id)
 
 
-def _ensure_local_user(session, email: str) -> User:
-    existing = session.scalar(select(User).where(User.email == email))
-    if existing:
-        return existing
-    user = User(email=email, display_name="Garmin User", created_at=datetime.utcnow())
-    session.add(user)
-    session.flush()
-    return user
-
-
-def get_missing_garmin_rides(limit: int = 50) -> dict[str, Any]:
+def get_missing_garmin_rides(user_id: int, limit: int = 50) -> dict[str, Any]:
     safe_limit = max(1, min(limit, 200))
-    client = _build_client()
+    client = _build_client(user_id=user_id)
     recent = client.get_activities(0, safe_limit)
-    loaded_ids = _collect_loaded_ids()
+    loaded_ids = _collect_loaded_ids(user_id=user_id)
 
     missing: list[dict[str, Any]] = []
     already_loaded_count = 0
@@ -254,14 +249,13 @@ def get_missing_garmin_rides(limit: int = 50) -> dict[str, Any]:
     }
 
 
-def import_selected_garmin_rides(activity_ids: list[str]) -> dict[str, Any]:
+def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[str, Any]:
     cleaned_ids = [str(x).strip() for x in activity_ids if str(x).strip()]
     deduped_ids = list(dict.fromkeys(cleaned_ids))
     if not deduped_ids:
         return {"loaded": 0, "skipped": 0, "errors": [], "imported_ids": []}
 
-    client = _build_client()
-    email = os.getenv("GARMIN_EMAIL", "garmin@trainmind.local")
+    client = _build_client(user_id=user_id)
     loaded_ids: list[str] = []
     skipped_ids: list[str] = []
     errors: list[dict[str, str]] = []
@@ -278,6 +272,7 @@ def import_selected_garmin_rides(activity_ids: list[str]) -> dict[str, Any]:
                 select(Activity.id).where(
                     Activity.provider == "garmin",
                     Activity.external_id == activity_id,
+                    Activity.user_id == user_id,
                 )
             )
             if existing:
@@ -300,9 +295,8 @@ def import_selected_garmin_rides(activity_ids: list[str]) -> dict[str, Any]:
             file_sha = sha256(fit_bytes).hexdigest()
 
             try:
-                user = _ensure_local_user(session, email=email)
                 fit_file = FitFile(
-                    user_id=user.id,
+                    user_id=user_id,
                     provider="garmin",
                     external_activity_id=activity_id,
                     file_name=file_name,
@@ -327,7 +321,7 @@ def import_selected_garmin_rides(activity_ids: list[str]) -> dict[str, Any]:
 
                 session.add(
                     Activity(
-                        user_id=user.id,
+                        user_id=user_id,
                         source_fit_file_id=fit_file.id,
                         provider="garmin",
                         external_id=activity_id,
@@ -356,6 +350,7 @@ def import_selected_garmin_rides(activity_ids: list[str]) -> dict[str, Any]:
                     select(Activity).where(
                         Activity.provider == "garmin",
                         Activity.external_id == activity_id,
+                        Activity.user_id == user_id,
                     )
                 )
                 if created_activity is not None:

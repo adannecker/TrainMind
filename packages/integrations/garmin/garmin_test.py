@@ -9,6 +9,6 @@ password = "HA3297VFsdt54"
 client = Garmin(username, password)
 client.login()
 
-activities = client.get_activities(0, 5)  # letzte 5 Aktivit‰ten
+activities = client.get_activities(0, 5)  # letzte 5 Aktivit√§ten
 for a in activities:
     print(a["activityName"], a["distance"], a["duration"])

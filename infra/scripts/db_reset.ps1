@@ -8,7 +8,7 @@ Write-Host "Stopping containers and deleting DB volume..."
 docker compose -f $composeFile down -v
 
 Write-Host "Starting fresh Postgres..."
-docker compose -f $composeFile up -d
+docker compose -f $composeFile up -d postgres
 
 Write-Host "Applying migrations..."
 $env:DATABASE_URL = if ($env:DATABASE_URL) { $env:DATABASE_URL } else { "postgresql+psycopg2://trainmind:trainmind@localhost:5432/trainmind" }

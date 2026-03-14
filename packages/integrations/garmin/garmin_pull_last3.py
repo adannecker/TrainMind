@@ -71,7 +71,7 @@ def load_manifest() -> Dict[str, Any]:
         try:
             return json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         except Exception:
-            # Corrupt manifest — start clean
+            # Corrupt manifest â€” start clean
             return {"downloaded_ids": []}
     return {"downloaded_ids": []}
 
