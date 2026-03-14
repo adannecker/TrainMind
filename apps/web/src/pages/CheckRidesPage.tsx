@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../api";
+import { API_BASE_URL } from "../config";
 
 type Ride = {
   activity_id: string;
@@ -22,7 +24,13 @@ type RidesResponse = {
   rides: Ride[];
 };
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+async function parseJsonSafely<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  return JSON.parse(text) as T;
+}
 
 function formatDateTime(value: string | null): string {
   if (!value) {
@@ -67,14 +75,17 @@ export function CheckRidesPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/garmin/new-rides?limit=80`);
-      const payload = (await response.json()) as RidesResponse | { detail?: string };
+      const response = await apiFetch(`${API_BASE_URL}/garmin/new-rides?limit=80`);
+      const payload = await parseJsonSafely<RidesResponse | { detail?: string }>(response);
       if (!response.ok) {
         throw new Error(
           typeof payload === "object" && payload && "detail" in payload && payload.detail
             ? payload.detail
             : "Failed to load rides"
         );
+      }
+      if (!payload) {
+        throw new Error("Failed to load rides: empty response from API");
       }
       setData(payload as RidesResponse);
       setSelectedIds(new Set());
@@ -106,15 +117,19 @@ export function CheckRidesPage() {
         const ride = selectedList[i];
         setImportCurrentName(ride.name);
 
-        const response = await fetch(`${API_BASE_URL}/garmin/import-rides`, {
+        const response = await apiFetch(`${API_BASE_URL}/garmin/import-rides`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ activity_ids: [ride.activity_id] }),
         });
 
-        const payload = (await response.json()) as
+        const payload = (await parseJsonSafely<
           | { loaded: number; skipped: number; errors: Array<{ activity_id: string; reason: string }> }
-          | { detail?: string };
+          | { detail?: string }
+        >(response)) as
+          | { loaded: number; skipped: number; errors: Array<{ activity_id: string; reason: string }> }
+          | { detail?: string }
+          | null;
 
         if (!response.ok) {
           throw new Error(
@@ -122,6 +137,9 @@ export function CheckRidesPage() {
               ? payload.detail
               : "Import failed"
           );
+        }
+        if (!payload || !("loaded" in payload)) {
+          throw new Error("Import failed: empty response from API");
         }
 
         const okPayload = payload as {

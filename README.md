@@ -1,135 +1,56 @@
 # TrainMind
 
-TrainMind is organized as a modular monorepo:
-- `apps/api`: FastAPI service
-- `apps/web`: React + Vite frontend
-- `apps/worker`: worker/service placeholder
-- `packages/db`: SQLAlchemy models, session, Alembic, seed
-- `packages/fit`: FIT parsing/utilities
-- `packages/integrations`: Garmin and Withings integrations
-- `infra`: Docker and database scripts
-- `data`: local data, exports, and tokens
+TrainMind ist als modularer Monorepo aufgebaut und aktuell als Hub + API lauffaehig.
 
-## Prerequisites
-- Python 3.11+
-- Node.js 20+ (with npm)
-- Docker Desktop
-- PowerShell (Windows)
+## Quick Start
 
-## Backend Setup
-1. Create and initialize virtual environment:
+Vollstaendiger Stack (Hub, API, DB):
+
 ```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+docker compose -f infra/docker/docker-compose.yml up -d --build
 ```
 
-2. Create local environment file:
+Danach:
+
+- Hub UI: `http://127.0.0.1:8000`
+- API (direkt): `http://127.0.0.1:8010`
+- API Health: `http://127.0.0.1:8010/health`
+
+Stoppen:
+
 ```powershell
-Copy-Item .env.example .env
+docker compose -f infra/docker/docker-compose.yml down
 ```
 
-3. Start PostgreSQL:
+## Projektstruktur
+
+- `apps/web`: Hub Frontend (React + Vite), laeuft auf `:8000`
+- `apps/api`: zentrale API (Garmin + Auth + Nutrition-Endpunkte), laeuft auf `:8010`
+- `apps/mobile`: Expo/React-Native Prototyp fuer Login + Nutrition
+- `apps/worker`: optionale Service-Entrypoints (Withings/Nutrition Placeholder)
+- `packages/db`: SQLAlchemy Modelle + Alembic Migrationen
+- `packages/integrations`: Provider-Integrationen (Garmin/Withings)
+- `infra/docker`: Docker/Compose Setup
+- `infra/scripts`: PowerShell-Helfer (DB, Stack, Account-Erstellung)
+
+## Wichtige Hinweise
+
+- `APP_ENCRYPTION_KEY` muss in `.env` gesetzt sein, damit Provider-Credentials verschluesselt gespeichert werden.
+- API-Endpunkte sind login-geschuetzt (Bearer Token, Session in DB).
+- Garmin-Credentials werden pro User in `core.service_credentials` verschluesselt abgelegt.
+
+Account manuell anlegen:
+
 ```powershell
-.\infra\scripts\db_up.ps1 -Build
+.\infra\scripts\create_account.ps1 -Email "you@example.com" -Password "your-password" -DisplayName "Your Name"
 ```
 
-4. Apply migrations:
-```powershell
-.\infra\scripts\db_migrate.ps1
-```
+## Detaillierte Doku
 
-5. Seed demo data:
-```powershell
-.\infra\scripts\db_seed.ps1
-```
-
-6. Start API:
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn apps.api.main:app --reload
-```
-
-Health endpoint:
-- `GET http://127.0.0.1:8000/health`
-
-## Frontend Setup
-```powershell
-cd apps/web
-npm install
-npm run dev
-```
-
-Frontend URL:
-- `http://127.0.0.1:5173`
-
-## Database Helpers
-Stop DB:
-```powershell
-.\infra\scripts\db_down.ps1
-```
-
-Full reset (drop volume, recreate, migrate, seed):
-```powershell
-.\infra\scripts\db_reset.ps1
-```
-
-Create a new migration after changing `packages/db/models.py`:
-```powershell
-.\infra\scripts\db_revision.ps1 -Message "describe change"
-.\infra\scripts\db_migrate.ps1
-```
-
-## Optional: Adminer (Browser DB UI)
-```powershell
-docker run --name trainmind-adminer -d -p 8081:8080 --network trainmind_default adminer
-```
-
-Open:
-- `http://localhost:8081`
-
-Connection values:
-- System: `PostgreSQL`
-- Server: `trainmind-postgres`
-- Username: `trainmind`
-- Password: `trainmind`
-- Database: `trainmind`
-
-## Garmin Import Workflow
-- Configure credentials in `.env`:
-  - `GARMIN_EMAIL`
-  - `GARMIN_PASSWORD`
-- Use the frontend page `Setup > Neue Rides prüfen` to:
-  - compare latest Garmin rides with already stored rides
-  - select single/all rides
-  - import selected rides into DB (including FIT payload)
-- Import stores:
-  - `activities`
-  - `fit_files`
-  - `fit_file_payloads`
-  - `activity_laps` (when Garmin split data exists)
-
-## Weekly Activities View
-- Open `Aktivitäten > Wochenansicht`
-- Features:
-  - week selector with available weeks containing data
-  - week and month navigation (`<`, `>`, `<<`, `>>`)
-  - day cards (Mon-Sun) with activity bundles and per-day summaries
-  - right-side weekly summary + performance visualizer
-    - reference target for ambitious amateurs: `250 km / 10 h` per week
-
-## Key Files
-- API entrypoint: `apps/api/main.py`
-- Frontend entrypoint: `apps/web/src/main.tsx`
-- Activity services: `apps/api/activity_service.py`, `apps/api/garmin_service.py`
-- DB models: `packages/db/models.py`
-- Alembic config: `packages/db/alembic.ini`
-- Docker Compose: `infra/docker/docker-compose.yml`
-
-## Current Status (2026-02-11)
-- Monorepo layout migrated from `src/trainmind` to `apps/` and `packages/`
-- Project/solution legacy files removed
-- Integration scripts updated to new paths
-- PostgreSQL + Alembic + seed workflow running
-- FIT schema v1 tables created (including raw FIT payload storage)
-- Garmin compare/import flow implemented in API + frontend
-- Garmin data repair/backfill for summaryDTO-based fields added
-- Weekly activities board implemented with navigation, summaries, and visualizer
+- [Doku Index](docs/README.md)
+- [Architektur](docs/architecture.md)
+- [Services und API](docs/services-and-api.md)
+- [Datenbank und Schemata](docs/database-and-schemas.md)
+- [Integrationen](docs/integrations.md)
+- [Mobile App](docs/mobile-app.md)
+- [Runbook und Betrieb](docs/runbook.md)

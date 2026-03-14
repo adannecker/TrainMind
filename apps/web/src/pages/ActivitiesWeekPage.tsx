@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiFetch } from "../api";
+import { API_BASE_URL } from "../config";
 
 type WeekActivity = {
   id: number;
@@ -48,7 +50,14 @@ type AvailableWeek = {
   activities_count: number;
 };
 
-const API_BASE_URL = "http://127.0.0.1:8000";
+async function parseJsonSafely<T>(response: Response): Promise<T | null> {
+  const text = await response.text();
+  if (!text) {
+    return null;
+  }
+  return JSON.parse(text) as T;
+}
+
 const TARGET_KM = 250;
 const TARGET_HOURS = 10;
 
@@ -132,9 +141,9 @@ export function ActivitiesWeekPage() {
 
   async function loadWeeksAvailable() {
     try {
-      const response = await fetch(`${API_BASE_URL}/activities/weeks-available`);
-      const payload = (await response.json()) as { weeks?: AvailableWeek[] };
-      if (response.ok) {
+      const response = await apiFetch(`${API_BASE_URL}/activities/weeks-available`);
+      const payload = await parseJsonSafely<{ weeks?: AvailableWeek[] }>(response);
+      if (response.ok && payload) {
         setAvailableWeeks(payload.weeks ?? []);
       }
     } catch {
@@ -146,14 +155,17 @@ export function ActivitiesWeekPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(`${API_BASE_URL}/activities/week?reference_date=${referenceDate}`);
-      const payload = (await response.json()) as WeekResponse | { detail?: string };
+      const response = await apiFetch(`${API_BASE_URL}/activities/week?reference_date=${referenceDate}`);
+      const payload = await parseJsonSafely<WeekResponse | { detail?: string }>(response);
       if (!response.ok) {
         throw new Error(
           typeof payload === "object" && payload && "detail" in payload && payload.detail
             ? payload.detail
             : "Failed to load weekly activities",
         );
+      }
+      if (!payload) {
+        throw new Error("Failed to load weekly activities: empty response from API");
       }
       setData(payload as WeekResponse);
     } catch (err) {

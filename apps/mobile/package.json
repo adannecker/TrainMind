@@ -1,0 +1,27 @@
+{
+  "name": "trainmind-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "expo": "~53.0.0",
+    "expo-asset": "~11.1.7",
+    "expo-constants": "~17.1.8",
+    "expo-file-system": "~18.1.11",
+    "expo-font": "~13.3.2",
+    "expo-keep-awake": "~14.1.4",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native": "0.79.6"
+  },
+  "devDependencies": {
+    "@types/react": "~19.0.10",
+    "typescript": "~5.8.3"
+  }
+}

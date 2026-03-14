@@ -1,0 +1,37 @@
+{
+  "expo": {
+    "name": "TrainMind Mobile",
+    "slug": "trainmind-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "icon": "../../assets/branding/icon/app-icon-1024.png",
+    "splash": {
+      "image": "../../assets/branding/icon/app-icon-1024-transparent.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#EEF6F2"
+    },
+    "platforms": [
+      "android",
+      "ios",
+      "web"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.trainmind.mobile"
+    },
+    "android": {
+      "package": "com.trainmind.mobile",
+      "adaptiveIcon": {
+        "foregroundImage": "../../assets/branding/icon/app-icon-1024-transparent.png",
+        "backgroundColor": "#EEF6F2"
+      }
+    },
+    "web": {
+      "favicon": "../../assets/branding/icon/favicon-source-1024.png"
+    },
+    "plugins": [
+      "expo-asset",
+      "expo-font"
+    ]
+  }
+}
