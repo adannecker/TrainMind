@@ -94,6 +94,13 @@ Fuer produktiven Betrieb:
 - `.env` sicher verwalten.
 - `APP_ENCRYPTION_KEY` getrennt und sicher sichern.
 
+## 8.1 Verschluesselung fuer API-/Provider-Keys
+
+- `APP_ENCRYPTION_KEY` ist der zentrale App-Verschluesselungsschluessel.
+- Damit werden sensible Zugangsdaten (z. B. Garmin-Credentials, spaeter LLM/API-Token) verschluesselt in der DB gespeichert.
+- Ohne denselben Schluessel koennen bestehende verschluesselte Eintraege nicht mehr gelesen werden.
+- Der Schluessel gehoert nicht ins Repo und muss pro Umgebung sicher verwaltet werden.
+
 ## 9. USDA-Verifizierung (Ernaehrungsdaten)
 
 Script:

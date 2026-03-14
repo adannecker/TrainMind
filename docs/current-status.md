@@ -21,6 +21,7 @@ Diese Datei dokumentiert den aktuellen Projektstand und die naechsten konkreten 
 - Forward-Typing/Suchvorschlaege in der Eingabe sind aktiv.
 - `name_de` und `name_en` sind im Datenmodell vorhanden und im UI/API angebunden.
 - Erste grosse Seed-Basis wurde geladen (aktuell ~800 Eintraege).
+- App-Verschluesselung per `APP_ENCRYPTION_KEY` ist vorhanden und fuer sensible Keys/Token nutzbar.
 
 ## 2) Datenmodell und Migrationen (Nutrition)
 

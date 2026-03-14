@@ -17,6 +17,9 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] Encoding-Check in gesamtem App/Web-Frontend final abschliessen.
 - [ ] i18n-Struktur einbauen (de als Default, en vorbereitet).
 - [ ] UI-Texte in zentrale Translation-Dateien auslagern.
+- [ ] Komplette Projektdokumentation auf Englisch umstellen (inkl. README, Runbook, Architektur, API, Roadmap).
+- [ ] Benutzerverwaltung erweitern: API-/LLM-Keys pro Nutzer hinterlegbar (verschluesselt mit `APP_ENCRYPTION_KEY`).
+- [ ] Kleinen integrierten Workflow bauen: Key erzeugen/beschreiben/eintragen/validieren in einem gefuehrten UI-Flow.
 
 ## Phase 1: Nutrition Core (Web-Referenz)
 
