@@ -1,0 +1,152 @@
+[
+  {
+    "id": "00818369dc0b8be49fd3dcb02f373679e2a0",
+    "name_de": "Feldsalat (gedämpft)",
+    "name_en": "Lamb's lettuce (steamed)"
+  },
+  {
+    "id": "01a365364bde46d8f650e886194d7efe0505",
+    "name_de": "Rosenkohl (gedämpft)",
+    "name_en": "Brussels sprouts (steamed)"
+  },
+  {
+    "id": "0216d1608d17d1be0d4c67bd28f69f538688",
+    "name_de": "Rinderhack mager (roh)",
+    "name_en": "Lean ground beef (raw)"
+  },
+  {
+    "id": "02991971073ae1f1f07f2744338ace179569",
+    "name_de": "Kaki (TK)",
+    "name_en": "Persimmon (frozen)"
+  },
+  {
+    "id": "03b3f281d4add471e90bb1d948ec2bc2447e",
+    "name_de": "Reis weiß",
+    "name_en": "White rice"
+  },
+  {
+    "id": "03e1ded13b8d92d3a4daaf9b3d80f3320351",
+    "name_de": "Steinpilz (gekocht)",
+    "name_en": "Porcini mushroom (cooked)"
+  },
+  {
+    "id": "03e2f5c8cc8480df364a7b7e63a93aa8c0c7",
+    "name_de": "Johannisbeere",
+    "name_en": "Currant"
+  },
+  {
+    "id": "04384c06100ba3485d9f59b3dcee862c6e3f",
+    "name_de": "Amaranth",
+    "name_en": "Amaranth"
+  },
+  {
+    "id": "048a8141046161c29943027c07debb322cc0",
+    "name_de": "Karotte (gedämpft)",
+    "name_en": "Carrot (steamed)"
+  },
+  {
+    "id": "0566b44858711b5a82b62179e43aa8a0b8c8",
+    "name_de": "Mango (TK)",
+    "name_en": "Mango (frozen)"
+  },
+  {
+    "id": "05ba3ede3a05f5c88355b1f5279077dd5904",
+    "name_de": "Rumpsteak (grillfertig)",
+    "name_en": "Rump steak (grill-ready)"
+  },
+  {
+    "id": "06723787f1fcd9fcad3337b2f19c65c2b225",
+    "name_de": "Grapefruit (TK)",
+    "name_en": "Grapefruit (frozen)"
+  },
+  {
+    "id": "068f40ccdaa21765b1c45df707c6083ce052",
+    "name_de": "Ricotta",
+    "name_en": "Ricotta"
+  },
+  {
+    "id": "077860fe2054ba99bac33cf733356924968f",
+    "name_de": "Linsensuppe",
+    "name_en": "Lentil soup"
+  },
+  {
+    "id": "07bf13f414423cdad351615536ec7723fd60",
+    "name_de": "Mais (gekocht)",
+    "name_en": "Corn (cooked)"
+  },
+  {
+    "id": "0846492f8a8098f03af7389a4b72dfc63082",
+    "name_de": "Ananas (TK)",
+    "name_en": "Pineapple (frozen)"
+  },
+  {
+    "id": "0872c71b49793efc5e6f009da50741b18fb9",
+    "name_de": "Mirabelle",
+    "name_en": "Mirabelle plum"
+  },
+  {
+    "id": "09da5d907f31f09153eb97b531ab4f02e6d7",
+    "name_de": "Tomatensaft",
+    "name_en": "Tomato juice"
+  },
+  {
+    "id": "0ac1fc3271e028ff86a9c016f4d60d01c144",
+    "name_de": "Joghurt Vanille",
+    "name_en": "Vanilla yogurt"
+  },
+  {
+    "id": "0adeb3afa5044c9c9455c33cb6eb1a97e01e",
+    "name_de": "Granatapfel (reif)",
+    "name_en": "Pomegranate (ripe)"
+  },
+  {
+    "id": "0b5aff641ca553d6bf6044b80e6aaa688c33",
+    "name_de": "Rapsöl",
+    "name_en": "Rapeseed oil"
+  },
+  {
+    "id": "0ba1c87e36569594b6753349c406766ff342",
+    "name_de": "Paprika grün (Bio)",
+    "name_en": "Green bell pepper (organic)"
+  },
+  {
+    "id": "0c1f948743e8c7a5e5f00abbf3b0435bb70c",
+    "name_de": "Champignon (gekocht)",
+    "name_en": "Champignon mushroom (cooked)"
+  },
+  {
+    "id": "0c2aaef8e89833e06d048d9178ac1c8f2845",
+    "name_de": "Dattel frisch",
+    "name_en": "Date (fresh)"
+  },
+  {
+    "id": "0c8022cd747254de9b84e268f464582520f4",
+    "name_de": "Quitte",
+    "name_en": "Quince"
+  },
+  {
+    "id": "0ca5e0781ec2600e733e75676adbada8da6d",
+    "name_de": "Toastbrot",
+    "name_en": "Toast bread"
+  },
+  {
+    "id": "0d0d73623fd2c5c897c575a329a89856721c",
+    "name_de": "Blumenkohl (Bio)",
+    "name_en": "Cauliflower (organic)"
+  },
+  {
+    "id": "0d272130075da4c419b9ace1d7e67d08af8e",
+    "name_de": "Spinat (roh)",
+    "name_en": "Spinach (raw)"
+  },
+  {
+    "id": "0d2b05a85e0a0d9b33e9f93e72e6ccfc51e9",
+    "name_de": "Schweinelachs",
+    "name_en": "Pork loin"
+  },
+  {
+    "id": "0de0708d0428827049e17d7a0de0e502ba4d",
+    "name_de": "Brombeere (TK)",
+    "name_en": "Blackberry (frozen)"
+  }
+]

@@ -1,0 +1,21 @@
+id,name,category,score,fdc_id,usda_description,status
+5ff9873bcb1428358dda10f7eb72f8106579,Aal,Fisch,0.0,,,no_match
+04384c06100ba3485d9f59b3dcee862c6e3f,Amaranth,Getreide,0.65,2512371,"Flour, amaranth",matched
+b384aecffb003fbe1142b86ef6d13c807f6a,Ananas,Obst,0.0,,,no_match
+58e65c6e795818b0835f4f1783601fb68c8f,Ananas (Bio),Obst,0.0,,,no_match
+f629ce069c2f93c9e62a40949deeadc60964,Ananas (frisch),Obst,0.0,,,no_match
+c1ea84e10a78561f55b9347d99c73acab2db,Ananas (reif),Obst,0.0,,,api_error:HTTPError
+0846492f8a8098f03af7389a4b72dfc63082,Ananas (TK),Obst,0.0,,,no_match
+564e6d9b9836cb6ce2c4c7d2ce248ead808c,Apfel,Obst,0.0,,,api_error:HTTPError
+b77630c645078643c832c4480118eb74973c,Apfel (Bio),Obst,0.0,,,api_error:HTTPError
+c9ade3486efcd1e1569011cd2f9f26c00d4c,Apfel (frisch),Obst,0.0,,,api_error:HTTPError
+af4ad24a35f03d490fc7ff890f3d10ea34d7,Apfel (reif),Obst,0.0,,,api_error:HTTPError
+94d15707cd18f82d6dcd2baa919dd48a49d6,Apfel (TK),Obst,0.0,,,api_error:HTTPError
+2b3ec4a52ffde6ff01d38245e9f4dfa9e38f,Aprikose,Obst,0.0,,,api_error:HTTPError
+9fe18000ab13c54bb9174bd6827b71b7fcdd,Aprikose (Bio),Obst,0.0,,,api_error:HTTPError
+96c572dbc6d138a80f51de9aa9c0b5f07200,Aprikose (frisch),Obst,0.0,,,api_error:HTTPError
+941fd1b54ca1e95ad96bb17ee392174a26b0,Aprikose (reif),Obst,0.0,,,api_error:HTTPError
+e0fb5c430da991b8a6e1ea03b4c251ee4312,Aprikose (TK),Obst,0.0,,,api_error:HTTPError
+63d76c9e12865f7bfe330c252fff4cf79c1e,Aubergine,Gemüse,0.0,,,api_error:HTTPError
+3746fea675a71bfe6524250587390993dcaa,Aubergine (Bio),Gemüse,0.0,,,api_error:HTTPError
+bea25319a867fec4a9455b2ff7f57a5f9ecc,Aubergine (gedaempft),Gemüse,0.0,,,api_error:HTTPError

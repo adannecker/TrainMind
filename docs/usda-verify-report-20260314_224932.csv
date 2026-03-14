@@ -1,0 +1,101 @@
+id,name,category,score,fdc_id,usda_description,status
+5ff9873bcb1428358dda10f7eb72f8106579,Aal,Fisch,0.0,,,api_error:HTTPError
+04384c06100ba3485d9f59b3dcee862c6e3f,Amaranth,Getreide,0.0,,,api_error:HTTPError
+b384aecffb003fbe1142b86ef6d13c807f6a,Ananas,Obst,0.0,,,api_error:HTTPError
+58e65c6e795818b0835f4f1783601fb68c8f,Ananas (Bio),Obst,0.0,,,api_error:HTTPError
+f629ce069c2f93c9e62a40949deeadc60964,Ananas (frisch),Obst,0.0,,,api_error:HTTPError
+c1ea84e10a78561f55b9347d99c73acab2db,Ananas (reif),Obst,0.0,,,api_error:HTTPError
+0846492f8a8098f03af7389a4b72dfc63082,Ananas (TK),Obst,0.0,,,api_error:HTTPError
+564e6d9b9836cb6ce2c4c7d2ce248ead808c,Apfel,Obst,0.0,,,api_error:HTTPError
+b77630c645078643c832c4480118eb74973c,Apfel (Bio),Obst,0.0,,,api_error:HTTPError
+c9ade3486efcd1e1569011cd2f9f26c00d4c,Apfel (frisch),Obst,0.0,,,api_error:HTTPError
+af4ad24a35f03d490fc7ff890f3d10ea34d7,Apfel (reif),Obst,0.0,,,api_error:HTTPError
+94d15707cd18f82d6dcd2baa919dd48a49d6,Apfel (TK),Obst,0.0,,,api_error:HTTPError
+2b3ec4a52ffde6ff01d38245e9f4dfa9e38f,Aprikose,Obst,0.0,,,api_error:HTTPError
+9fe18000ab13c54bb9174bd6827b71b7fcdd,Aprikose (Bio),Obst,0.0,,,api_error:HTTPError
+96c572dbc6d138a80f51de9aa9c0b5f07200,Aprikose (frisch),Obst,0.0,,,api_error:HTTPError
+941fd1b54ca1e95ad96bb17ee392174a26b0,Aprikose (reif),Obst,0.0,,,api_error:HTTPError
+e0fb5c430da991b8a6e1ea03b4c251ee4312,Aprikose (TK),Obst,0.0,,,api_error:HTTPError
+63d76c9e12865f7bfe330c252fff4cf79c1e,Aubergine,Gemüse,0.0,,,api_error:HTTPError
+3746fea675a71bfe6524250587390993dcaa,Aubergine (Bio),Gemüse,0.0,,,api_error:HTTPError
+bea25319a867fec4a9455b2ff7f57a5f9ecc,Aubergine (gedämpft),Gemüse,0.0,,,api_error:HTTPError
+31b307e2f3128e0301f56bf0e257415b8279,Aubergine (gekocht),Gemüse,0.0,,,api_error:HTTPError
+daf5c7aa8e735b3bcb9beb349c95ce2d127b,Aubergine (roh),Gemüse,0.0,,,api_error:HTTPError
+242ff19383c7af5bec94e29c537e7ea0d8f0,Aubergine (TK),Gemüse,0.0,,,api_error:HTTPError
+d604a4cedc109d070b3c8a152dcb868ce3fa,Avocado,Obst,0.0,,,api_error:HTTPError
+bc74d48e00c531fe7106bb1c1aecae8b1607,Avocado (Bio),Obst,0.0,,,api_error:HTTPError
+224520164470bbe961234bec0c2a51d1a1f4,Avocado (frisch),Obst,0.0,,,api_error:HTTPError
+a73d82f84fa39aa80c5098729a2cd6ac2104,Avocadoöl,Öle,0.0,,,api_error:HTTPError
+18ef38ccd3921d66455edbcb4c33631dd15e,Avocado (reif),Obst,0.0,,,api_error:HTTPError
+957bbe92b0d43fea249fb9a5697176ac1e1c,Avocado (TK),Obst,0.0,,,api_error:HTTPError
+fbc52ad82bead3ae064272e21d9ab34c6104,Baguette,Brot,0.0,,,api_error:HTTPError
+c8f55a228c0e5c4379fdf0af3d4bb2665372,Banane,Obst,0.0,,,api_error:HTTPError
+9678d685c5e026b6111c2ff4285c7ec7e2a6,Banane (Bio),Obst,0.0,,,api_error:HTTPError
+41e61ec3fab9624a33b3a5dfe1d3cd8389a2,Banane (frisch),Obst,0.0,,,api_error:HTTPError
+a7d8eba1db8203255a10651ac23d774ae52a,Banane (reif),Obst,0.0,,,api_error:HTTPError
+4311e7e2c3924b99f857d63bdf98b625d40e,Banane (TK),Obst,0.0,,,api_error:HTTPError
+5cc414ba1b8ba89e92b4c57489abda057862,Basilikum,Gewürze,0.0,,,api_error:HTTPError
+1524f491c3b05369674e9c0bb1adc7799857,Basmati Reis,Getreide,0.0,,,api_error:HTTPError
+9e126d865b85df51cc1c77d92ae238a0c7ac,Bauernbrot,Brot,0.0,,,api_error:HTTPError
+5981a3eeccb084474d29e1ac00d70f9fc567,Bergkaese,Käse,0.0,,,api_error:HTTPError
+86b6d3f70e058bc8d055ae860ee6b8ab2e9a,Birne,Obst,0.0,,,api_error:HTTPError
+5d4ef0f7ebe64b75a21e73ada0b7d4d5639e,Birne (Bio),Obst,0.0,,,api_error:HTTPError
+2a039a547f04b4352136867aa1d67e6a4112,Birne (frisch),Obst,0.0,,,api_error:HTTPError
+85a473aa138b63656913c93ecc591f4683fa,Birne (reif),Obst,0.0,,,api_error:HTTPError
+5936530945f1726fcbf16678b3a8e6479e32,Birne (TK),Obst,0.0,,,api_error:HTTPError
+cae75cc16ac08164246255950552dde0bdde,Blumenkohl,Gemüse,0.0,,,api_error:HTTPError
+0d0d73623fd2c5c897c575a329a89856721c,Blumenkohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+da6a4ebce237a841d6954ac58d4ff8f501a4,Blumenkohl (gedämpft),Gemüse,0.0,,,api_error:HTTPError
+3ec88b3d0bad8c0f7aa4c04ff15548b2cf29,Blumenkohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+c36a8eb8be8924620d892ee0e60a4e470899,Blumenkohl (roh),Gemüse,0.0,,,api_error:HTTPError
+ff870b9e944d533e5fe3caf1159474cb520b,Blumenkohl (TK),Gemüse,0.0,,,api_error:HTTPError
+60726c7c7dd0c95cc8251c6c902baa6727f8,Bohne grün,Gemüse,0.0,,,api_error:HTTPError
+6092900cc219a5b35048760cafb0714ba93c,Bohne grün (Bio),Gemüse,0.0,,,api_error:HTTPError
+9aeb450ac491551a8ebde3185f40da4a96d6,Bohne grün (gekocht),Gemüse,0.0,,,api_error:HTTPError
+14de94103eab9f1560907625e6136e4bef44,Bohne grün (roh),Gemüse,0.0,,,api_error:HTTPError
+db81a95640c7634b4c2ec78eb13cac4d0e1c,Bohne grün (TK),Gemüse,0.0,,,api_error:HTTPError
+34d86d352f91a3c9b162a786f762f7335bb3,Brie,Käse,0.0,,,api_error:HTTPError
+bd8b5bd4876909b30ef649575efd4ff6980e,Brokkoli,Gemüse,0.0,,,api_error:HTTPError
+621d798949797354b06784b467e5f5603706,Brokkoli (Bio),Gemüse,0.0,,,api_error:HTTPError
+d635f52804c3ed9e5e8e92783ae63cdfd212,Brokkoli (gedämpft),Gemüse,0.0,,,api_error:HTTPError
+1410254420d8e70e465d96885e9adafc572a,Brokkoli (gekocht),Gemüse,0.0,,,api_error:HTTPError
+b64f2385d627ef5cfa6279979b079a1b1510,Brokkoli (roh),Gemüse,0.0,,,api_error:HTTPError
+3b1d9d7533ee7bb0de2a97bf4f7b7119e38b,Brokkoli (TK),Gemüse,0.0,,,api_error:HTTPError
+7f318d127b547d456f8684cd6960156ae43c,Brombeere,Obst,0.0,,,api_error:HTTPError
+d3ebe21fdf3c0d543a010822f4801330b87e,Brombeere (Bio),Obst,0.0,,,api_error:HTTPError
+d7900778d24ba9a9a45455304fb76c7fcadc,Brombeere (frisch),Obst,0.0,,,api_error:HTTPError
+f708c2647362150b610e1ca400dd10e9abc0,Brombeere (reif),Obst,0.0,,,api_error:HTTPError
+0de0708d0428827049e17d7a0de0e502ba4d,Brombeere (TK),Obst,0.0,,,api_error:HTTPError
+582741d7d521f26932b31e5868c2a17b0c16,Buchweizen,Getreide,0.0,,,api_error:HTTPError
+2226e96f3fd88df6343b4b3355ee711ab74d,Bulgur,Getreide,0.0,,,api_error:HTTPError
+f352c025653bbfc9329e465a2583fe1c74ec,Butter,Öle,0.0,,,api_error:HTTPError
+c935691eb7b1d03401164ed58fb8f6f33380,Butterschmalz,Öle,0.0,,,api_error:HTTPError
+30f2f603dcf304a64fe4e1883b718d182547,Camembert,Käse,0.0,,,api_error:HTTPError
+925758110dd6d288f656133eb5686690c092,Cashew,Nüsse,0.0,,,api_error:HTTPError
+e0fc60daa0f8facd77088fc67766b3c428cb,Cashewmus,Nüsse,0.0,,,api_error:HTTPError
+d173692706b52909db6007e857e477859ece,Champignon,Gemüse,0.0,,,api_error:HTTPError
+8a25547b3a53453dc095a21a230990c514fd,Champignon (Bio),Gemüse,0.0,,,api_error:HTTPError
+7269c5cb055ba3a7b53445a15a0ddc2ac8ea,Champignon (gedämpft),Gemüse,0.0,,,api_error:HTTPError
+0c1f948743e8c7a5e5f00abbf3b0435bb70c,Champignon (gekocht),Gemüse,0.0,,,api_error:HTTPError
+22fe0a32e1f6c56208b6cfd4f0c8db9ea91a,Champignon (roh),Gemüse,0.0,,,api_error:HTTPError
+c6f3a3e0bf2fc204316c2cf8270bc151cd82,Champignon (TK),Gemüse,0.0,,,api_error:HTTPError
+9a01437f46ca4044f83e116ff3360d079167,Cheddar,Käse,0.0,,,api_error:HTTPError
+1b2aea6f30189db9450fa3888f43f3e3f2d0,Chiasamen,Samen,0.0,,,api_error:HTTPError
+7dd243abab548c11806dfbb1ffcb62c05810,Chili gemahlen,Gewürze,0.0,,,api_error:HTTPError
+288aecdb1489134096ceafbce95e9b4665d7,Chinakohl,Gemüse,0.0,,,api_error:HTTPError
+373e5ed6c5babb970443169f8133e914f435,Chinakohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+285ab705211d49e10ab96222a18c67ace065,Chinakohl (gedämpft),Gemüse,0.0,,,api_error:HTTPError
+4e716b77e83f5b04f2fa4131809ad339e46a,Chinakohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+d9449f5d0792b6e427383bf4330e3c9f81af,Chinakohl (roh),Gemüse,0.0,,,api_error:HTTPError
+6a78666c95b83a8387479e1160088f433cca,Chinakohl (TK),Gemüse,0.0,,,api_error:HTTPError
+143d047c4df1b88a25538560f9c1436e05c3,Ciabatta,Brot,0.0,,,api_error:HTTPError
+d8ac32259b96997e95304ff9114a4f0babdd,Couscous,Getreide,0.0,,,api_error:HTTPError
+637e964eb9d9a209b1bea53bd4fefaaee3db,Cranberry,Obst,0.0,,,api_error:HTTPError
+11acf028ada466b5c76ae3ce9905cc41acbb,Cranberry (Bio),Obst,0.0,,,api_error:HTTPError
+c9e0a2d7af342a33e2725d83a7cabc73edba,Cranberry (frisch),Obst,0.0,,,api_error:HTTPError
+f46b11b6586dfc37c1600b7ac85a2f4382ec,Cranberry (reif),Obst,0.0,,,api_error:HTTPError
+c529fc3c9617293c14dc17eb9cbe55b249ab,Cranberry (TK),Obst,0.0,,,api_error:HTTPError
+35011cc9d7f81c9fd404000440767e060dd9,Currypulver,Gewürze,0.0,,,api_error:HTTPError
+0c2aaef8e89833e06d048d9178ac1c8f2845,Dattel frisch,Obst,0.0,,,api_error:HTTPError
+8731ad2b3d9a7f6e03def8b9e7173af6f8c2,Dattel frisch (Bio),Obst,0.0,,,api_error:HTTPError
+823509d0583ac5868e17e545c21a455cb813,Dattel frisch (frisch),Obst,0.0,,,api_error:HTTPError

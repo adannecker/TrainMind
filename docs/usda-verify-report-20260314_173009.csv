@@ -1,0 +1,704 @@
+id,name,category,score,fdc_id,usda_description,status
+5ff9873bcb1428358dda10f7eb72f8106579,Aal,Fisch,0.0,,,api_error:HTTPError
+04384c06100ba3485d9f59b3dcee862c6e3f,Amaranth,Getreide,0.0,,,api_error:HTTPError
+b384aecffb003fbe1142b86ef6d13c807f6a,Ananas,Obst,0.0,,,api_error:HTTPError
+58e65c6e795818b0835f4f1783601fb68c8f,Ananas (Bio),Obst,0.0,,,api_error:HTTPError
+f629ce069c2f93c9e62a40949deeadc60964,Ananas (frisch),Obst,0.0,,,api_error:HTTPError
+c1ea84e10a78561f55b9347d99c73acab2db,Ananas (reif),Obst,0.0,,,api_error:HTTPError
+0846492f8a8098f03af7389a4b72dfc63082,Ananas (TK),Obst,0.0,,,api_error:HTTPError
+564e6d9b9836cb6ce2c4c7d2ce248ead808c,Apfel,Obst,0.0,,,api_error:HTTPError
+b77630c645078643c832c4480118eb74973c,Apfel (Bio),Obst,0.0,,,api_error:HTTPError
+c9ade3486efcd1e1569011cd2f9f26c00d4c,Apfel (frisch),Obst,0.0,,,api_error:HTTPError
+af4ad24a35f03d490fc7ff890f3d10ea34d7,Apfel (reif),Obst,0.0,,,api_error:HTTPError
+94d15707cd18f82d6dcd2baa919dd48a49d6,Apfel (TK),Obst,0.0,,,api_error:HTTPError
+2b3ec4a52ffde6ff01d38245e9f4dfa9e38f,Aprikose,Obst,0.0,,,api_error:HTTPError
+9fe18000ab13c54bb9174bd6827b71b7fcdd,Aprikose (Bio),Obst,0.0,,,api_error:HTTPError
+96c572dbc6d138a80f51de9aa9c0b5f07200,Aprikose (frisch),Obst,0.0,,,api_error:HTTPError
+941fd1b54ca1e95ad96bb17ee392174a26b0,Aprikose (reif),Obst,0.0,,,api_error:HTTPError
+e0fb5c430da991b8a6e1ea03b4c251ee4312,Aprikose (TK),Obst,0.0,,,api_error:HTTPError
+63d76c9e12865f7bfe330c252fff4cf79c1e,Aubergine,Gemüse,0.0,,,api_error:HTTPError
+3746fea675a71bfe6524250587390993dcaa,Aubergine (Bio),Gemüse,0.0,,,api_error:HTTPError
+bea25319a867fec4a9455b2ff7f57a5f9ecc,Aubergine (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+31b307e2f3128e0301f56bf0e257415b8279,Aubergine (gekocht),Gemüse,0.0,,,api_error:HTTPError
+daf5c7aa8e735b3bcb9beb349c95ce2d127b,Aubergine (roh),Gemüse,0.0,,,api_error:HTTPError
+242ff19383c7af5bec94e29c537e7ea0d8f0,Aubergine (TK),Gemüse,0.0,,,api_error:HTTPError
+d604a4cedc109d070b3c8a152dcb868ce3fa,Avocado,Obst,0.0,,,api_error:HTTPError
+bc74d48e00c531fe7106bb1c1aecae8b1607,Avocado (Bio),Obst,0.0,,,api_error:HTTPError
+224520164470bbe961234bec0c2a51d1a1f4,Avocado (frisch),Obst,0.0,,,api_error:HTTPError
+a73d82f84fa39aa80c5098729a2cd6ac2104,Avocadooel,Öle,0.0,,,api_error:HTTPError
+18ef38ccd3921d66455edbcb4c33631dd15e,Avocado (reif),Obst,0.0,,,api_error:HTTPError
+957bbe92b0d43fea249fb9a5697176ac1e1c,Avocado (TK),Obst,0.0,,,api_error:HTTPError
+fbc52ad82bead3ae064272e21d9ab34c6104,Baguette,Brot,0.0,,,api_error:HTTPError
+c8f55a228c0e5c4379fdf0af3d4bb2665372,Banane,Obst,0.0,,,api_error:HTTPError
+9678d685c5e026b6111c2ff4285c7ec7e2a6,Banane (Bio),Obst,0.0,,,api_error:HTTPError
+41e61ec3fab9624a33b3a5dfe1d3cd8389a2,Banane (frisch),Obst,0.0,,,api_error:HTTPError
+a7d8eba1db8203255a10651ac23d774ae52a,Banane (reif),Obst,0.0,,,api_error:HTTPError
+4311e7e2c3924b99f857d63bdf98b625d40e,Banane (TK),Obst,0.0,,,api_error:HTTPError
+5cc414ba1b8ba89e92b4c57489abda057862,Basilikum,Gewürze,0.0,,,api_error:HTTPError
+1524f491c3b05369674e9c0bb1adc7799857,Basmati Reis,Getreide,0.0,,,api_error:HTTPError
+9e126d865b85df51cc1c77d92ae238a0c7ac,Bauernbrot,Brot,0.0,,,api_error:HTTPError
+5981a3eeccb084474d29e1ac00d70f9fc567,Bergkaese,Käse,0.0,,,api_error:HTTPError
+86b6d3f70e058bc8d055ae860ee6b8ab2e9a,Birne,Obst,0.0,,,api_error:HTTPError
+5d4ef0f7ebe64b75a21e73ada0b7d4d5639e,Birne (Bio),Obst,0.0,,,api_error:HTTPError
+2a039a547f04b4352136867aa1d67e6a4112,Birne (frisch),Obst,0.0,,,api_error:HTTPError
+85a473aa138b63656913c93ecc591f4683fa,Birne (reif),Obst,0.0,,,api_error:HTTPError
+5936530945f1726fcbf16678b3a8e6479e32,Birne (TK),Obst,0.0,,,api_error:HTTPError
+cae75cc16ac08164246255950552dde0bdde,Blumenkohl,Gemüse,0.0,,,api_error:HTTPError
+0d0d73623fd2c5c897c575a329a89856721c,Blumenkohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+da6a4ebce237a841d6954ac58d4ff8f501a4,Blumenkohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+3ec88b3d0bad8c0f7aa4c04ff15548b2cf29,Blumenkohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+c36a8eb8be8924620d892ee0e60a4e470899,Blumenkohl (roh),Gemüse,0.0,,,api_error:HTTPError
+ff870b9e944d533e5fe3caf1159474cb520b,Blumenkohl (TK),Gemüse,0.0,,,api_error:HTTPError
+60726c7c7dd0c95cc8251c6c902baa6727f8,Bohne gruen,Gemüse,0.0,,,api_error:HTTPError
+6092900cc219a5b35048760cafb0714ba93c,Bohne gruen (Bio),Gemüse,0.0,,,api_error:HTTPError
+ca8ed82f9a5711f73f2eb339759290c8aa4f,Bohne gruen (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+9aeb450ac491551a8ebde3185f40da4a96d6,Bohne gruen (gekocht),Gemüse,0.0,,,api_error:HTTPError
+14de94103eab9f1560907625e6136e4bef44,Bohne gruen (roh),Gemüse,0.0,,,api_error:HTTPError
+db81a95640c7634b4c2ec78eb13cac4d0e1c,Bohne gruen (TK),Gemüse,0.0,,,api_error:HTTPError
+34d86d352f91a3c9b162a786f762f7335bb3,Brie,Käse,0.0,,,api_error:HTTPError
+bd8b5bd4876909b30ef649575efd4ff6980e,Brokkoli,Gemüse,0.0,,,api_error:HTTPError
+621d798949797354b06784b467e5f5603706,Brokkoli (Bio),Gemüse,0.0,,,api_error:HTTPError
+d635f52804c3ed9e5e8e92783ae63cdfd212,Brokkoli (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+1410254420d8e70e465d96885e9adafc572a,Brokkoli (gekocht),Gemüse,0.0,,,api_error:HTTPError
+b64f2385d627ef5cfa6279979b079a1b1510,Brokkoli (roh),Gemüse,0.0,,,api_error:HTTPError
+3b1d9d7533ee7bb0de2a97bf4f7b7119e38b,Brokkoli (TK),Gemüse,0.0,,,api_error:HTTPError
+7f318d127b547d456f8684cd6960156ae43c,Brombeere,Obst,0.0,,,api_error:HTTPError
+d3ebe21fdf3c0d543a010822f4801330b87e,Brombeere (Bio),Obst,0.0,,,api_error:HTTPError
+d7900778d24ba9a9a45455304fb76c7fcadc,Brombeere (frisch),Obst,0.0,,,api_error:HTTPError
+f708c2647362150b610e1ca400dd10e9abc0,Brombeere (reif),Obst,0.0,,,api_error:HTTPError
+0de0708d0428827049e17d7a0de0e502ba4d,Brombeere (TK),Obst,0.0,,,api_error:HTTPError
+582741d7d521f26932b31e5868c2a17b0c16,Buchweizen,Getreide,0.0,,,api_error:HTTPError
+2226e96f3fd88df6343b4b3355ee711ab74d,Bulgur,Getreide,0.0,,,api_error:HTTPError
+f352c025653bbfc9329e465a2583fe1c74ec,Butter,Öle,0.0,,,api_error:HTTPError
+c935691eb7b1d03401164ed58fb8f6f33380,Butterschmalz,Öle,0.0,,,api_error:HTTPError
+30f2f603dcf304a64fe4e1883b718d182547,Camembert,Käse,0.0,,,api_error:HTTPError
+925758110dd6d288f656133eb5686690c092,Cashew,Nüsse,0.0,,,api_error:HTTPError
+e0fc60daa0f8facd77088fc67766b3c428cb,Cashewmus,Nüsse,0.0,,,api_error:HTTPError
+d173692706b52909db6007e857e477859ece,Champignon,Gemüse,0.0,,,api_error:HTTPError
+8a25547b3a53453dc095a21a230990c514fd,Champignon (Bio),Gemüse,0.0,,,api_error:HTTPError
+7269c5cb055ba3a7b53445a15a0ddc2ac8ea,Champignon (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+0c1f948743e8c7a5e5f00abbf3b0435bb70c,Champignon (gekocht),Gemüse,0.0,,,api_error:HTTPError
+22fe0a32e1f6c56208b6cfd4f0c8db9ea91a,Champignon (roh),Gemüse,0.0,,,api_error:HTTPError
+c6f3a3e0bf2fc204316c2cf8270bc151cd82,Champignon (TK),Gemüse,0.0,,,api_error:HTTPError
+9a01437f46ca4044f83e116ff3360d079167,Cheddar,Käse,0.0,,,api_error:HTTPError
+1b2aea6f30189db9450fa3888f43f3e3f2d0,Chiasamen,Samen,0.0,,,api_error:HTTPError
+7dd243abab548c11806dfbb1ffcb62c05810,Chili gemahlen,Gewürze,0.0,,,api_error:HTTPError
+288aecdb1489134096ceafbce95e9b4665d7,Chinakohl,Gemüse,0.0,,,api_error:HTTPError
+373e5ed6c5babb970443169f8133e914f435,Chinakohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+285ab705211d49e10ab96222a18c67ace065,Chinakohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+4e716b77e83f5b04f2fa4131809ad339e46a,Chinakohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+d9449f5d0792b6e427383bf4330e3c9f81af,Chinakohl (roh),Gemüse,0.0,,,api_error:HTTPError
+6a78666c95b83a8387479e1160088f433cca,Chinakohl (TK),Gemüse,0.0,,,api_error:HTTPError
+143d047c4df1b88a25538560f9c1436e05c3,Ciabatta,Brot,0.0,,,api_error:HTTPError
+d8ac32259b96997e95304ff9114a4f0babdd,Couscous,Getreide,0.0,,,api_error:HTTPError
+637e964eb9d9a209b1bea53bd4fefaaee3db,Cranberry,Obst,0.0,,,api_error:HTTPError
+11acf028ada466b5c76ae3ce9905cc41acbb,Cranberry (Bio),Obst,0.0,,,api_error:HTTPError
+c9e0a2d7af342a33e2725d83a7cabc73edba,Cranberry (frisch),Obst,0.0,,,api_error:HTTPError
+f46b11b6586dfc37c1600b7ac85a2f4382ec,Cranberry (reif),Obst,0.0,,,api_error:HTTPError
+c529fc3c9617293c14dc17eb9cbe55b249ab,Cranberry (TK),Obst,0.0,,,api_error:HTTPError
+35011cc9d7f81c9fd404000440767e060dd9,Currypulver,Gewürze,0.0,,,api_error:HTTPError
+0c2aaef8e89833e06d048d9178ac1c8f2845,Dattel frisch,Obst,0.0,,,api_error:HTTPError
+8731ad2b3d9a7f6e03def8b9e7173af6f8c2,Dattel frisch (Bio),Obst,0.0,,,api_error:HTTPError
+823509d0583ac5868e17e545c21a455cb813,Dattel frisch (frisch),Obst,0.0,,,api_error:HTTPError
+9aff8bf980f94baa978c9f012762e9d70336,Dattel frisch (reif),Obst,0.0,,,api_error:HTTPError
+2937081f3536c25855c2db2cb1cf002f7439,Dattel frisch (TK),Obst,0.0,,,api_error:HTTPError
+23d6264bbe5ff06d218bc06ea2dbef40b005,Dinkelbrot,Brot,0.0,,,api_error:HTTPError
+91accb98a2f0ecc3c27980d6d509c7a0f1ab,Dinkelflocken,Getreide,0.0,,,api_error:HTTPError
+f746159ffbd63316157330e0f7bbc6d96c65,Dorade,Fisch,0.0,,,api_error:HTTPError
+7b88b7ec0ae3a5e6a799fef7da06daf71119,Edamame,Hülsenfrüchte,0.0,,,api_error:HTTPError
+42c3a248b94f2874705bd71bfd5592d96426,Ei ganz,Eier,0.0,,,api_error:HTTPError
+207a185a976d48cb8a7c3967513967f9c788,Ei gekocht,Eier,0.0,,,api_error:HTTPError
+1de7c7f75cbbf0d1999161190f42460bfce0,Eigelb,Eier,0.0,,,api_error:HTTPError
+211795a9c0c3004908b5b89b35d6ea90f8c2,Eiklar,Eier,0.0,,,api_error:HTTPError
+bcb075f4a11b4307f4da6fcb9f1a2b4e3305,Eisbergsalat,Gemüse,0.0,,,api_error:HTTPError
+527770bf93514b3f62df7be4b61d861a8269,Eisbergsalat (Bio),Gemüse,0.0,,,api_error:HTTPError
+58af210769f341415182edf3d55a9c3065af,Eisbergsalat (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+192374593fd66d5d93bacda88dad52e44fb6,Eisbergsalat (gekocht),Gemüse,0.0,,,api_error:HTTPError
+af209719bfd8160762ae88028c042d191d4b,Eisbergsalat (roh),Gemüse,0.0,,,api_error:HTTPError
+a2b65c492b01012ffdb09f0debf425a98d1a,Eisbergsalat (TK),Gemüse,0.0,,,api_error:HTTPError
+600f6bc274805a83876d4878a1bca1ffdd8b,Eiweissbrot,Brot,0.0,,,api_error:HTTPError
+3d26d2565561eeb063d702834aaa7d6fb2ca,Emmentaler,Käse,0.0,,,api_error:HTTPError
+d4b91dc9b2513ac2e55dbc80b40ebc1c644f,Entenbrust,Fleisch,0.0,,,api_error:HTTPError
+37b26d852e33cae342ac5c03e6cc907e1cc6,Erbse getrocknet,Hülsenfrüchte,0.0,,,api_error:HTTPError
+f5d0f32e91eb4798e852cde595da2af62b03,Erbse gruen,Gemüse,0.0,,,api_error:HTTPError
+bc18bf31b6169ad789bdc6fb098791b07d17,Erbse gruen (Bio),Gemüse,0.0,,,api_error:HTTPError
+7b91d45a9403e279c3110ec3eba87037b5b0,Erbse gruen (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+a8999fc7b4b4a582b86f83e1bc6e3db6d61a,Erbse gruen (gekocht),Gemüse,0.0,,,api_error:HTTPError
+510d5a0e77bc1257c79c2eb8f054370263dd,Erbse gruen (roh),Gemüse,0.0,,,api_error:HTTPError
+789e82c811eb0cf219bed32bccf162eb1aba,Erbse gruen (TK),Gemüse,0.0,,,api_error:HTTPError
+e9953fbd06ae7c4e2b873429369546f014ae,Erdbeere,Obst,0.0,,,api_error:HTTPError
+72407bdb4e51fe90c4bc61d34932e90b8769,Erdbeere (Bio),Obst,0.0,,,api_error:HTTPError
+18bcedaa2d47cf70da30074d88b585a6a8d0,Erdbeere (frisch),Obst,0.0,,,api_error:HTTPError
+0f4fdee8c73e1d2055bb0174aa6bcfed9b1a,Erdbeere (reif),Obst,0.0,,,api_error:HTTPError
+f42036b5b4c1a6ed72a5fab479f58f1f9af1,Erdbeere (TK),Obst,0.0,,,api_error:HTTPError
+259161d54b154a91a23c546ff1b275544ef7,Erdnuss,Nüsse,0.0,,,api_error:HTTPError
+fc7d26e70d3e933a4a077af777845cdd2c87,Erdnussmus,Nüsse,0.0,,,api_error:HTTPError
+7b5cf53d1d4136a0bc20b7898c030d22b497,Erdnussoel,Öle,0.0,,,api_error:HTTPError
+387f292149428c5d0d2de9951963c30dd8e5,Feige,Obst,0.0,,,api_error:HTTPError
+1f89f7d73f0d5fb6b781d332c6491f0b4cb0,Feige (Bio),Obst,0.0,,,api_error:HTTPError
+84c3e81d025aeb5e55e84365cffc260b8166,Feige (frisch),Obst,0.0,,,api_error:HTTPError
+c4beac4222c5e09d0ee2f625c66539bcd499,Feige (reif),Obst,0.0,,,api_error:HTTPError
+1a5d0893e340bd312d835984b7e33e4ff01a,Feige (TK),Obst,0.0,,,api_error:HTTPError
+9a4271d757f05d6e5467b09005bf8d76868e,Feldsalat,Gemüse,0.0,,,api_error:HTTPError
+8cff451494175a7cfd91a509e392d9357ee4,Feldsalat (Bio),Gemüse,0.0,,,api_error:HTTPError
+00818369dc0b8be49fd3dcb02f373679e2a0,Feldsalat (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+c82d80729e688862c70ae571a9e9275b8f22,Feldsalat (gekocht),Gemüse,0.0,,,api_error:HTTPError
+39c185805aed0b7b9f7ea9da066ff448c3d6,Feldsalat (roh),Gemüse,0.0,,,api_error:HTTPError
+39283fded840845dcee237b5cda4128d20e8,Feldsalat (TK),Gemüse,0.0,,,api_error:HTTPError
+f4906ff240a36a84c851969e8eb182b89de1,Fenchel,Gemüse,0.0,,,api_error:HTTPError
+dd34e887343be7bdd5c3faeeee7928982d53,Fenchel (Bio),Gemüse,0.0,,,api_error:HTTPError
+5f863c1c8a13062c2e22951fc7251d8fd430,Fenchel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+49aecfbcecfd3e33c445b6a96358ad8b9cf7,Fenchel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+9ce6793f8f037bd72c994f9af3eade2a8607,Fenchel (roh),Gemüse,0.0,,,api_error:HTTPError
+cf31161002bde6ba67227b78b04cce9a66fb,Fenchel (TK),Gemüse,0.0,,,api_error:HTTPError
+b14dcd524e307430e7603b8d3132ed684097,Feta,Käse,0.0,,,api_error:HTTPError
+cbcb4b838431a46ccba4888f3a37f8c68fe7,Fischstaebchen,Fisch,0.0,,,api_error:HTTPError
+e7fedc16b66bc4423468d0fd454daaad0c0b,Flohsamenschalen,Samen,0.0,,,api_error:HTTPError
+36366d6463cf7670764aae86301b4ca19e33,Forelle,Fisch,0.0,,,api_error:HTTPError
+e3f1ed7479d41f3f2bb42d5d9ce59638fa0c,Frischkaese natur,Käse,0.0,,,api_error:HTTPError
+5f52b218ffa46b01d6b885da7f8e4672cbcb,Fruehlingszwiebel,Gemüse,0.0,,,api_error:HTTPError
+b0de9f0028cf30b1ad19440d188dfaad1644,Fruehlingszwiebel (Bio),Gemüse,0.0,,,api_error:HTTPError
+9ad6994de40741a0ab2ab0e21a61a0620d8c,Fruehlingszwiebel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+f60075165b6d5d026f98e4c39fb37c12ed27,Fruehlingszwiebel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+33c1980c1b668c5e977b62df10bf58db0f76,Fruehlingszwiebel (roh),Gemüse,0.0,,,api_error:HTTPError
+9aa29262a4a5f45b0d9f93dd4bf8105f8051,Fruehlingszwiebel (TK),Gemüse,0.0,,,api_error:HTTPError
+1640849a9f0bdb44712f0fa01d07551b21df,Fusilli,Getreide,0.0,,,api_error:HTTPError
+96602e2314791991e050d7b10f998b1d8395,Gansfleisch,Fleisch,0.0,,,api_error:HTTPError
+ea4f36808be94cadebb505129db932b9beae,Garnele,Fisch,0.0,,,api_error:HTTPError
+c79b6b971e82471bb04e0c987e5b4f0e9978,Gerste,Getreide,0.0,,,api_error:HTTPError
+82c40bcf76784ac9e13f56a80af0f684b1af,Gouda alt,Käse,0.0,,,api_error:HTTPError
+f47e05a9a07b9ffe6d50f6365f1433d2e786,Gouda jung,Käse,0.0,,,api_error:HTTPError
+b47f10712f1a92e7a366ec5e7927d12a6897,Granatapfel,Obst,0.0,,,api_error:HTTPError
+793b7d048cf19209b7dcee7a1fe2ff6383a6,Granatapfel (Bio),Obst,0.0,,,api_error:HTTPError
+8707a7309c9d5eff68ecc90e5f3d997f43ea,Granatapfel (frisch),Obst,0.0,,,api_error:HTTPError
+0adeb3afa5044c9c9455c33cb6eb1a97e01e,Granatapfel (reif),Obst,0.0,,,api_error:HTTPError
+f06e5c8679bf7eea72979c9941d3969ad8b4,Granatapfel (TK),Obst,0.0,,,api_error:HTTPError
+a4117894de04155bad2cd39d9de8be12ebe9,Grapefruit,Obst,0.0,,,api_error:HTTPError
+6b304072232e08cc3d49289e88c21ae2d501,Grapefruit (Bio),Obst,0.0,,,api_error:HTTPError
+2a07bb747275737d64f180009f309e5e621c,Grapefruit (frisch),Obst,0.0,,,api_error:HTTPError
+b0d46843b94e1a41418d336577041e0300d4,Grapefruit (reif),Obst,0.0,,,api_error:HTTPError
+06723787f1fcd9fcad3337b2f19c65c2b225,Grapefruit (TK),Obst,0.0,,,api_error:HTTPError
+f580102b5a6da96db7345a439f7af7504f2d,Griechischer Joghurt 10%,Joghurt,0.0,,,api_error:HTTPError
+39e7621c5574161a85e976851ba598a3125a,Griechischer Joghurt 2%,Joghurt,0.0,,,api_error:HTTPError
+e42822575f6277ab7860c968193532f3b0ed,Gruenkohl,Gemüse,0.0,,,api_error:HTTPError
+6ee0d7c1798c591b303fa44048082c00dc6b,Gruenkohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+889ff69da43e6590bfd129e9a88621121eaa,Gruenkohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+d77167ac5075bde848226f87f73e69406582,Gruenkohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+9f73df7ab8471bb39f23ca12532f884475e4,Gruenkohl (roh),Gemüse,0.0,,,api_error:HTTPError
+5d0ab9247a94da30a263b55ccd849eb2b9fd,Gruenkohl (TK),Gemüse,0.0,,,api_error:HTTPError
+2263c2e614dd55b7288e541d58501b62747f,Gruyere,Käse,0.0,,,api_error:HTTPError
+d8fcd684a4f8c146c96370c7217a99d9288e,Guave,Obst,0.0,,,api_error:HTTPError
+549615068ea76cc52bdf20dd5bc804e53a07,Guave (Bio),Obst,0.0,,,api_error:HTTPError
+ff9223d7396909e335baa9a612d1f25d59d2,Guave (frisch),Obst,0.0,,,api_error:HTTPError
+32f4cf89fa4e97733a884650c13d83e100e7,Guave (reif),Obst,0.0,,,api_error:HTTPError
+383b9c75cd3208689f68224f284f26ae6913,Guave (TK),Obst,0.0,,,api_error:HTTPError
+6219cc070eaa719d206c6ca993b81d2dc2c5,Gurke,Gemüse,0.0,,,api_error:HTTPError
+ff64eff0c5bb23209225423aadfa0e7dad20,Gurke (Bio),Gemüse,0.0,,,api_error:HTTPError
+8ee21ccfd83db297f21eedc1c4ef752934fb,Gurke (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+dac01ceb3c97d7ed4537355bc3b7ba8b64ea,Gurke (gekocht),Gemüse,0.0,,,api_error:HTTPError
+655430425efe2715215225a446d47e61a9b4,Gurke (roh),Gemüse,0.0,,,api_error:HTTPError
+6d06b4e00375aefdeb1bc32518ea96e0d03a,Gurke (TK),Gemüse,0.0,,,api_error:HTTPError
+19f8d2522fb94c4665421f6925ecebe5a872,Haehnchenbrust,Fleisch,0.0,,,api_error:HTTPError
+3afc2c42bbb4d7093302151f43804df36ee8,Haehnchenbrust (gebraten),Fleisch,0.0,,,api_error:HTTPError
+2ece770ccb2bec0c0ed260b3809b0ef176ad,Haehnchenbrust (gekocht),Fleisch,0.0,,,api_error:HTTPError
+41541d2c2e1534fd51e0c4f0b3c227b2c22d,Haehnchenbrust (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+aa2cc0deb9a3f4e43a0f5052a994565dab23,Haehnchenbrust (mager),Fleisch,0.0,,,api_error:HTTPError
+f72cc68b8d8353f9e19a10ac8d2599dcb8f2,Haehnchenbrust (roh),Fleisch,0.0,,,api_error:HTTPError
+fabc1aeff8e6bfdaf28f3f79c1094cfc80e3,Haehnchenkeule,Fleisch,0.0,,,api_error:HTTPError
+9e31286467e3ea449851c840bc22d552da9a,Haehnchenkeule (gebraten),Fleisch,0.0,,,api_error:HTTPError
+9e1d3879679fafb532f784bf5ec61dac04b5,Haehnchenkeule (gekocht),Fleisch,0.0,,,api_error:HTTPError
+19fe2ade94f4fcc5aa985d330003f583ebf0,Haehnchenkeule (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+e2a34041e01cfe2d34ee1b4ad30898646ca0,Haehnchenkeule (mager),Fleisch,0.0,,,api_error:HTTPError
+23ab61abe3029cd6ac62269e9b8416de8681,Haehnchenkeule (roh),Fleisch,0.0,,,api_error:HTTPError
+8d83a5907bc7eb979f18b20c859dd67cbb1b,Haferflocken,Getreide,0.0,,,api_error:HTTPError
+6adaa06008788a118e931d324264a20daf53,Hagebutte,Obst,0.0,,,api_error:HTTPError
+4af4301441833de787bfe6e79fc9caadc57c,Hagebutte (Bio),Obst,0.0,,,api_error:HTTPError
+ad8976552bbf540a267cefc058d13e8d6e28,Hagebutte (frisch),Obst,0.0,,,api_error:HTTPError
+48aa14e9772272076edd565a8023714cbf8f,Hagebutte (reif),Obst,0.0,,,api_error:HTTPError
+1d929d60bc71e5e6a1aeea69eb23e47186ba,Hagebutte (TK),Obst,0.0,,,api_error:HTTPError
+44d9b7e19f631affcf8a9a21011193dbf2a5,Halloumi,Käse,0.0,,,api_error:HTTPError
+9bd57f01631dc1a7d54cafbad87ca995ec6d,Hanfsamen,Samen,0.0,,,api_error:HTTPError
+5efdb18888d614d3ad2f28cdf828c1b50d95,Hartweizengriess,Getreide,0.0,,,api_error:HTTPError
+8babe00bbbf86799bfdf5f068d179aae8983,Harzer Kaese,Käse,0.0,,,api_error:HTTPError
+2602a9194e95f5f1705e2c0399326160360d,Haselnuss,Nüsse,0.0,,,api_error:HTTPError
+65a6ccfc0a5f3beed340a5c6c74254d98b4c,Heidelbeere,Obst,0.0,,,api_error:HTTPError
+79d32d5f901f5951352d64b2e5308ebfb615,Heidelbeere (Bio),Obst,0.0,,,api_error:HTTPError
+b4431fc9fdf5b6af291643930fe63d9625de,Heidelbeere (frisch),Obst,0.0,,,api_error:HTTPError
+8b24b61edda7f8def9926899f2580fda47b6,Heidelbeere (reif),Obst,0.0,,,api_error:HTTPError
+19a54156703516ccfeffe78b09273a7ec2d2,Heidelbeere (TK),Obst,0.0,,,api_error:HTTPError
+8eb5cabd71351a0b4def817454a73ced1288,Heilbutt,Fisch,0.0,,,api_error:HTTPError
+42758fba4736c3e26101c9553aeecdb88101,Hering,Fisch,0.0,,,api_error:HTTPError
+e4805f5e1e29b2e2814941193d3f38f20828,Himbeere,Obst,0.0,,,api_error:HTTPError
+39b1bb8a5bdeb6d6db5d499a71b76166db28,Himbeere (Bio),Obst,0.0,,,api_error:HTTPError
+82c2d4be6db225c5261a2f7e958126b6a3c0,Himbeere (frisch),Obst,0.0,,,api_error:HTTPError
+9635a9743699d842b2263130d7733651f77c,Himbeere (reif),Obst,0.0,,,api_error:HTTPError
+93f68f2b2024278a59708190b4f946b29d49,Himbeere (TK),Obst,0.0,,,api_error:HTTPError
+a215e071a3de6d26dc79da3a91a4fb94fbae,Hirschfleisch,Fleisch,0.0,,,api_error:HTTPError
+b7bdb4ed3f0af0d387a5e19a2a7b2dc3c575,Hirse,Getreide,0.0,,,api_error:HTTPError
+932846eef80e1c3450304f65cbd86e727809,Hirtenkaese,Käse,0.0,,,api_error:HTTPError
+b696f637afbc7e4f58c681557f2e07cfe2ee,Honigmelone,Obst,0.0,,,api_error:HTTPError
+631b29ba965c5d2556099ba623abb0b8b6e9,Honigmelone (Bio),Obst,0.0,,,api_error:HTTPError
+3748d13b472f1791d0cceea377269c210409,Honigmelone (frisch),Obst,0.0,,,api_error:HTTPError
+32116b5b277a54187a591bc4ff87f8155239,Honigmelone (reif),Obst,0.0,,,api_error:HTTPError
+93cd1e31ef4862e82da8030287821a92a487,Honigmelone (TK),Obst,0.0,,,api_error:HTTPError
+a5969eb83f8c30f4fb7a53bbeafbdfa5dbac,Huehnchenherz,Fleisch,0.0,,,api_error:HTTPError
+a95c457a17592f80aceb0052292a277b4ca3,Hüttenkäse,Käse,0.0,,,api_error:HTTPError
+1aa609591feb0c138ab9b4662e5fff66c93d,Ingwerpulver,Gewürze,0.0,,,api_error:HTTPError
+afa91f46c940a5789b314fbe4e3110e78994,Instant Oats,Getreide,0.0,,,api_error:HTTPError
+7c9fc127a3f6eee368987a09f608bf0104f1,Jakobsmuschel,Fisch,0.0,,,api_error:HTTPError
+54300b3ddac29756930c7a30887df8088719,Jasminreis,Getreide,0.0,,,api_error:HTTPError
+fa673aede3d14dd82b9d8ad5f0c2b04abba0,Joghurt Erdbeere,Joghurt,0.0,,,api_error:HTTPError
+55e3a4747877efe884ccc150db614f6be749,Joghurt natur 1.5%,Joghurt,0.0,,,api_error:HTTPError
+eeebacc8267c10117fd95952574bc6550996,Joghurt natur 3.5%,Joghurt,0.0,,,api_error:HTTPError
+0ac1fc3271e028ff86a9c016f4d60d01c144,Joghurt Vanille,Joghurt,0.0,,,api_error:HTTPError
+03e2f5c8cc8480df364a7b7e63a93aa8c0c7,Johannisbeere,Obst,0.0,,,api_error:HTTPError
+d175db02fcb3cab6668280bfcd33b4d2452c,Johannisbeere (Bio),Obst,0.0,,,api_error:HTTPError
+2a4eae5946c1779e1690753873c0099ecab9,Johannisbeere (frisch),Obst,0.0,,,api_error:HTTPError
+e76e54f485011b0bbe451abd798494a47bf4,Johannisbeere (reif),Obst,0.0,,,api_error:HTTPError
+8ef7c6e9b85c41d13b6f6ee84158d26fa433,Johannisbeere (TK),Obst,0.0,,,api_error:HTTPError
+4cb05830725d560cc6f1494d98fdfbe7bf83,Kabeljau,Fisch,0.0,,,api_error:HTTPError
+9c504989237edaa9e72143198898b22323b2,Kakaopulver,Gewürze,0.0,,,api_error:HTTPError
+b73cf67e5193acd14bd3991c78b18a300fa2,Kaki,Obst,0.0,,,api_error:HTTPError
+c9f8f08bcb567f59c1214fb7b715c607a4b1,Kaki (Bio),Obst,0.0,,,api_error:HTTPError
+ee390005d057cffef1158afe7cab5105c471,Kaki (frisch),Obst,0.0,,,api_error:HTTPError
+d8388e63b66c5404e64be63ae37be134ddf5,Kaki (reif),Obst,0.0,,,api_error:HTTPError
+02991971073ae1f1f07f2744338ace179569,Kaki (TK),Obst,0.0,,,api_error:HTTPError
+4a9a9a1cf21e2e40356489390dea6bd91e1d,Kalbsfilet,Fleisch,0.0,,,api_error:HTTPError
+42b253d28ce0b75c629e9206dff10bd0429c,Kalbsfilet (gebraten),Fleisch,0.0,,,api_error:HTTPError
+507172e2454882d1554ab43ff284133c4696,Kalbsfilet (gekocht),Fleisch,0.0,,,api_error:HTTPError
+7100fd7ef88a3d4dfef1211bdb208d02efe5,Kalbsfilet (roh),Fleisch,0.0,,,api_error:HTTPError
+993ab7aa0bef94901ddfbc7851339ad27b91,Kalbsleber,Fleisch,0.0,,,api_error:HTTPError
+f2c97c072b23eef8799f31f6ba66de15fc0a,Kaninchenfleisch,Fleisch,0.0,,,api_error:HTTPError
+feb25acd3da62a8cbb61c117ab0fc895d883,Karotte,Gemüse,0.0,,,api_error:HTTPError
+264fe9c5b4fce99583f7158450e9566fd226,Karotte (Bio),Gemüse,0.0,,,api_error:HTTPError
+048a8141046161c29943027c07debb322cc0,Karotte (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+8de6d7d0d76766ca394813b0d43812877c70,Karotte (gekocht),Gemüse,0.0,,,api_error:HTTPError
+7da9b3db28baa4b3c52667cf2dffe9e90605,Karotte (roh),Gemüse,0.0,,,api_error:HTTPError
+8e8db3ee99c2986f3d5ec6a6d7884595e440,Karotte (TK),Gemüse,0.0,,,api_error:HTTPError
+48454daa245c6bf85e6d66790ed9f202e281,Kartoffel,Gemüse,0.0,,,api_error:HTTPError
+ff3f0fe0988630dc33518a767425ae132b48,Kartoffel (Bio),Gemüse,0.0,,,api_error:HTTPError
+4d8a1d07ccc8a701eac0a4606c7381db8635,Kartoffelbrot,Brot,0.0,,,api_error:HTTPError
+45b85c950e86881dc2537e5d6f013b5d5e51,Kartoffel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+ea3813098f3792df54905d62896b1b8643d5,Kartoffel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+255511bf541cb810400f5d0874364dac8236,Kartoffel (roh),Gemüse,0.0,,,api_error:HTTPError
+dde458cc2879d48034b7819eaa2a7e97dedf,Kartoffel (TK),Gemüse,0.0,,,api_error:HTTPError
+455b02ae4298587653152cb64926f2a2bf3c,Kichererbse,Hülsenfrüchte,0.0,,,api_error:HTTPError
+807929657190ec6907934ac895d8c5c78699,Kidneybohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+94f9abcfe7d1b46e84fc3d45be6be421d106,Kirsche,Obst,0.0,,,api_error:HTTPError
+9431ac980241f6a131420f4293454673bdc9,Kirsche (Bio),Obst,0.0,,,api_error:HTTPError
+6fcbda2d76d0b2dd3ed2357b18245de49fb2,Kirsche (frisch),Obst,0.0,,,api_error:HTTPError
+1c20b8a45cbcf221285259d91d897056a7b2,Kirsche (reif),Obst,0.0,,,api_error:HTTPError
+d6b4d31df17e2fb1bcf9cbaabff28bfe8fea,Kirsche (TK),Obst,0.0,,,api_error:HTTPError
+ef39ed255ced748c9dcf227e8593115e3e62,Kiwi,Obst,0.0,,,api_error:HTTPError
+8b63decbe945a1f3f8aa2aa5d4219848b809,Kiwi (Bio),Obst,0.0,,,api_error:HTTPError
+9c3d275fdc49ca6432dbe945714e98c0a0d9,Kiwi (frisch),Obst,0.0,,,api_error:HTTPError
+bebc703b6b35d6b096b1a3875f95ed390485,Kiwi (reif),Obst,0.0,,,api_error:HTTPError
+ab4562d85d195d65d390281c8a0d1f540b5d,Kiwi (TK),Obst,0.0,,,api_error:HTTPError
+6c5a3a965d445075cba4b7add853488bf605,Knäckebrot,Brot,0.0,,,api_error:HTTPError
+4655222a006274f123baf4d9beb347d8a5f1,Knoblauch,Gemüse,0.0,,,api_error:HTTPError
+95954e46b297fff0a52a429c389e12ee2ccd,Knoblauch (Bio),Gemüse,0.0,,,api_error:HTTPError
+79880638ed5827d6282560501daa4216e164,Knoblauch (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+eaf7cbaf3d5827a506c562a812fea036ad9f,Knoblauch (gekocht),Gemüse,0.0,,,api_error:HTTPError
+9beda06e58e4d781fb682c9abba8f16f9845,Knoblauchpulver,Gewürze,0.0,,,api_error:HTTPError
+5dc7558a74218a65a32d8d7b4f336a06bc9b,Knoblauch (roh),Gemüse,0.0,,,api_error:HTTPError
+12c373e83a56557c6f8d436daddff2aa03f9,Knoblauch (TK),Gemüse,0.0,,,api_error:HTTPError
+efeab56e6e101f60ced345c47ad0037bc3a2,Kohlrabi,Gemüse,0.0,,,api_error:HTTPError
+91aac024d8d21cb68e518928225ff20b4372,Kohlrabi (Bio),Gemüse,0.0,,,api_error:HTTPError
+782e998846012a40830e15bf3b12f0cca8fc,Kohlrabi (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+6f93bf9bc316903223940d95d938b1bf5243,Kohlrabi (gekocht),Gemüse,0.0,,,api_error:HTTPError
+1f998384b7a70f0e2240a0e1d5a80c3e1e9f,Kohlrabi (roh),Gemüse,0.0,,,api_error:HTTPError
+1f9148bf382a72e1d4753cc56dc0cc782845,Kohlrabi (TK),Gemüse,0.0,,,api_error:HTTPError
+367c1a1a670b2f91b1af984c1ff207beab76,Kokoschips,Nüsse,0.0,,,api_error:HTTPError
+828cfd2195d7326c42062e30c94b6c05ec9c,Kokosnuss Fruchtfleisch,Obst,0.0,,,api_error:HTTPError
+d2327138aa14ad98933dcade45b5370db473,Kokosnuss Fruchtfleisch (Bio),Obst,0.0,,,api_error:HTTPError
+f855f8a1aa823af63b92323da9b5167aa481,Kokosnuss Fruchtfleisch (frisch),Obst,0.0,,,api_error:HTTPError
+b633ad4579a81664ab075b4f5282d97c0f97,Kokosnuss Fruchtfleisch (reif),Obst,0.0,,,api_error:HTTPError
+539f680e7f6320a9e4ca9d105fd17f221288,Kokosnuss Fruchtfleisch (TK),Obst,0.0,,,api_error:HTTPError
+edddf33fd2eb61589eb2a1e4f127c8c19bcb,Kokosoel,Öle,0.0,,,api_error:HTTPError
+f28c55ad3cfdb79e2441ef7adf3d846b1c06,Kopfsalat,Gemüse,0.0,,,api_error:HTTPError
+596926b59256f331785f70659750baf96f3c,Kopfsalat (Bio),Gemüse,0.0,,,api_error:HTTPError
+86e72e5918c2d2b5193c0f4fc461a8cda65a,Kopfsalat (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+0f2a58b918253b29d85cef1df2b3e77feed2,Kopfsalat (gekocht),Gemüse,0.0,,,api_error:HTTPError
+77e92af80954b032512e30e3edcee5c7ae9f,Kopfsalat (roh),Gemüse,0.0,,,api_error:HTTPError
+7e17e837d51585c7a8a5d7707835d0a82994,Kopfsalat (TK),Gemüse,0.0,,,api_error:HTTPError
+883d60377af55a9e0e4ca35884ea7d21a456,Krabbe,Fisch,0.0,,,api_error:HTTPError
+fb01e1acc4911116a74e1ad8d23edd03741d,Kreuzkuemmel,Gewürze,0.0,,,api_error:HTTPError
+ad69aa1b0bdbe5e60fbd7ba707fe59c1cdbe,Kuerbiskerne,Samen,0.0,,,api_error:HTTPError
+9ec810bb28272e37d3622b3881c6852c5548,Kuerbiskernoel,Öle,0.0,,,api_error:HTTPError
+39ace6482b4dcfaebe1328bd878820b677b8,Kurkumapulver,Gewürze,0.0,,,api_error:HTTPError
+ce7e8798535ed78b48e581292d86e99222e1,Lachs,Fisch,0.0,,,api_error:HTTPError
+f005668a578c19d1f93d17eeb286444c5d5e,Lachsforelle,Fisch,0.0,,,api_error:HTTPError
+67ffcd8e13c6071fc294f9e2325d6a2ed5a9,Lammkeule,Fleisch,0.0,,,api_error:HTTPError
+e36cfb2abcfc85fa4a2f4be721374dd9730d,Lammkotelett,Fleisch,0.0,,,api_error:HTTPError
+88617c80f1e7d225327606ca650db9fa5e0a,Lauch,Gemüse,0.0,,,api_error:HTTPError
+4388e063c9a76e053c1345182fd16d6286f2,Lauch (Bio),Gemüse,0.0,,,api_error:HTTPError
+9886abcde6428b4e9dbca67067ea7aaccb8d,Lauch (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+9fbe3f427613e28d846f54d10ed182e07ab9,Lauch (gekocht),Gemüse,0.0,,,api_error:HTTPError
+95c4df8668d569b066070280213236a74757,Lauch (roh),Gemüse,0.0,,,api_error:HTTPError
+6fdc636b3af0fc98f74041e3a50a1ef5ad89,Lauch (TK),Gemüse,0.0,,,api_error:HTTPError
+5bdd83fbc06c722cc3ddba87969c16f86f2a,Leinoel,Öle,0.0,,,api_error:HTTPError
+2e3d05e33223a18a04c4dd07a8ee8f5f0b0e,Leinsamen,Samen,0.0,,,api_error:HTTPError
+401b1e5a5d61d4af79d8c50706fdde765940,Limette,Obst,0.0,,,api_error:HTTPError
+890ac58ef40f20d3ed2abdb3ff0c46ccb71f,Limette (Bio),Obst,0.0,,,api_error:HTTPError
+4403bfd0083333b6fdd3fc7769390b74be6d,Limette (frisch),Obst,0.0,,,api_error:HTTPError
+7645f77808dbb8dd6f8508c9655aa28d4086,Limette (reif),Obst,0.0,,,api_error:HTTPError
+22eed7543969007e91e7918b2079d2f045f7,Limette (TK),Obst,0.0,,,api_error:HTTPError
+34ae3d7406d6aded4ebe9e3dc2f1c5687cc1,Linsen braun,Hülsenfrüchte,0.0,,,api_error:HTTPError
+d096d49a398df2d9e6c146c6fbddf52e3ae2,Linsen gruen,Hülsenfrüchte,0.0,,,api_error:HTTPError
+f32443fd76b1c3879e2d821b23551425ac36,Linsen rot,Hülsenfrüchte,0.0,,,api_error:HTTPError
+67cd80b201847cddc0d9bf9a6c606ca72254,Litschi,Obst,0.0,,,api_error:HTTPError
+fa435e21704e41624cdd077c6b0492c80982,Litschi (Bio),Obst,0.0,,,api_error:HTTPError
+b3ba0260f773211ebf55d2770832e6f0b6e0,Litschi (frisch),Obst,0.0,,,api_error:HTTPError
+96de873ff9da9635baf55b0103f10e6209df,Litschi (reif),Obst,0.0,,,api_error:HTTPError
+2534f42ed491ad498c413c9ebbee6b3155c0,Litschi (TK),Obst,0.0,,,api_error:HTTPError
+d1a4f9d030000b931a156f65e2f3d4587312,Lupine,Hülsenfrüchte,0.0,,,api_error:HTTPError
+fe940e2ee3d1897b65cb8cfe4b2c51703b32,Macadamia,Nüsse,0.0,,,api_error:HTTPError
+d126e89f555f85a16d7d8c519bf09e6229cc,Mais,Gemüse,0.0,,,api_error:HTTPError
+a0f42cbd5bdd2e97831f8b7c942f16d0bb9f,Mais (Bio),Gemüse,0.0,,,api_error:HTTPError
+74ad2a8626825923b9ac7f3b0967de416a29,Mais (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+07bf13f414423cdad351615536ec7723fd60,Mais (gekocht),Gemüse,0.0,,,api_error:HTTPError
+30adcde551864ceec66f6553fbacd8784592,Maisgries,Getreide,0.0,,,api_error:HTTPError
+845eb42f0d98d0ce89b03865ff405aa02e00,Mais (roh),Gemüse,0.0,,,api_error:HTTPError
+6a143087da7236d4b0f1adbca129f6608819,Mais (TK),Gemüse,0.0,,,api_error:HTTPError
+1c10230b55ac31252082b540c550466030b3,Makrele,Fisch,0.0,,,api_error:HTTPError
+9abf3970fe9ff7cd748c01466aaeb2007811,Mandarine,Obst,0.0,,,api_error:HTTPError
+648cb6edeb07be93bf949a7aab6f2542b245,Mandarine (Bio),Obst,0.0,,,api_error:HTTPError
+49deb06aa8e3341f9124aafdf52783403229,Mandarine (frisch),Obst,0.0,,,api_error:HTTPError
+23e4f68c268dc040902e4086929ae403687b,Mandarine (reif),Obst,0.0,,,api_error:HTTPError
+4cbbef527781c352f8cf98a4091e743623ef,Mandarine (TK),Obst,0.0,,,api_error:HTTPError
+96d259438edb236a07fc916188d39f01cff7,Mandel,Nüsse,0.0,,,api_error:HTTPError
+2ce9a2173113c3f7424b897411dc6fcd7218,Mandelmus,Nüsse,0.0,,,api_error:HTTPError
+25eec34b50e8d5cab0b9d02e35474bd4b625,Mango,Obst,0.0,,,api_error:HTTPError
+697f07b1c178caed55341fee3c53454538e9,Mango (Bio),Obst,0.0,,,api_error:HTTPError
+6245819375e4ec15d8ef080cf824183cbcad,Mango (frisch),Obst,0.0,,,api_error:HTTPError
+58a9b751512f913239084a25319d772227a0,Mangold,Gemüse,0.0,,,api_error:HTTPError
+1bad64d6325a6883cf20efa38af0c63b9487,Mangold (Bio),Gemüse,0.0,,,api_error:HTTPError
+890822c4928c500bc782d1efcdb5f71bde6f,Mangold (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+1a1e9d823c7d7f52e7bf760940de6e12351c,Mangold (gekocht),Gemüse,0.0,,,api_error:HTTPError
+7652d4b613c99f28aaf9c12c03baceb38e6d,Mangold (roh),Gemüse,0.0,,,api_error:HTTPError
+bad7f4c895b50949bd622cbc07b243670e78,Mangold (TK),Gemüse,0.0,,,api_error:HTTPError
+3f05c1d21fedc81eff34ad55dedc16dcdca4,Mango (reif),Obst,0.0,,,api_error:HTTPError
+0566b44858711b5a82b62179e43aa8a0b8c8,Mango (TK),Obst,0.0,,,api_error:HTTPError
+28f3c3b1de9808bdaa9099ff4a1f85a77ca5,Mascarpone,Käse,0.0,,,api_error:HTTPError
+cb658d2bc97f38e9a3e0a9a7f078df973679,Meersalz,Gewürze,0.0,,,api_error:HTTPError
+7cd742688d5467282f2ddda3b4d9659c0da5,Mehrkornbrot,Brot,0.0,,,api_error:HTTPError
+cba974be011cd35096989c7bca2eb3dc420d,Miesmuschel,Fisch,0.0,,,api_error:HTTPError
+0872c71b49793efc5e6f009da50741b18fb9,Mirabelle,Obst,0.0,,,api_error:HTTPError
+5ccf7ca15373a007a4c3469400b796de9cb2,Mirabelle (Bio),Obst,0.0,,,api_error:HTTPError
+816ab0c8821c6530041129a9e70c56ae63a7,Mirabelle (frisch),Obst,0.0,,,api_error:HTTPError
+5496d04727c3471127dd6071a97c64cfeae8,Mirabelle (reif),Obst,0.0,,,api_error:HTTPError
+fb8707533fe829caac76d75853c7eb3487a8,Mirabelle (TK),Obst,0.0,,,api_error:HTTPError
+341295360d3d7d9151e452e5d0a407bc0e68,Mischbrot,Brot,0.0,,,api_error:HTTPError
+8b1b2cd85d7f4550b993d718df64b0e06f64,Mohn,Samen,0.0,,,api_error:HTTPError
+41e02aa27b2d7ce05072bd37b46020ed2cca,Mozzarella,Käse,0.0,,,api_error:HTTPError
+2ba3aa42f2221b1808bf5721b218a5900d49,Mungbohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+e266c3660a75874c1e898801f3d6dfca8c9e,Nektarine,Obst,0.0,,,api_error:HTTPError
+58c31b0898eac68e009e881121ef3b43d6d9,Nektarine (Bio),Obst,0.0,,,api_error:HTTPError
+6d81bae1f815c7c9645647e5f2375fbb74bc,Nektarine (frisch),Obst,0.0,,,api_error:HTTPError
+418bdf4be6c47f7d441fe47d814af3b83596,Nektarine (reif),Obst,0.0,,,api_error:HTTPError
+76d3a679571788aae9cf9dc42e856e38729e,Nektarine (TK),Obst,0.0,,,api_error:HTTPError
+30c3011184e5818aacb5b85f24f8b8964600,Olivenoel,Öle,0.0,,,api_error:HTTPError
+23eea31478c853afce11c5bd2e0781c09696,Omelett natur,Eier,0.0,,,api_error:HTTPError
+625dd05531c54b2b0ec13c4903fd36dbcc29,Orange,Obst,0.0,,,api_error:HTTPError
+60b076fa89da2afe0afe2f87822568dba92e,Orange (Bio),Obst,0.0,,,api_error:HTTPError
+c447e5571e261960b22d7d4a6770d29888d4,Orange (frisch),Obst,0.0,,,api_error:HTTPError
+e31b11fcd4a1fdd76b38a7ff09647c409c86,Orange (reif),Obst,0.0,,,api_error:HTTPError
+9cb6543ce5c9a25e114cf099c66f8e7360a1,Orange (TK),Obst,0.0,,,api_error:HTTPError
+5489d67f5509bbfe5941d2c127e1d4f92eac,Oregano,Gewürze,0.0,,,api_error:HTTPError
+995791de4acbc0f700836c71a19e9061593f,Papaya,Obst,0.0,,,api_error:HTTPError
+d2e138ac2632de813ebec17f572f99dc53a9,Papaya (Bio),Obst,0.0,,,api_error:HTTPError
+94174b164bec4de5c9358b92bf0aa7132b65,Papaya (frisch),Obst,0.0,,,api_error:HTTPError
+8decd3219ed29c26dd28baa1f4dcf62c2ffd,Papaya (reif),Obst,0.0,,,api_error:HTTPError
+568613e0ea73e1c442fb4f088ca52545ba2a,Papaya (TK),Obst,0.0,,,api_error:HTTPError
+4fd29ab54cdef632d2ecc68f0ba4e4f3e9d5,Paprika gelb,Gemüse,0.0,,,api_error:HTTPError
+6b2fd48ab1fbd63d1cfa0ac336ebb93a0c78,Paprika gelb (Bio),Gemüse,0.0,,,api_error:HTTPError
+ef1bc4e2c8ee84734dd5a28e37c24cd09cb5,Paprika gelb (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+8aa7537a51b927bdedb727e368f354c9bda3,Paprika gelb (gekocht),Gemüse,0.0,,,api_error:HTTPError
+ed3004f90ae06e5c3febb7e8cf6b36dbe320,Paprika gelb (roh),Gemüse,0.0,,,api_error:HTTPError
+8691ef4158736306c69905543193dab61315,Paprika gelb (TK),Gemüse,0.0,,,api_error:HTTPError
+130e92bab4e8ed9d63ff76d1e134adca287c,Paprika gruen,Gemüse,0.0,,,api_error:HTTPError
+0ba1c87e36569594b6753349c406766ff342,Paprika gruen (Bio),Gemüse,0.0,,,api_error:HTTPError
+a5a99a055b044416a70135ce4d39e06fc59c,Paprika gruen (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+2057029f6a1dc61089b17eeb8be5694b84bb,Paprika gruen (gekocht),Gemüse,0.0,,,api_error:HTTPError
+df90c4fd0bb947617d270d3cf1f987865107,Paprika gruen (roh),Gemüse,0.0,,,api_error:HTTPError
+6e3f375c5b6daf1ed44b60f6b3af0e3694f6,Paprika gruen (TK),Gemüse,0.0,,,api_error:HTTPError
+ae6141edda166966e87a93ed9b590eb5b9b5,Paprikapulver,Gewürze,0.0,,,api_error:HTTPError
+ba5d03c1c3f6ff40a9b7f35f0379c2cd222d,Paprika rot,Gemüse,0.0,,,api_error:HTTPError
+ef4a9a24a52e73a2dedf4e5a31dcac512f8b,Paprika rot (Bio),Gemüse,0.0,,,api_error:HTTPError
+82a6fc02b82fc1b1af45d967240aa93786c3,Paprika rot (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+f350563f5ab4b201da0a7e21663451515be9,Paprika rot (gekocht),Gemüse,0.0,,,api_error:HTTPError
+c9bf7a28c1daf42b41a70d70c4c250eec41a,Paprika rot (roh),Gemüse,0.0,,,api_error:HTTPError
+2581cbc168eeb47d64c74289fca1a3d9ff58,Paprika rot (TK),Gemüse,0.0,,,api_error:HTTPError
+2da2166c28e2dc25f704b580e676186f9841,Paranuss,Nüsse,0.0,,,api_error:HTTPError
+658162e9af05007769d0f540072d6f334a3f,Parmesan,Käse,0.0,,,api_error:HTTPError
+3b3f5778196304f6a5eb1167df2415b72fcf,Passionsfrucht,Obst,0.0,,,api_error:HTTPError
+61249ad7e8ebf98e4bce1d468a842549639f,Passionsfrucht (Bio),Obst,0.0,,,api_error:HTTPError
+8382f1e0308b1ac23d4189f18103a1b60c86,Passionsfrucht (frisch),Obst,0.0,,,api_error:HTTPError
+c5768448f22f2c229f3d3a7dd8d69e93dd0d,Passionsfrucht (reif),Obst,0.0,,,api_error:HTTPError
+b8ed2014ba1a3b708406ad1eabfdae4ff359,Passionsfrucht (TK),Obst,0.0,,,api_error:HTTPError
+79a217ed0bdabdedf3cbacfe801a8352a846,Pasta weiss,Getreide,0.0,,,api_error:HTTPError
+cde47d27ebde9812038a354778f9bfb546e8,Pecorino,Käse,0.0,,,api_error:HTTPError
+e84c44a8a0c9e1f1bc644760d206f1b6239d,Pekannuss,Nüsse,0.0,,,api_error:HTTPError
+8e9676e8496ffb5e9d286ff6ac79e4b435c0,Penne,Getreide,0.0,,,api_error:HTTPError
+581a954c79b099252f456a65074ab773f4c7,Pfeffer schwarz,Gewürze,0.0,,,api_error:HTTPError
+29371c30453099272e3ced9c6709f9f6c9fc,Pfifferling,Gemüse,0.0,,,api_error:HTTPError
+856fef0ee03ec42060f7c80c54bc4e9afc56,Pfifferling (Bio),Gemüse,0.0,,,api_error:HTTPError
+486307b1b49ecf4e40d29880158f61bb7fc2,Pfifferling (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+33e62d69cbef0384669751290b20c9c5018a,Pfifferling (gekocht),Gemüse,0.0,,,api_error:HTTPError
+206b55cd5e94199a25783f0790e05e4ad160,Pfifferling (roh),Gemüse,0.0,,,api_error:HTTPError
+ec3cf3073768ceb892fd108f3e4da9627feb,Pfifferling (TK),Gemüse,0.0,,,api_error:HTTPError
+51e14dffe1df9d58b045c30039901d5a8b02,Pfirsich,Obst,0.0,,,api_error:HTTPError
+7c5a5dccf562f165a4af1b25da8d539fca46,Pfirsich (Bio),Obst,0.0,,,api_error:HTTPError
+ae3eb9cda9bbac47a279f20af2acb09723c1,Pfirsich (frisch),Obst,0.0,,,api_error:HTTPError
+b07460b228d63aff3950ad548d29971da4ae,Pfirsich (reif),Obst,0.0,,,api_error:HTTPError
+6464c3dbd67b3df52d006e2adf33541f64bf,Pfirsich (TK),Obst,0.0,,,api_error:HTTPError
+34c5f363da301bfd9a88a60060b9e0da7cc4,Pflaume,Obst,0.0,,,api_error:HTTPError
+b562c1679c825f92bbf962551482e64409e2,Pflaume (Bio),Obst,0.0,,,api_error:HTTPError
+67d3a8d27add25d4091f6f6bd98f070e7e6c,Pflaume (frisch),Obst,0.0,,,api_error:HTTPError
+921f98cd9fd541f339b82ce562d065ceac47,Pflaume (reif),Obst,0.0,,,api_error:HTTPError
+f6233a62691a99638b0887963443363b3c3b,Pflaume (TK),Obst,0.0,,,api_error:HTTPError
+4bf243655dda0b58344254f9cd25ec5615c3,Pinienkern,Nüsse,0.0,,,api_error:HTTPError
+70d5c2b26bcc5f66d5b8872709cc6c19d12e,Pinto Bohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+f0dd87aa0782e4a69e3803c5e0834d1550ef,Pistazie,Nüsse,0.0,,,api_error:HTTPError
+8ab57fa2b389dfef339ac38fbac2bdc62ed6,Polenta,Getreide,0.0,,,api_error:HTTPError
+a8b5fcc5046295a3c4e42ffb9c987f2f6fd7,Proteinjoghurt,Joghurt,0.0,,,api_error:HTTPError
+80f473c80423d1e81e4b5ef2162c98afaf8c,Provolone,Käse,0.0,,,api_error:HTTPError
+80be0c2fdcaf99d32c561b8affb5b28f5cc8,Pulpo,Fisch,0.0,,,api_error:HTTPError
+253764b39e32deda6e4d355b885120d020fc,Pumpernickel,Brot,0.0,,,api_error:HTTPError
+3910a87f80ab03d987ecdc3a0fb43ee5014a,Putenbrust,Fleisch,0.0,,,api_error:HTTPError
+3f449e456e939952acd0d7ab93c609fb5c25,Putenbrust (gebraten),Fleisch,0.0,,,api_error:HTTPError
+17e11b2ce891a082c67559bfe8a961fc0da5,Putenbrust (gekocht),Fleisch,0.0,,,api_error:HTTPError
+ead404415d6e6551565b54f06346f37ff6b3,Putenbrust (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+8d5fbfe154a086e397bfae7f7b77d8131f40,Putenbrust (mager),Fleisch,0.0,,,api_error:HTTPError
+e9c751e9537565ccaf13c1397929fd8a82d1,Putenbrust (roh),Fleisch,0.0,,,api_error:HTTPError
+daf527ea441d227e8dd824d1c2fb0d8375bb,Putenoberkeule,Fleisch,0.0,,,api_error:HTTPError
+b149640a91b8df41a79a3bb93f0f6fdea180,Putenoberkeule (gebraten),Fleisch,0.0,,,api_error:HTTPError
+387572ec029dc662abcda6a7711b9278d066,Putenoberkeule (gekocht),Fleisch,0.0,,,api_error:HTTPError
+ef5529ccbb27f1b7d17980408722063cd438,Putenoberkeule (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+c87f5ed66f81d360c07ad92282d35f53627f,Putenoberkeule (mager),Fleisch,0.0,,,api_error:HTTPError
+d163f68cf5abdaf875580cbc4248ee7ec57f,Putenoberkeule (roh),Fleisch,0.0,,,api_error:HTTPError
+e682fe3c34fef6d1433ecf8dd756e4bd9a72,Quark 20%,Joghurt,0.0,,,api_error:HTTPError
+fc4ddcce8a84fc4e47b9684281173b9f449c,Quark 40%,Joghurt,0.0,,,api_error:HTTPError
+942695980f2103ff584d6453330d894d90dd,Quark mager,Joghurt,0.0,,,api_error:HTTPError
+4dfd8951effbf98428603f81a2c1ccfafbcd,Quinoa,Getreide,0.0,,,api_error:HTTPError
+0c8022cd747254de9b84e268f464582520f4,Quitte,Obst,0.0,,,api_error:HTTPError
+8f92d1e326e01a259c73ec48237f71e2228c,Quitte (Bio),Obst,0.0,,,api_error:HTTPError
+13adb5e6ebb91293fd860bf0091439f45fa9,Quitte (frisch),Obst,0.0,,,api_error:HTTPError
+513d08b761c50c3e280d5ae8fafffdbd31e6,Quitte (reif),Obst,0.0,,,api_error:HTTPError
+bee7c5bdf3714e7184e508f458acc9d819c3,Quitte (TK),Obst,0.0,,,api_error:HTTPError
+360deb2d62955887d262c37e05ab79374aa4,Radieschen,Gemüse,0.0,,,api_error:HTTPError
+2771d9fdb6a46dd7241cf83342159368d762,Radieschen (Bio),Gemüse,0.0,,,api_error:HTTPError
+e35050c0cf9c093931dd6a482b945b456b25,Radieschen (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+72e2c0edc88262becaee45e30f60a3c3d74e,Radieschen (gekocht),Gemüse,0.0,,,api_error:HTTPError
+3f8fc18e8407c81fc0c0940a2988904d4e39,Radieschen (roh),Gemüse,0.0,,,api_error:HTTPError
+64e9a723e5ce9ae1b2977a67f98e17dc8ac4,Radieschen (TK),Gemüse,0.0,,,api_error:HTTPError
+0b5aff641ca553d6bf6044b80e6aaa688c33,Rapsoel,Öle,0.0,,,api_error:HTTPError
+7708d2190d34b12b4d49a5b13b4a009d5d92,Rehfleisch,Fleisch,0.0,,,api_error:HTTPError
+e3b3ef10a3ff64f94b380ec65f3bb6679684,Reis braun,Getreide,0.0,,,api_error:HTTPError
+59d3f96dcefbddd2a9c34d19f620d1918203,Reisflocken,Getreide,0.0,,,api_error:HTTPError
+d098c8603006b53c7f36337612a3037b88c1,Reisnudeln,Getreide,0.0,,,api_error:HTTPError
+03b3f281d4add471e90bb1d948ec2bc2447e,Reis weiss,Getreide,0.0,,,api_error:HTTPError
+9816ef32469bdbd167e45d479139466618d8,Rettich,Gemüse,0.0,,,api_error:HTTPError
+abf3da788333774b20af5dbc224ea14bc948,Rettich (Bio),Gemüse,0.0,,,api_error:HTTPError
+2e512291341349837647c8397964786cd086,Rettich (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+ded4951474dbdb2d1fa5bd07b7c029bfe1b7,Rettich (gekocht),Gemüse,0.0,,,api_error:HTTPError
+62c694fc72a7cb1539adf3deb5777c672d09,Rettich (roh),Gemüse,0.0,,,api_error:HTTPError
+454e7d0d8ae0991aa29e1a56c6a11b16b366,Rettich (TK),Gemüse,0.0,,,api_error:HTTPError
+1333998fcb6f56b937d0effec9e41cbb2936,Rhabarber,Obst,0.0,,,api_error:HTTPError
+4c05ae5b1860c7e813d54fcc98a1e48abf1f,Rhabarber (Bio),Obst,0.0,,,api_error:HTTPError
+4706d9ef63c43a03b4621574a9707271c9ac,Rhabarber (frisch),Obst,0.0,,,api_error:HTTPError
+47cb7816faf8f62ce942b1134b3d78eea9e5,Rhabarber (reif),Obst,0.0,,,api_error:HTTPError
+860a2105735155e7084a778913ed612fc369,Rhabarber (TK),Obst,0.0,,,api_error:HTTPError
+068f40ccdaa21765b1c45df707c6083ce052,Ricotta,Käse,0.0,,,api_error:HTTPError
+ee2ce540c08f0f8be0c733e56c3ff0a49550,Rinderfilet,Fleisch,0.0,,,api_error:HTTPError
+21826c8fd285612dcb04b830f0924877df7d,Rinderfilet (gebraten),Fleisch,0.0,,,api_error:HTTPError
+7138cd48461c61d4647083b021b5d328d25f,Rinderfilet (gekocht),Fleisch,0.0,,,api_error:HTTPError
+808fa56fcfef9b8bc1e5571d1fe265b3ed3f,Rinderfilet (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+7a6b533522bf846d64b0a27efbe53af706e5,Rinderfilet (mager),Fleisch,0.0,,,api_error:HTTPError
+6352fa77f5e267810f009ea226a05a0b7ea6,Rinderfilet (roh),Fleisch,0.0,,,api_error:HTTPError
+6908d0c6629d248af0dd1a5653731de9b38b,Rinderhack gemischt,Fleisch,0.0,,,api_error:HTTPError
+9f36422170a1a244f1bed7b4475d2960d1d5,Rinderhack gemischt (gebraten),Fleisch,0.0,,,api_error:HTTPError
+2214bb6bab2c4e8fa560893b12d390f52455,Rinderhack gemischt (gekocht),Fleisch,0.0,,,api_error:HTTPError
+4424150a39fc6c6263828b7e789678d7cefe,Rinderhack gemischt (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+26c747e3a78dd9f757cf2652e86c717f9b24,Rinderhack gemischt (mager),Fleisch,0.0,,,api_error:HTTPError
+d04bc52f8ee2e9fb6c15823e4a717b78fd25,Rinderhack gemischt (roh),Fleisch,0.0,,,api_error:HTTPError
+a710b53a92193aa24c2da9d47e780fb1af95,Rinderhack mager,Fleisch,0.0,,,api_error:HTTPError
+245333c4427b8aa4fa1d78e7aadfbfafd7c0,Rinderhack mager (gebraten),Fleisch,0.0,,,api_error:HTTPError
+4b701c662d605e1d54813919a5caec6118f6,Rinderhack mager (gekocht),Fleisch,0.0,,,api_error:HTTPError
+e4a8f1f68b9d1e7a83bb63dadab5dfd13b46,Rinderhack mager (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+b68260e0437e364611fe0817d98fd628933a,Rinderhack mager (mager),Fleisch,0.0,,,api_error:HTTPError
+0216d1608d17d1be0d4c67bd28f69f538688,Rinderhack mager (roh),Fleisch,0.0,,,api_error:HTTPError
+0f6ab8023fa0863a170d8dfa01292b67366b,Rinderhuefte,Fleisch,0.0,,,api_error:HTTPError
+708d81e0e9bcc9b077d044181001742ee3f6,Rinderhuefte (gebraten),Fleisch,0.0,,,api_error:HTTPError
+2c47d3ddd13bca8b3cff30b9929b193702da,Rinderhuefte (gekocht),Fleisch,0.0,,,api_error:HTTPError
+83c24ebd14c55a7c159b751039d8ea4e5725,Rinderhuefte (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+43c3eb4b130a6f2b543c54214a8d0e2471c1,Rinderhuefte (mager),Fleisch,0.0,,,api_error:HTTPError
+81bd74ed17a1be41e77345dc725a7ee6bee0,Rinderhuefte (roh),Fleisch,0.0,,,api_error:HTTPError
+464bdd04bc921d5e315b711db90f89b7fbc3,Rinderleber,Fleisch,0.0,,,api_error:HTTPError
+4adb64ccea025e2533f2930943a389cd1a20,Roastbeef,Fleisch,0.0,,,api_error:HTTPError
+124b38db495345be9ca50136cefc9a6429bd,Roastbeefaufschnitt,Fleisch,0.0,,,api_error:HTTPError
+a4e8693bbda48ac742b61d9362626c445d46,Roastbeef (gebraten),Fleisch,0.0,,,api_error:HTTPError
+d6831452893ba37e145801adba0335e4a51f,Roastbeef (gekocht),Fleisch,0.0,,,api_error:HTTPError
+dcfb07fdafdf28c0d0152e31ed604a200d75,Roastbeef (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+4e78275607fb03f3f87ee1b8f83b65f30035,Roastbeef (mager),Fleisch,0.0,,,api_error:HTTPError
+314257612e7d2a8f6eac76860cc4aed4cc65,Roastbeef (roh),Fleisch,0.0,,,api_error:HTTPError
+82e5bb42ca040626be4675aa0149de3c3766,Roggenbrot,Brot,0.0,,,api_error:HTTPError
+3e78af3a2bcfcf37bb943cefdc31f8dd0df3,Rosenkohl,Gemüse,0.0,,,api_error:HTTPError
+2ee14f55b2dcd9227bb03f02f9f79ae99aea,Rosenkohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+01a365364bde46d8f650e886194d7efe0505,Rosenkohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+a67ad25050ff6d8366afc0b62c8d167f8092,Rosenkohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+d7456d42d4d3a3a7cb8fceceda38979b9d24,Rosenkohl (roh),Gemüse,0.0,,,api_error:HTTPError
+99a14d3449b5017e9dc90fabd8e81b095dc4,Rosenkohl (TK),Gemüse,0.0,,,api_error:HTTPError
+8e42aebe474781d7cb01ec68f060c74d9aae,Rosmarin,Gewürze,0.0,,,api_error:HTTPError
+1099201e1c329dcfb7f35b57b8c764252ece,Rotbarsch,Fisch,0.0,,,api_error:HTTPError
+6d976311830083bb23fd4d2decafd11ce3f5,Rote Bete,Gemüse,0.0,,,api_error:HTTPError
+a2bdbaf6ab62bb5ccb6b4c2f1f588741dc8e,Rote Bete (Bio),Gemüse,0.0,,,api_error:HTTPError
+360e88e02dea1d012a567134c1887d56e027,Rote Bete (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+ab620cd2b28f050d136513fded6671aa82f7,Rote Bete (gekocht),Gemüse,0.0,,,api_error:HTTPError
+ad451d78c08ccb6a2afaccc63270fd84aa4b,Rote Bete (roh),Gemüse,0.0,,,api_error:HTTPError
+4b4e56c85ec0e95ed548eb8aff5873282847,Rote Bete (TK),Gemüse,0.0,,,api_error:HTTPError
+da4a16c95c1c8fc1570ff301a75b473c5b98,Rotkohl,Gemüse,0.0,,,api_error:HTTPError
+2924d2ba611a25f5ca942da64ca96de307e8,Rotkohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+250c1d78e9e24871ba53a37704384e867367,Rotkohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+2273cc1cc368cbbc1620af11e654b480dd2f,Rotkohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+fb1158238c052f056571045d57e3ae157182,Rotkohl (roh),Gemüse,0.0,,,api_error:HTTPError
+9a497561799b6a984d099f023f9dc58a4409,Rotkohl (TK),Gemüse,0.0,,,api_error:HTTPError
+652d07a9df0bb160f5b9c1473cba14c2b7b7,Rucola,Gemüse,0.0,,,api_error:HTTPError
+1e4234c2f6ffbefaca8f6d70baf79a318b05,Rucola (Bio),Gemüse,0.0,,,api_error:HTTPError
+7949b27918d1531fa77b019be08fb941d3fb,Rucola (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+1c065b2283b3d8bcb7cb12e9709b13f0b663,Rucola (gekocht),Gemüse,0.0,,,api_error:HTTPError
+2713e33a72fdd59c1a5e9608d1796a85dbb0,Rucola (roh),Gemüse,0.0,,,api_error:HTTPError
+81653e29a581b0597223d6d9947b9cf787f8,Rucola (TK),Gemüse,0.0,,,api_error:HTTPError
+80e0c6dc46c4645bf54cfb1216e9a4a0797f,Ruehrei,Eier,0.0,,,api_error:HTTPError
+94daa899ad150866045115404f6c44772830,Rumpsteak,Fleisch,0.0,,,api_error:HTTPError
+48227eb6266fa8f6897d3b558901e6cd7061,Rumpsteak (gebraten),Fleisch,0.0,,,api_error:HTTPError
+2587f89f50bcca25c4922eae656d2271e531,Rumpsteak (gekocht),Fleisch,0.0,,,api_error:HTTPError
+05ba3ede3a05f5c88355b1f5279077dd5904,Rumpsteak (grillfertig),Fleisch,0.0,,,api_error:HTTPError
+13982801e243a07d38b2e655933fafd33cb8,Rumpsteak (mager),Fleisch,0.0,,,api_error:HTTPError
+123c3a591acf0c855e3b5afb39827f5a7a4d,Rumpsteak (roh),Fleisch,0.0,,,api_error:HTTPError
+e9a03fd5ae7ac8ca2c9b215886a00dd3b64c,Salz,Gewürze,0.0,,,api_error:HTTPError
+d3ad97096116bd5a3a40bce34e15597b89da,Sardine,Fisch,0.0,,,api_error:HTTPError
+f9a0025d9ea89cd7ffa76706334f01061647,Sauerteigbrot,Brot,0.0,,,api_error:HTTPError
+b0e367b80a8ab6938c5e30336f82718e9452,Schellfisch,Fisch,0.0,,,api_error:HTTPError
+3c34232e652d5b4607f157d20b148ed92ecb,Scholle,Fisch,0.0,,,api_error:HTTPError
+e7f73bfe277f7d8e34dde2821ae25927341f,Schwarze Bohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+4c15370b844cf773979b2761d766afc3aa54,Schweinebauch,Fleisch,0.0,,,api_error:HTTPError
+9ce74e720d12096b23481447e914c27f2725,Schweinefilet,Fleisch,0.0,,,api_error:HTTPError
+5f9a7fc60ac113528fdbb835b6a779db1bf7,Schweinehack,Fleisch,0.0,,,api_error:HTTPError
+0d2b05a85e0a0d9b33e9f93e72e6ccfc51e9,Schweinelachs,Fleisch,0.0,,,api_error:HTTPError
+f87fc878f45b1116bcb12c9d6b2f519f4b41,Seebarsch,Fisch,0.0,,,api_error:HTTPError
+8139f731d40a13234c3505a2ab4034b45701,Seelachs,Fisch,0.0,,,api_error:HTTPError
+654babbaa07eae58e86cf56547f866534108,Seezunge,Fisch,0.0,,,api_error:HTTPError
+5af3d79581eab533aeaa88bc8200347d0fb2,Sellerie,Gemüse,0.0,,,api_error:HTTPError
+238c1be69e33d81d766b3676ae9d8f32ee73,Sellerie (Bio),Gemüse,0.0,,,api_error:HTTPError
+ab24f9abfd7ed5db66cfeaf9c42d24ef4d7a,Sellerie (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+299f2508f149eb9fa2b8201c00a5dd0f4a57,Sellerie (gekocht),Gemüse,0.0,,,api_error:HTTPError
+1e480b983750d1f1e7bda8162c56f40ff201,Sellerie (roh),Gemüse,0.0,,,api_error:HTTPError
+4131ae81e3d10e29ab27dc2bfca50fcb5e2c,Sellerie (TK),Gemüse,0.0,,,api_error:HTTPError
+d270b13b8552e9e156d0ec87d3f36e6b84c8,Senfsaat,Samen,0.0,,,api_error:HTTPError
+542201d28648a6b1d920491d50f13e87876c,Sesam,Samen,0.0,,,api_error:HTTPError
+55fc3bee05550c12cb2de5703293cf6a1388,Sesamoel,Öle,0.0,,,api_error:HTTPError
+b9fcf68746d93a4676d7801ab506006ea165,Skyr,Joghurt,0.0,,,api_error:HTTPError
+2300c989c4b2aee2cfb83ffe792ed7521bc0,Sojabohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+84922916b35bef2d789f961412e81d8193c5,Sonnenblumenkerne,Samen,0.0,,,api_error:HTTPError
+655b26f67db6203068c28cc38a3608db16e5,Sonnenblumenoel,Öle,0.0,,,api_error:HTTPError
+aff7c11346766df40a539f9fbe8a89e0107e,Spaghetti,Getreide,0.0,,,api_error:HTTPError
+835981ac4fe2b418f3132804124e659a2fc0,Spargel,Gemüse,0.0,,,api_error:HTTPError
+a72db8513ecb1da492ded634d4296f679774,Spargel (Bio),Gemüse,0.0,,,api_error:HTTPError
+6d2ba0088661533ca46e7cf2eadf86b6812d,Spargel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+2892c5b9f0f2c6c954b78acf6c774c236ce1,Spargel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+5d92046d26bff380db880b30df0941d8a49d,Spargel (roh),Gemüse,0.0,,,api_error:HTTPError
+205b2ce8751c18b96313e1eb80387521cdc0,Spargel (TK),Gemüse,0.0,,,api_error:HTTPError
+8dbe1ac814cb96969c6382359b165100c467,Spiegelei,Eier,0.0,,,api_error:HTTPError
+e2ca89579d0d6eaebb6799db8064e61ccd38,Spinat,Gemüse,0.0,,,api_error:HTTPError
+c56109a25520e8e55c4f094928943ab3b802,Spinat (Bio),Gemüse,0.0,,,api_error:HTTPError
+b38929aae8821efa567cb336a70007397ca4,Spinat (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+e948f10ac911f09c1a049afb9e6227e51ade,Spinat (gekocht),Gemüse,0.0,,,api_error:HTTPError
+0d272130075da4c419b9ace1d7e67d08af8e,Spinat (roh),Gemüse,0.0,,,api_error:HTTPError
+4189269b6516b926e3cf779115b90eaa858c,Spinat (TK),Gemüse,0.0,,,api_error:HTTPError
+9a7500d3f5b6a3e46fca2d3ca95fad0039eb,Staudensellerie,Gemüse,0.0,,,api_error:HTTPError
+f2878bad988d4f5a429369ada437cfff1925,Staudensellerie (Bio),Gemüse,0.0,,,api_error:HTTPError
+3e783b24eee301da430d57d081f269e74eb8,Staudensellerie (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+db1c11ca911893bd62d10150580a129b667c,Staudensellerie (gekocht),Gemüse,0.0,,,api_error:HTTPError
+dccb45dbddb29f79330c3e14e4cbc932d88a,Staudensellerie (roh),Gemüse,0.0,,,api_error:HTTPError
+a34cf7f28b6515204fd113a93bafd037f950,Staudensellerie (TK),Gemüse,0.0,,,api_error:HTTPError
+9ceff7975ef4bfff703c288451a270bcf66f,Steinpilz,Gemüse,0.0,,,api_error:HTTPError
+a2a366eb966534a3e84f1f68110eff8363a0,Steinpilz (Bio),Gemüse,0.0,,,api_error:HTTPError
+80ab6aa843f021985fd670de0f007ad77ee5,Steinpilz (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+03e1ded13b8d92d3a4daaf9b3d80f3320351,Steinpilz (gekocht),Gemüse,0.0,,,api_error:HTTPError
+8f71307bb69a40c0207f96edad33ea9883fe,Steinpilz (roh),Gemüse,0.0,,,api_error:HTTPError
+a590b6eefe00757e9802cd8c3015d85c26ef,Steinpilz (TK),Gemüse,0.0,,,api_error:HTTPError
+8494ef73cc78df6f862d9f6b9deccca4df19,Suesskartoffel,Gemüse,0.0,,,api_error:HTTPError
+7326ef0ad8423052610573e4919a81d30caa,Suesskartoffel (Bio),Gemüse,0.0,,,api_error:HTTPError
+644544ae1deb9db59fd58bdc6a048d896835,Suesskartoffel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+4273364dcd512adf870fe37f053ab4df77ab,Suesskartoffel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+0f1ae90e3f16c01ed8048bb7788c4606c8f7,Suesskartoffel (roh),Gemüse,0.0,,,api_error:HTTPError
+6aad867e3d29d37109133c08b7b5bb5c0655,Suesskartoffel (TK),Gemüse,0.0,,,api_error:HTTPError
+13e0173fca013a5557028004887ccef0e63b,Tahini,Samen,0.0,,,api_error:HTTPError
+77e855b61d481f91b91363458e6c583b6e2f,Tempeh natur,Hülsenfrüchte,0.0,,,api_error:HTTPError
+b8c051f7097dd10c4850225f6ccc0f73d588,Thunfisch,Fisch,0.0,,,api_error:HTTPError
+ed714925a800fd1a81151ba179b7a561d5b8,Thymian,Gewürze,0.0,,,api_error:HTTPError
+1ccb37b77a929a87674119d271b8157ffb5a,Tilapia,Fisch,0.0,,,api_error:HTTPError
+5a90b18b56322ea7427940e781d3f4708e91,Tintenfisch,Fisch,0.0,,,api_error:HTTPError
+0ca5e0781ec2600e733e75676adbada8da6d,Toastbrot,Brot,0.0,,,api_error:HTTPError
+7a96594ba01d103dda0018c09434a3b96a33,Tofu natur,Hülsenfrüchte,0.0,,,api_error:HTTPError
+4fde0f8bae3ed20c4cfca4fd5d715ae29e2d,Tomate,Gemüse,0.0,,,api_error:HTTPError
+e3770e317b9b436636f305cffe28a3e02585,Tomate (Bio),Gemüse,0.0,,,api_error:HTTPError
+ee4b14d3faffce56510f429f621ab7ab7f7c,Tomate (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+ffa80c530a02f84115d5c80b1f1fb7dd5721,Tomate (gekocht),Gemüse,0.0,,,api_error:HTTPError
+523d5a509b2dddde88775855e1a57e02dd77,Tomate (roh),Gemüse,0.0,,,api_error:HTTPError
+2c44029431ffb068ce123f08d28777fa61c1,Tomate (TK),Gemüse,0.0,,,api_error:HTTPError
+acabcd7325b205de32b5030109601791004d,Traube dunkel,Obst,0.0,,,api_error:HTTPError
+b9f9ed815f7ac7e1cd9879848fc0b3220dfe,Traube dunkel (Bio),Obst,0.0,,,api_error:HTTPError
+baf4f9c6654cdf9a591133d1f832d22863a4,Traube dunkel (frisch),Obst,0.0,,,api_error:HTTPError
+2c1b8fdeb82c9ef5e7a8139d4dc2d23b6b28,Traube dunkel (reif),Obst,0.0,,,api_error:HTTPError
+55d710d78a1222682828f324225a4bebd171,Traube dunkel (TK),Obst,0.0,,,api_error:HTTPError
+611962adb23f485fabe9ab97adfaefafb6aa,Traube hell,Obst,0.0,,,api_error:HTTPError
+b485144ddad8bf29aef7c46d28962d0c5c06,Traube hell (Bio),Obst,0.0,,,api_error:HTTPError
+d62ca0348a221dd5b30b889f4fe283fde7dc,Traube hell (frisch),Obst,0.0,,,api_error:HTTPError
+4832a97034f5f2c6764a28d2a4ad83144103,Traube hell (reif),Obst,0.0,,,api_error:HTTPError
+28ba7279cab8b3e6e5f0ae68a300e44ecfb0,Traube hell (TK),Obst,0.0,,,api_error:HTTPError
+effb169252e2b6d905665b5a70b706d40ee1,Truthahnaufschnitt,Fleisch,0.0,,,api_error:HTTPError
+39d30b7d877a1041cb4dd3563334b5c654e8,Vanille,Gewürze,0.0,,,api_error:HTTPError
+13068d2673559b541b4e4cc2240ea74ae01e,Vollkornbrot,Brot,0.0,,,api_error:HTTPError
+40d112d265bf1180f5905644a02cd7980b28,Vollkornnudeln,Getreide,0.0,,,api_error:HTTPError
+6dea4542bed59d86e5b506e45b9e2dbe4b85,Wachtelei,Eier,0.0,,,api_error:HTTPError
+54248dc6fb1be82dd090f9ada0fb79a4b487,Walnuss,Nüsse,0.0,,,api_error:HTTPError
+d63d4ce4ffa4f1b906dbc24f3b5c07ec0e54,Walnussoel,Öle,0.0,,,api_error:HTTPError
+ad3266752bcab6f4bcc39db1e72e90a4754b,Wassermelone,Obst,0.0,,,api_error:HTTPError
+f397401f33ee71aa7f876dd14702962a109c,Wassermelone (Bio),Obst,0.0,,,api_error:HTTPError
+e89a32d83317e7673dfe815e5b7794a608c9,Wassermelone (frisch),Obst,0.0,,,api_error:HTTPError
+60497b68337bae1e28af455bb86865e7c94e,Wassermelone (reif),Obst,0.0,,,api_error:HTTPError
+8d782491189ae879801b388db4148a90f325,Wassermelone (TK),Obst,0.0,,,api_error:HTTPError
+7a1e4cc41bf21945b03d3ad61efbe7e04fb3,Weisse Bohne,Hülsenfrüchte,0.0,,,api_error:HTTPError
+41eb375f0305263ee8ad92736225e07610fe,Weisskohl,Gemüse,0.0,,,api_error:HTTPError
+98e9c77f612f5f18fbc0ff331f1e43bf6011,Weisskohl (Bio),Gemüse,0.0,,,api_error:HTTPError
+7410929e6134b43c76b192e70de94923cdeb,Weisskohl (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+c504adb2ac974fb1f5b9b54596acb2669a83,Weisskohl (gekocht),Gemüse,0.0,,,api_error:HTTPError
+c1672175acd69479640b2689cde10c5ead9a,Weisskohl (roh),Gemüse,0.0,,,api_error:HTTPError
+4750ce9ceea7bce7c54f04f08b32fd703ebc,Weisskohl (TK),Gemüse,0.0,,,api_error:HTTPError
+17a9dc28656b7610c952229762de65c582cb,Weizenkleie,Getreide,0.0,,,api_error:HTTPError
+e2d784a9ae82f1b968f5d36c706b2fdae134,Wels,Fisch,0.0,,,api_error:HTTPError
+c69a1e5b1c6053591085b886081ba99f3006,Wildreis,Getreide,0.0,,,api_error:HTTPError
+d5e7d8d23dedb0cacba23da51ed7e1ad2ac2,Wildschwein,Fleisch,0.0,,,api_error:HTTPError
+17be522e4b37c9fd7a90d839946f446c6222,Zander,Fisch,0.0,,,api_error:HTTPError
+cf2a693957b98d6bd951b8ffe1bf7f1410ad,Zarte Haferflocken,Getreide,0.0,,,api_error:HTTPError
+8c8d7edc3dbedeec6b71f4c45959c7ae2298,Zimt,Gewürze,0.0,,,api_error:HTTPError
+29fb191d45142872192388d672008de24fed,Zitrone,Obst,0.0,,,api_error:HTTPError
+c23cb5cf30f8ec491fed7e14c7b494055041,Zitrone (Bio),Obst,0.0,,,api_error:HTTPError
+1cde80d28865154cf604318b8d05488082f2,Zitrone (frisch),Obst,0.0,,,api_error:HTTPError
+d9bd8a9e83ec9c44750c30f347b1ccd6a5ef,Zitrone (reif),Obst,0.0,,,api_error:HTTPError
+b31b283a5128a4993036ebe2e30f648220bc,Zitrone (TK),Obst,0.0,,,api_error:HTTPError
+1a56a4f62b0587534107032ab1401c48781c,Zucchini,Gemüse,0.0,,,api_error:HTTPError
+b81c1a18a22e33d140796414a9e3d33cdaa2,Zucchini (Bio),Gemüse,0.0,,,api_error:HTTPError
+f05356b2f2e7c6ffddcb9e122a6cf55a3dab,Zucchini (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+3700578735bf7a138a32119df7a38813d455,Zucchini (gekocht),Gemüse,0.0,,,api_error:HTTPError
+5e320b10fc455f50175275c505cf326386fd,Zucchini (roh),Gemüse,0.0,,,api_error:HTTPError
+5df476f7abde459c225c08eae4f7b60a4562,Zucchini (TK),Gemüse,0.0,,,api_error:HTTPError
+a94b5305e76cc9e13139192b608efb24dbf0,Zwiebel,Gemüse,0.0,,,api_error:HTTPError
+1b8746f7eaa0974e0a4d7cd68189bda7f614,Zwiebel (Bio),Gemüse,0.0,,,api_error:HTTPError
+c7f5b163b60d8cc7b83c4bfac787265276a1,Zwiebel (gedaempft),Gemüse,0.0,,,api_error:HTTPError
+dbcd19f318d92e9f3b777cf8dba485adf310,Zwiebel (gekocht),Gemüse,0.0,,,api_error:HTTPError
+1eb957c88140fc62f144a372cf5b964a19ea,Zwiebelpulver,Gewürze,0.0,,,api_error:HTTPError
+6f18ea797010744c7512ba14dec05d1d1a1f,Zwiebel (roh),Gemüse,0.0,,,api_error:HTTPError
+bef4e5e028dca195c0abe67fce0ea5d89763,Zwiebel (TK),Gemüse,0.0,,,api_error:HTTPError
