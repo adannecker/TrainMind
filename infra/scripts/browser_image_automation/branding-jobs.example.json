@@ -1,0 +1,22 @@
+[
+  {
+    "output": "assets/branding/icon/app-icon-1024.png",
+    "prompt": "Create a 1024x1024 app icon for \"TrainMind\". Meaning note: \"Train\" means fitness training, not railway train. Style: flat, modern, high contrast, no text. Motif: stylized \"T\" fused with route/graph signal. Palette: #1F8B6F base, #173F37 dark accent. Background: solid. Keep edges crisp and shape simple for small-size readability. No railway imagery."
+  },
+  {
+    "output": "assets/branding/icon/app-icon-1024-transparent.png",
+    "prompt": "Create the same TrainMind app icon design as the reference variant. Meaning note: fitness training app, not railway. Output size: 1024x1024. Background: fully transparent. No text, no tiny details. No railway imagery."
+  },
+  {
+    "output": "assets/branding/icon/app-icon-mono-dark-1024.png",
+    "prompt": "Create a monochrome dark variant of the TrainMind app icon. Output size: 1024x1024. Single-color dark icon on transparent background. No text. No railway imagery."
+  },
+  {
+    "output": "assets/branding/icon/app-icon-mono-light-1024.png",
+    "prompt": "Create a monochrome light variant of the TrainMind app icon. Output size: 1024x1024. Single-color light icon on transparent background. No text. No railway imagery."
+  },
+  {
+    "output": "assets/branding/social/og-trainmind-1200x630.png",
+    "prompt": "Create a social preview image for TrainMind in 1200x630. Meaning note: sports training platform, not railway. Layout: logo/icon on left, title and short tagline on right. Tagline: \"Dein Hub fuer Training, Ernaehrung und Fortschritt.\" Style: minimal SaaS, trustworthy, clean. Palette: #173F37 background, #EEF6F2 text, #6FC7AE accents. No railway visuals."
+  }
+]

@@ -1,0 +1,25 @@
+<svg width="256" height="256" viewBox="0 0 256 256" xmlns="http://www.w3.org/2000/svg">
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    
+    <!-- abstract brain outline -->
+    <path d="M88 40C62 40 44 60 44 84C30 90 20 106 20 122C20 146 36 162 58 168C68 192 92 208 120 208H154C188 208 214 182 214 150C228 142 236 126 236 110C236 84 218 64 192 58C182 42 164 32 144 32C122 32 104 36 88 40Z" stroke="#173F37" stroke-width="6"></path>
+
+    <!-- route / pulse line -->
+    <path d="M36 128H78L102 96L118 150L140 78L164 128H208" stroke="#1F8B6F" stroke-width="8"></path>
+
+    <!-- brain node network -->
+    <path d="M102 72L140 72L172 104L200 104" stroke="#173F37" stroke-width="5"></path>
+    <path d="M140 72L118 96" stroke="#173F37" stroke-width="5"></path>
+    <path d="M172 104L164 128" stroke="#173F37" stroke-width="5"></path>
+    <path d="M164 128L196 152" stroke="#173F37" stroke-width="5"></path>
+
+    <!-- nodes -->
+    <circle cx="36" cy="128" r="7" fill="#1F8B6F"></circle>
+    <circle cx="208" cy="128" r="7" fill="#1F8B6F"></circle>
+    <circle cx="102" cy="72" r="5" fill="#173F37"></circle>
+    <circle cx="140" cy="72" r="5" fill="#173F37"></circle>
+    <circle cx="172" cy="104" r="5" fill="#173F37"></circle>
+    <circle cx="196" cy="152" r="5" fill="#173F37"></circle>
+
+  </g>
+</svg>

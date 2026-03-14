@@ -1,0 +1,49 @@
+<svg width="1400" height="420" viewBox="0 0 1400 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">TrainMind logo</title>
+  <desc id="desc">Minimal logo for TrainMind with an abstract icon combining a fitness route line, pulse metrics, and a simple brain node pattern, followed by the TrainMind wordmark.</desc>
+
+  <g transform="translate(70 58)">
+    <!-- Icon -->
+    <g transform="translate(0 0)">
+      <!-- outer calm container / brain silhouette -->
+      <path d="M88 18C57 18 34 40 34 69C16 76 4 94 4 116C4 141 19 160 43 167C52 190 73 206 99 206H144C180 206 209 177 209 141C227 132 239 114 239 92C239 64 219 40 192 33C182 14 162 2 139 2C119 2 102 8 88 18Z"
+            fill="#EEF6F2"/>
+
+      <!-- route / pulse line -->
+      <path d="M24 110H66L88 82L104 137L126 65L145 110H182"
+            stroke="#1F8B6F" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- route continuation into node pattern -->
+      <path d="M145 110L184 110L160 146"
+            stroke="#173F37" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- brain node pattern -->
+      <path d="M88 54L124 54L154 84L184 84"
+            stroke="#173F37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M124 54L104 82"
+            stroke="#173F37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M154 84L126 110"
+            stroke="#173F37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M126 110L160 146"
+            stroke="#173F37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M154 84L160 146"
+            stroke="#173F37" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- nodes -->
+      <circle cx="24" cy="110" r="11" fill="#EEF6F2" stroke="#1F8B6F" stroke-width="8"/>
+      <circle cx="88" cy="54" r="9" fill="#EEF6F2" stroke="#173F37" stroke-width="6"/>
+      <circle cx="184" cy="84" r="9" fill="#EEF6F2" stroke="#173F37" stroke-width="6"/>
+      <circle cx="160" cy="146" r="9" fill="#EEF6F2" stroke="#173F37" stroke-width="6"/>
+      <circle cx="182" cy="110" r="11" fill="#EEF6F2" stroke="#1F8B6F" stroke-width="8"/>
+    </g>
+
+    <!-- Wordmark -->
+    <g transform="translate(300 118)">
+      <text x="0" y="0"
+            font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif"
+            font-size="112" font-weight="700" letter-spacing="-3">
+        <tspan fill="#173F37">Train</tspan><tspan fill="#1F8B6F">Mind</tspan>
+      </text>
+    </g>
+  </g>
+</svg>

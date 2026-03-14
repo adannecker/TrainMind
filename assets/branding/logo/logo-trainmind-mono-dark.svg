@@ -1,0 +1,29 @@
+<svg width="1400" height="420" viewBox="0 0 1400 420" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">TrainMind monochrome dark full logo</title>
+  <desc id="desc">Monochrome dark TrainMind full logo with abstract icon and wordmark on a transparent background.</desc>
+
+  <g transform="translate(70 58)" fill="none" stroke="#173F37" stroke-linecap="round" stroke-linejoin="round">
+    <g transform="translate(0 0)">
+      <path d="M24 110H66L88 82L104 137L126 65L145 110H182" stroke-width="12"></path>
+      <path d="M145 110L184 110L160 146" stroke-width="10"></path>
+
+      <path d="M88 54L124 54L154 84L184 84" stroke-width="8"></path>
+      <path d="M124 54L104 82" stroke-width="8"></path>
+      <path d="M154 84L126 110" stroke-width="8"></path>
+      <path d="M126 110L160 146" stroke-width="8"></path>
+      <path d="M154 84L160 146" stroke-width="8"></path>
+
+      <path d="M88 18C57 18 34 40 34 69C16 76 4 94 4 116C4 141 19 160 43 167C52 190 73 206 99 206H144C180 206 209 177 209 141C227 132 239 114 239 92C239 64 219 40 192 33C182 14 162 2 139 2C119 2 102 8 88 18Z" stroke-width="8"></path>
+
+      <circle cx="24" cy="110" r="11" fill="#173F37" stroke-width="0"></circle>
+      <circle cx="88" cy="54" r="9" fill="#173F37" stroke-width="0"></circle>
+      <circle cx="184" cy="84" r="9" fill="#173F37" stroke-width="0"></circle>
+      <circle cx="160" cy="146" r="9" fill="#173F37" stroke-width="0"></circle>
+      <circle cx="182" cy="110" r="11" fill="#173F37" stroke-width="0"></circle>
+    </g>
+
+    <g transform="translate(300 118)">
+      <text x="0" y="0" fill="#173F37" stroke="none" font-family="Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif" font-size="112" font-weight="700" letter-spacing="-3">TrainMind</text>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+{
+  "name": "trainmind-browser-image-automation",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Semi-automatic OpenAI browser image generation and local save",
+  "scripts": {
+    "run": "node generate_images_via_browser.js"
+  },
+  "dependencies": {
+    "playwright": "^1.54.2"
+  }
+}

@@ -32,3 +32,6 @@ dist/
 # Expo / React Native local artifacts
 apps/mobile/.expo/
 apps/mobile/expo-dev.log
+
+# Local browser profile data for automation
+infra/scripts/browser_image_automation/data/
