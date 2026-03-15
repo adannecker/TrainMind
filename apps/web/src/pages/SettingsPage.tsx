@@ -9,12 +9,40 @@ type CredentialStatus = {
   active_source: "db" | "env" | "none";
 };
 
+type UserProfile = {
+  current_weight_kg: number | null;
+  target_weight_kg: number | null;
+  start_weight_kg: number | null;
+  goal_start_date: string | null;
+  goal_end_date: string | null;
+  goal_period_days: number | null;
+  updated_at: string | null;
+};
+
+type WeightLog = {
+  id: number;
+  recorded_at: string;
+  weight_kg: number;
+  source_type: string;
+  source_label: string | null;
+  notes: string | null;
+  created_at: string;
+};
+
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) {
     return null;
   }
   return JSON.parse(text) as T;
+}
+
+function toLocalInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function SettingsPage() {
@@ -25,6 +53,21 @@ export function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [currentWeight, setCurrentWeight] = useState("");
+  const [targetWeight, setTargetWeight] = useState("");
+  const [startWeight, setStartWeight] = useState("");
+  const [goalStartDate, setGoalStartDate] = useState("");
+  const [goalEndDate, setGoalEndDate] = useState("");
+  const [logWeight, setLogWeight] = useState("");
+  const [logDate, setLogDate] = useState("");
+  const [logNotes, setLogNotes] = useState("");
 
   async function loadStatus() {
     setLoading(true);
@@ -47,6 +90,45 @@ export function SettingsPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadProfile() {
+    setProfileLoading(true);
+    setProfileError(null);
+    try {
+      const [profileRes, logsRes] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/profile`),
+        apiFetch(`${API_BASE_URL}/profile/weight-logs?limit=30`),
+      ]);
+      const profileBody = await parseJsonSafely<UserProfile | { detail?: string }>(profileRes);
+      const logsBody = await parseJsonSafely<{ weight_logs: WeightLog[] } | { detail?: string }>(logsRes);
+      if (!profileRes.ok) {
+        throw new Error(
+          typeof profileBody === "object" && profileBody && "detail" in profileBody && profileBody.detail
+            ? profileBody.detail
+            : "Profil konnte nicht geladen werden."
+        );
+      }
+      if (!logsRes.ok) {
+        throw new Error(
+          typeof logsBody === "object" && logsBody && "detail" in logsBody && logsBody.detail
+            ? logsBody.detail
+            : "Gewichtsverlauf konnte nicht geladen werden."
+        );
+      }
+      const p = profileBody as UserProfile;
+      setProfile(p);
+      setCurrentWeight(p.current_weight_kg == null ? "" : String(p.current_weight_kg));
+      setTargetWeight(p.target_weight_kg == null ? "" : String(p.target_weight_kg));
+      setStartWeight(p.start_weight_kg == null ? "" : String(p.start_weight_kg));
+      setGoalStartDate(toLocalInputValue(p.goal_start_date));
+      setGoalEndDate(toLocalInputValue(p.goal_end_date));
+      setWeightLogs(((logsBody as { weight_logs: WeightLog[] }).weight_logs ?? []).slice());
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setProfileLoading(false);
     }
   }
 
@@ -82,8 +164,88 @@ export function SettingsPage() {
     }
   }
 
+  async function saveProfile(e: FormEvent) {
+    e.preventDefault();
+    if (profileSaving) return;
+    setProfileSaving(true);
+    setProfileError(null);
+    setProfileMessage(null);
+    try {
+      const toNumberOrNull = (v: string) => {
+        const t = v.trim();
+        if (!t) return null;
+        const n = Number(t);
+        return Number.isFinite(n) ? n : null;
+      };
+      const response = await apiFetch(`${API_BASE_URL}/profile`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          current_weight_kg: toNumberOrNull(currentWeight),
+          target_weight_kg: toNumberOrNull(targetWeight),
+          start_weight_kg: toNumberOrNull(startWeight),
+          goal_start_date: goalStartDate || null,
+          goal_end_date: goalEndDate || null,
+        }),
+      });
+      const payload = await parseJsonSafely<UserProfile | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(
+          typeof payload === "object" && payload && "detail" in payload && payload.detail
+            ? payload.detail
+            : "Profil konnte nicht gespeichert werden."
+        );
+      }
+      setProfile(payload as UserProfile);
+      setProfileMessage("Profil gespeichert.");
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setProfileSaving(false);
+    }
+  }
+
+  async function addLog(e: FormEvent) {
+    e.preventDefault();
+    const w = Number(logWeight);
+    if (!Number.isFinite(w) || w <= 0) {
+      setProfileError("Bitte ein gültiges Gewicht eingeben.");
+      return;
+    }
+    setProfileError(null);
+    setProfileMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/profile/weight-logs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          recorded_at: logDate || null,
+          weight_kg: w,
+          notes: logNotes.trim() || null,
+          source_type: "manual",
+        }),
+      });
+      const payload = await parseJsonSafely<WeightLog | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(
+          typeof payload === "object" && payload && "detail" in payload && payload.detail
+            ? payload.detail
+            : "Gewichtseintrag konnte nicht gespeichert werden."
+        );
+      }
+      setLogWeight("");
+      setLogDate("");
+      setLogNotes("");
+      setProfileMessage("Gewichtseintrag gespeichert.");
+      await loadProfile();
+    } catch (err) {
+      setProfileError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }
+
   useEffect(() => {
     void loadStatus();
+    void loadProfile();
   }, []);
 
   return (
@@ -91,7 +253,7 @@ export function SettingsPage() {
       <div className="hero">
         <p className="eyebrow">Setup</p>
         <h1>Einstellungen</h1>
-        <p className="lead">Provider-Zugänge einmalig hinterlegen. Speicherung erfolgt verschlüsselt in der DB.</p>
+        <p className="lead">Provider-Zugänge und persönliche Ziele zentral verwalten.</p>
       </div>
 
       <div className="card">
@@ -138,6 +300,84 @@ export function SettingsPage() {
             </button>
           </div>
         </form>
+      </div>
+
+      <div className="card nutrition-form-card">
+        <h2>Profil und Zielgewicht</h2>
+        {profileLoading ? <p>Profil wird geladen...</p> : null}
+        {profileError ? <p className="error-text">{profileError}</p> : null}
+        {profileMessage ? <p className="info-text">{profileMessage}</p> : null}
+
+        <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
+          <label className="settings-label">
+            Aktuelles Gewicht (kg)
+            <input className="settings-input" type="number" step="0.1" value={currentWeight} onChange={(e) => setCurrentWeight(e.target.value)} />
+          </label>
+          <label className="settings-label">
+            Zielgewicht (kg)
+            <input className="settings-input" type="number" step="0.1" value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)} />
+          </label>
+          <label className="settings-label">
+            Startgewicht (kg)
+            <input className="settings-input" type="number" step="0.1" value={startWeight} onChange={(e) => setStartWeight(e.target.value)} />
+          </label>
+          <label className="settings-label">
+            Ziel-Start
+            <input className="settings-input" type="datetime-local" value={goalStartDate} onChange={(e) => setGoalStartDate(e.target.value)} />
+          </label>
+          <label className="settings-label">
+            Ziel-Ende
+            <input className="settings-input" type="datetime-local" value={goalEndDate} onChange={(e) => setGoalEndDate(e.target.value)} />
+          </label>
+          <div className="settings-label">
+            Zeitraum
+            <div className="settings-input" style={{ display: "flex", alignItems: "center" }}>
+              {profile?.goal_period_days != null ? `${profile.goal_period_days} Tage` : "-"}
+            </div>
+          </div>
+          <div className="settings-actions nutrition-span-2">
+            <button className="primary-button" type="submit" disabled={profileSaving}>
+              {profileSaving ? "Speichere..." : "Profil speichern"}
+            </button>
+            <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
+              Aktualisieren
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div className="card nutrition-list-card">
+        <h2>Gewichtsverlauf</h2>
+        <form className="nutrition-form" onSubmit={(e) => void addLog(e)}>
+          <label className="settings-label">
+            Gewicht (kg)
+            <input className="settings-input" type="number" step="0.1" value={logWeight} onChange={(e) => setLogWeight(e.target.value)} required />
+          </label>
+          <label className="settings-label">
+            Zeitpunkt
+            <input className="settings-input" type="datetime-local" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
+          </label>
+          <label className="settings-label nutrition-span-2">
+            Notiz
+            <input className="settings-input" value={logNotes} onChange={(e) => setLogNotes(e.target.value)} placeholder="optional" />
+          </label>
+          <div className="settings-actions nutrition-span-2">
+            <button className="primary-button" type="submit">Gewicht eintragen</button>
+          </div>
+        </form>
+
+        <div className="nutrition-list" style={{ marginTop: "0.8rem" }}>
+          {weightLogs.length === 0 ? <p>Noch keine Einträge.</p> : null}
+          {weightLogs.map((row) => (
+            <article className="nutrition-entry" key={row.id}>
+              <div className="nutrition-entry-head">
+                <strong>{row.weight_kg.toFixed(1)} kg</strong>
+                <span>{new Date(row.recorded_at).toLocaleString()}</span>
+              </div>
+              {row.notes ? <p className="nutrition-notes">{row.notes}</p> : null}
+            </article>
+          ))}
+        </div>
       </div>
     </section>
   );

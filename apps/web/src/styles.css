@@ -493,6 +493,35 @@ h1 {
   gap: 0.6rem;
 }
 
+.health-indicator-badge {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.18rem 0.52rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  border: 1px solid transparent;
+}
+
+.health-very_positive {
+  color: #0f5a40;
+  background: #dbf3e8;
+  border-color: #9cd7bb;
+}
+
+.health-neutral {
+  color: #6a5a20;
+  background: #fff7d9;
+  border-color: #ebd99a;
+}
+
+.health-counterproductive {
+  color: #7c2c2c;
+  background: #ffe4e4;
+  border-color: #edb8b8;
+}
+
 .nutrition-entry-head .secondary-button {
   margin-left: auto;
 }

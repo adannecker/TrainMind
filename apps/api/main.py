@@ -26,6 +26,7 @@ from apps.api.nutrition_service import (
     update_food_item,
     update_recipe,
 )
+from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
 
 app = FastAPI(title="TrainMind API", version="0.1.0")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -92,6 +93,51 @@ def auth_logout(credentials: HTTPAuthorizationCredentials | None = Depends(beare
 @app.get("/auth/me")
 def auth_me(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
+
+
+@app.get("/profile")
+def profile_get(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_user_profile(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
+
+
+@app.patch("/profile")
+def profile_update(payload: UserProfileUpdateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return upsert_user_profile(user_id=int(current_user["id"]), payload=payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
+
+
+@app.get("/profile/weight-logs")
+def profile_weight_logs(
+    limit: int = Query(default=100, ge=1, le=500),
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return list_weight_logs(user_id=int(current_user["id"]), limit=limit, from_iso=from_, to_iso=to)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
+
+
+@app.post("/profile/weight-logs")
+def profile_add_weight_log(payload: WeightLogCreateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return add_weight_log(user_id=int(current_user["id"]), payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
 
 
 @app.get("/garmin/new-rides")
@@ -169,6 +215,8 @@ class NutritionFoodItemCreateRequest(BaseModel):
     origin_type: str | None = None
     trust_level: str | None = None
     verification_status: str | None = None
+    usda_status: str | None = None
+    health_indicator: str | None = None
     source_type: str | None = None
     source_label: str | None = None
     source_url: str | None = None
@@ -199,6 +247,8 @@ class NutritionFoodItemUpdateRequest(BaseModel):
     origin_type: str | None = None
     trust_level: str | None = None
     verification_status: str | None = None
+    usda_status: str | None = None
+    health_indicator: str | None = None
     source_label: str | None = None
     source_url: str | None = None
     kcal_per_100g: float | None = None
@@ -253,6 +303,22 @@ class NutritionEntryFromRecipeRequest(BaseModel):
     amount_g: float
     consumed_at: str
     meal_type: str | None = None
+    notes: str | None = None
+
+
+class UserProfileUpdateRequest(BaseModel):
+    current_weight_kg: float | None = None
+    target_weight_kg: float | None = None
+    start_weight_kg: float | None = None
+    goal_start_date: str | None = None
+    goal_end_date: str | None = None
+
+
+class WeightLogCreateRequest(BaseModel):
+    recorded_at: str | None = None
+    weight_kg: float
+    source_type: str | None = "manual"
+    source_label: str | None = None
     notes: str | None = None
 
 

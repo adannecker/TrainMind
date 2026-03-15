@@ -40,7 +40,10 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] Haeufig genutzte Eintraege/Favoriten speichern und mit zuletzt genutzter Menge direkt auswaehlbar machen.
 - [ ] In Zutaten/Produkten den Bereich `Herkunft`, `Verifizierung`, `Trust Level` visuell deutlich abheben (eigener Info-Block/Badge-Bereich).
 - [ ] `Trust Level` farblich kennzeichnen (z. B. `high=gruen`, `medium=gelb`, `low=rot`) in Formular und Listenansicht.
-- [ ] Gesundheitsindikator fuer Zutaten und Produkte einfuehren (z. B. `gesund`, `neutral`, `eher ungesund`) als gut sichtbarer Marker.
+- [ ] Gesundheitsindikator fuer Zutaten und Produkte einfuehren als gut sichtbarer Marker mit Stufen:
+  `sehr positiv`, `neutral`, `eher kontraproduktiv`.
+- [ ] Health-Score-Regeln definieren (z. B. Zucker, Salz, Ballaststoffe, Protein, Verarbeitungsgrad) und transparent im UI erklaeren.
+- [ ] Indikator auf Produkt- und Rezept-Ebene anzeigen (inkl. kurzer Begruendung in einer Zeile).
 
 ## Phase 2: Datenqualitaet und Quellen
 
@@ -51,10 +54,16 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] Matching fuer nicht exakte Namen verbessern (Synonyme/Normalisierung).
 - [ ] Trust-/Verifizierungsstatus regelbasiert final setzen.
 - [ ] Produkte mit echten Marken/Barcode-Datensaetzen ausbauen.
+- [ ] Datenmodell fuer Mikronaehrstoffe erweitern (Vitamine/Mineralstoffe) inkl. `data_available`/`source` pro Naehrwert.
+- [ ] Barcode-Flow technisch aufteilen: `barcode_lookup` (Produktdatenbank) + `usda_fallback` (Zutaten/fehlende Felder).
+- [ ] Quellenprioritaet im Modell hinterlegen (z. B. `manufacturer` > `barcode_db` > `usda_fallback` > `manual`) und pro Feld versionieren.
 
 ## Phase 3: User Profil + Energiebilanz
 
 - [ ] Nutzerprofil erweitern: Gewicht, Zielgewicht, Zieldatum, Alter.
+- [ ] Persoenliche Einstellungen ergaenzen: `aktuelles Gewicht`, `Zielgewicht`, optional `Startgewicht`.
+- [ ] Zeitraum fuer Zielsetzung erfassen (z. B. 4/8/12 Wochen oder freies Zieldatum) und in allen Auswertungen beruecksichtigen.
+- [ ] Historie vorbereiten, damit Gewicht spaeter automatisch ueber externe Services synchronisiert werden kann.
 - [ ] Grundumsatz/Tagesverbrauch berechnen (konfigurierbare Formel).
 - [ ] Verbrauch durch Sport integrieren (Garmin + spaeter weitere Quellen).
 - [ ] Manuelle Sport-Kalorien als Fallback erlauben.
@@ -63,6 +72,7 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] Zielbalken fuer essentielle Kennzahlen (z. B. Eiweiss, Ballaststoffe).
 - [ ] Wochenansicht (kompakt).
 - [ ] Monatsansicht (kompakt, trendfaehig).
+- [ ] Trend-Indikator nach Zeitraum einbauen (Richtung, Tempo, Zielerreichung).
 
 ## Phase 4: Mobile Synchronisierung
 

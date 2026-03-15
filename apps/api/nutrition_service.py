@@ -72,6 +72,7 @@ FOOD_SCALAR_FIELDS = [
     "category",
     "brand",
     "barcode",
+    "health_indicator",
     "kcal_per_100g",
     "protein_per_100g",
     "carbs_per_100g",
@@ -126,6 +127,18 @@ def _normalize_trust_level(value: str | None, origin_type: str) -> str:
     if raw in allowed:
         return raw
     return _default_trust_level(origin_type)
+
+
+def _normalize_usda_status(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    allowed = {"unknown", "valid", "valid_unknown"}
+    return raw if raw in allowed else "unknown"
+
+
+def _normalize_health_indicator(value: str | None) -> str:
+    raw = (value or "").strip().lower()
+    allowed = {"very_positive", "neutral", "counterproductive"}
+    return raw if raw in allowed else "neutral"
 
 
 def _record_sync_event(session, user_id: int, entity_type: str, entity_id: str, op: str, payload: dict[str, Any]) -> None:
@@ -454,6 +467,8 @@ def _food_item_payload(
         "origin_type": item.origin_type,
         "trust_level": item.trust_level,
         "verification_status": item.verification_status,
+        "usda_status": item.usda_status,
+        "health_indicator": item.health_indicator,
         "source_type": source_type,
         "source_label": source_name,
         "source_url": source_url,
@@ -636,6 +651,8 @@ def create_food_item(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     origin_type = _normalize_origin_type(str(payload.get("origin_type") or ""), default_scope=scope)
     verification_status = _normalize_verification_status(str(payload.get("verification_status") or ""))
     trust_level = _normalize_trust_level(str(payload.get("trust_level") or ""), origin_type=origin_type)
+    usda_status = _normalize_usda_status(str(payload.get("usda_status") or ""))
+    health_indicator = _normalize_health_indicator(str(payload.get("health_indicator") or ""))
 
     source_label = str(payload.get("source_label")).strip() if payload.get("source_label") else None
     source_url = str(payload.get("source_url")).strip() if payload.get("source_url") else None
@@ -661,6 +678,8 @@ def create_food_item(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             origin_type=origin_type,
             trust_level=trust_level,
             verification_status=verification_status,
+            usda_status=usda_status,
+            health_indicator=health_indicator,
             source_label=source_label,
             source_url=source_url,
             kcal_per_100g=float(payload["kcal_per_100g"]) if payload.get("kcal_per_100g") is not None else None,
@@ -862,6 +881,10 @@ def update_food_item(user_id: int, item_id: str, payload: dict[str, Any]) -> dic
             item.origin_type = _normalize_origin_type(str(payload.get("origin_type") or ""), default_scope="user")
         if "verification_status" in payload:
             item.verification_status = _normalize_verification_status(str(payload.get("verification_status") or ""))
+        if "usda_status" in payload:
+            item.usda_status = _normalize_usda_status(str(payload.get("usda_status") or ""))
+        if "health_indicator" in payload:
+            item.health_indicator = _normalize_health_indicator(str(payload.get("health_indicator") or ""))
         if "trust_level" in payload:
             item.trust_level = _normalize_trust_level(
                 str(payload.get("trust_level") or ""),
@@ -1182,6 +1205,8 @@ def build_food_item_llm_prompt(name: str, brand: str | None = None, category: st
         '  "potassium_mg_per_100g": <number|null>,\n'
         '  "origin_type": "llm",\n'
         '  "verification_status": "unverified",\n'
+        '  "usda_status": "unknown",\n'
+        '  "health_indicator": "neutral",\n'
         '  "trust_level": "low",\n'
         '  "source_type": "trusted_source",\n'
         '  "source_label": "USDA FoodData Central",\n'
@@ -1225,6 +1250,8 @@ def import_food_item_from_llm(user_id: int, raw_text: str) -> dict[str, Any]:
         "scope": data.get("scope") or "user",
         "origin_type": data.get("origin_type") or "llm",
         "verification_status": data.get("verification_status") or "unverified",
+        "usda_status": data.get("usda_status") or "unknown",
+        "health_indicator": data.get("health_indicator") or "neutral",
         "trust_level": data.get("trust_level") or "low",
         "source_label": data.get("source_label"),
         "source_url": data.get("source_url"),

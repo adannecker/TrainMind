@@ -47,6 +47,12 @@ class User(Base):
     food_entries: Mapped[list["FoodEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     activities: Mapped[list["Activity"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     fit_files: Mapped[list["FitFile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped["UserProfile | None"] = relationship(
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    weight_logs: Mapped[list["UserWeightLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class ServiceCredential(Base):
@@ -81,6 +87,41 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class UserProfile(Base):
+    __tablename__ = "user_profiles"
+    __table_args__ = {"schema": CORE_SCHEMA}
+
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), primary_key=True)
+    current_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    target_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    start_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    goal_start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    goal_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="profile")
+
+
+class UserWeightLog(Base):
+    __tablename__ = "user_weight_logs"
+    __table_args__ = (
+        Index("ix_user_weight_logs_user_recorded", "user_id", "recorded_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    source_type: Mapped[str] = mapped_column(String(40), default="manual", nullable=False)
+    source_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="weight_logs")
 
 
 class FitFile(Base):
@@ -297,6 +338,8 @@ class NutritionFoodItem(Base):
     origin_type: Mapped[str] = mapped_column(String(32), default="user_self", nullable=False)
     trust_level: Mapped[str] = mapped_column(String(20), default="medium", nullable=False)
     verification_status: Mapped[str] = mapped_column(String(24), default="unverified", nullable=False)
+    usda_status: Mapped[str] = mapped_column(String(20), default="unknown", nullable=False)
+    health_indicator: Mapped[str] = mapped_column(String(24), default="neutral", nullable=False)
     source_label: Mapped[str | None] = mapped_column(String(180), nullable=True)
     source_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     kcal_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)

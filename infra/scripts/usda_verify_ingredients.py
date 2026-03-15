@@ -22,6 +22,9 @@ USDA_BASE_URL = "https://api.nal.usda.gov/fdc/v1"
 USDA_SOURCE_LABEL = "USDA FoodData Central"
 USDA_SOURCE_URL = "https://fdc.nal.usda.gov/"
 DEFAULT_TRACKER_FILE = os.path.join("docs", "usda-rate-tracker.json")
+USDA_STATUS_UNKNOWN = "unknown"
+USDA_STATUS_VALID = "valid"
+USDA_STATUS_VALID_UNKNOWN = "valid_unknown"
 
 # Keep these in sync with product view categories.
 PRODUCT_CATEGORIES = {
@@ -173,6 +176,42 @@ def choose_best(local_name: str, foods: list[dict[str, Any]]) -> tuple[dict[str,
     return best, best_score
 
 
+def is_uncertain_entry(row: NutritionFoodItem) -> bool:
+    usda_status = (getattr(row, "usda_status", "") or USDA_STATUS_UNKNOWN).strip().lower()
+    return usda_status != USDA_STATUS_VALID
+
+
+def log(msg: str) -> None:
+    print(msg, flush=True)
+
+
+def parse_error_code(exc: requests.RequestException) -> tuple[str, str]:
+    status_code: int | None = None
+    response = getattr(exc, "response", None)
+    if response is not None:
+        status_code = getattr(response, "status_code", None)
+    if status_code is not None:
+        code = f"HTTP_{status_code}"
+    else:
+        code = exc.__class__.__name__.upper()
+
+    explain = {
+        "HTTP_400": "Ungültige Anfrage an USDA.",
+        "HTTP_401": "API-Key fehlt oder ist ungültig.",
+        "HTTP_403": "USDA lehnt den Zugriff mit diesem Key ab.",
+        "HTTP_404": "USDA-Endpunkt nicht gefunden.",
+        "HTTP_408": "USDA Anfrage-Timeout.",
+        "HTTP_429": "USDA Rate-Limit erreicht.",
+        "HTTP_500": "USDA interner Serverfehler.",
+        "HTTP_502": "USDA Gateway-Fehler.",
+        "HTTP_503": "USDA Service vorübergehend nicht verfügbar.",
+        "HTTP_504": "USDA Gateway-Timeout.",
+        "CONNECTIONERROR": "Verbindungsproblem zur USDA API.",
+        "TIMEOUT": "Zeitüberschreitung beim USDA-Request.",
+    }.get(code, "Technischer USDA API-Fehler.")
+    return code, explain
+
+
 def merge_details(existing_details: str | None, usda_payload: dict[str, Any]) -> str:
     base: dict[str, Any] = {}
     if existing_details:
@@ -194,6 +233,7 @@ def run_verify(
     pause_seconds: float,
     max_calls_per_hour: int,
     tracker_file: str,
+    only_uncertain: bool,
 ) -> dict[str, Any]:
     now = datetime.utcnow().isoformat()
     report_rows: list[dict[str, Any]] = []
@@ -215,6 +255,8 @@ def run_verify(
 
         # We only verify ingredients here, so skip known product categories.
         ingredients = [r for r in all_rows if (r.category or "") not in PRODUCT_CATEGORIES]
+        if only_uncertain:
+            ingredients = [r for r in ingredients if is_uncertain_entry(r)]
         if limit is not None and limit > 0:
             ingredients = ingredients[:limit]
 
@@ -225,7 +267,7 @@ def run_verify(
         api_errors = 0
 
         rate_info = rate.stats()
-        print(
+        log(
             f"[start] USDA-Check: {len(ingredients)} Einträge | "
             f"Rate {rate_info['used_last_hour']}/{rate_info['max_calls_per_hour']} genutzt, "
             f"{rate_info['remaining_this_hour']} verbleibend."
@@ -234,7 +276,7 @@ def run_verify(
         for idx, row in enumerate(ingredients, start=1):
             query_name = (row.name_en or row.name or "").strip()
             display_name = (row.name_de or row.name or "").strip()
-            print(f"[{idx}/{len(ingredients)}] Prüfe: {display_name} | query={query_name}")
+            log(f"[{idx}/{len(ingredients)}] request item='{display_name}' query='{query_name}'")
             rate.wait_for_slot()
             try:
                 foods = search_usda(query_name, api_key=api_key)
@@ -248,10 +290,27 @@ def run_verify(
                         "score": 0.0,
                         "fdc_id": "",
                         "usda_description": "",
-                        "status": f"api_error:{exc.__class__.__name__}",
+                        "status": "api_error",
+                        "error_code": "",
+                        "note": "",
                     }
                 )
-                print(f"[{idx}/{len(ingredients)}] api_error: {display_name} ({exc.__class__.__name__})")
+                code, explain = parse_error_code(exc)
+                report_rows[-1]["error_code"] = code
+                report_rows[-1]["note"] = explain
+                if apply:
+                    details_payload = {
+                        "checked_at": datetime.utcnow().isoformat(),
+                        "matched": False,
+                        "status": "api_error",
+                        "error_code": code,
+                        "error_note": explain,
+                        "query": query_name,
+                    }
+                    row.usda_status = USDA_STATUS_UNKNOWN
+                    row.details_json = merge_details(row.details_json, details_payload)
+                    row.updated_at = datetime.utcnow()
+                log(f"[{idx}/{len(ingredients)}] api_error code={code} - {explain}")
                 time.sleep(pause_seconds)
                 continue
             best, score = choose_best(query_name, foods)
@@ -264,13 +323,29 @@ def run_verify(
                 "fdc_id": "",
                 "usda_description": "",
                 "status": "",
+                "error_code": "",
+                "note": "",
             }
 
             if best is None:
                 unmatched += 1
                 result["status"] = "no_match"
+                result["error_code"] = "NO_MATCH"
+                result["note"] = "Kein USDA Treffer für den Begriff."
                 report_rows.append(result)
-                print(f"[{idx}/{len(ingredients)}] no_match: {display_name}")
+                if apply:
+                    details_payload = {
+                        "checked_at": datetime.utcnow().isoformat(),
+                        "matched": False,
+                        "status": "no_match",
+                        "error_code": "NO_MATCH",
+                        "error_note": "Kein USDA Treffer für den Begriff.",
+                        "query": query_name,
+                    }
+                    row.usda_status = USDA_STATUS_VALID_UNKNOWN
+                    row.details_json = merge_details(row.details_json, details_payload)
+                    row.updated_at = datetime.utcnow()
+                log(f"[{idx}/{len(ingredients)}] no_match code=NO_MATCH - Kein USDA Treffer.")
                 time.sleep(pause_seconds)
                 continue
 
@@ -282,8 +357,25 @@ def run_verify(
             if score < min_score:
                 weak += 1
                 result["status"] = "weak_match"
+                result["error_code"] = "WEAK_MATCH"
+                result["note"] = "Treffer zu unsicher, manuelle Prüfung nötig."
                 report_rows.append(result)
-                print(f"[{idx}/{len(ingredients)}] weak_match: {display_name} -> {desc} ({score:.2f})")
+                if apply:
+                    details_payload = {
+                        "checked_at": datetime.utcnow().isoformat(),
+                        "matched": False,
+                        "status": "weak_match",
+                        "error_code": "WEAK_MATCH",
+                        "error_note": "Treffer zu unsicher, manuelle Prüfung nötig.",
+                        "score": round(score, 4),
+                        "fdc_id": fdc_id,
+                        "description": desc,
+                        "query": query_name,
+                    }
+                    row.usda_status = USDA_STATUS_VALID_UNKNOWN
+                    row.details_json = merge_details(row.details_json, details_payload)
+                    row.updated_at = datetime.utcnow()
+                log(f"[{idx}/{len(ingredients)}] weak_match code=WEAK_MATCH - Unsicherer Treffer ({score:.2f}).")
                 time.sleep(pause_seconds)
                 continue
 
@@ -304,6 +396,7 @@ def run_verify(
                 row.origin_type = "trusted_source"
                 row.trust_level = "high"
                 row.verification_status = "source_linked"
+                row.usda_status = USDA_STATUS_VALID
                 row.name_en = desc
                 if not row.name_de:
                     row.name_de = display_name
@@ -336,7 +429,7 @@ def run_verify(
                     source.citation_text = f"USDA FDC {fdc_id}" if fdc_id else "USDA FDC"
                 updated += 1
 
-            print(f"[{idx}/{len(ingredients)}] matched: {display_name} -> {desc} ({score:.2f})")
+            log(f"[{idx}/{len(ingredients)}] matched code=OK - {desc} ({score:.2f})")
             time.sleep(pause_seconds)
 
         if apply:
@@ -348,7 +441,7 @@ def run_verify(
     with open(report_path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(
             fh,
-            fieldnames=["id", "name", "category", "score", "fdc_id", "usda_description", "status"],
+            fieldnames=["id", "name", "category", "score", "fdc_id", "usda_description", "status", "error_code", "note"],
         )
         writer.writeheader()
         writer.writerows(report_rows)
@@ -376,6 +469,7 @@ def main() -> None:
     parser.add_argument("--max-calls-per-hour", type=int, default=100, help="USDA request limit per rolling hour.")
     parser.add_argument("--tracker-file", type=str, default=DEFAULT_TRACKER_FILE, help="Path to persist USDA call timestamps.")
     parser.add_argument("--api-key", type=str, default=None, help="USDA API key. Falls back to USDA_API_KEY env or DEMO_KEY.")
+    parser.add_argument("--only-uncertain", action="store_true", help="Check only entries that are not yet high-confidence USDA linked.")
     args = parser.parse_args()
 
     api_key = args.api_key or os.getenv("USDA_API_KEY") or "DEMO_KEY"
@@ -387,8 +481,9 @@ def main() -> None:
         pause_seconds=max(0.0, args.pause_seconds),
         max_calls_per_hour=max(1, args.max_calls_per_hour),
         tracker_file=args.tracker_file,
+        only_uncertain=args.only_uncertain,
     )
-    print(json.dumps(result, ensure_ascii=False))
+    log(json.dumps(result, ensure_ascii=False))
 
 
 if __name__ == "__main__":

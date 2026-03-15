@@ -52,6 +52,7 @@ type FoodItem = {
   origin_type: string;
   trust_level: string;
   verification_status: string;
+  health_indicator?: "very_positive" | "neutral" | "counterproductive" | null;
   source_type: string | null;
   source_label: string | null;
   source_url: string | null;
@@ -131,6 +132,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
   const [originType, setOriginType] = useState("user_self");
   const [trustLevel, setTrustLevel] = useState("medium");
   const [verificationStatus, setVerificationStatus] = useState("unverified");
+  const [healthIndicator, setHealthIndicator] = useState<"very_positive" | "neutral" | "counterproductive">("neutral");
   const [sourceLabel, setSourceLabel] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [numbers, setNumbers] = useState<NumericFields>(emptyNumbers());
@@ -157,6 +159,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     setOriginType(item.origin_type || "user_self");
     setTrustLevel(item.trust_level || "medium");
     setVerificationStatus(item.verification_status || "unverified");
+    setHealthIndicator((item.health_indicator as "very_positive" | "neutral" | "counterproductive" | null) || "neutral");
     setSourceLabel(item.source_label || "");
     setSourceUrl(item.source_url || "");
     const n = emptyNumbers();
@@ -179,6 +182,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
       origin_type: originType || null,
       trust_level: trustLevel || null,
       verification_status: verificationStatus || null,
+      health_indicator: healthIndicator || "neutral",
       source_label: sourceLabel.trim() || null,
       source_url: sourceUrl.trim() || null,
       source_type: sourceLabel.trim() || sourceUrl.trim() ? "manual" : null,
@@ -236,6 +240,12 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/category-counts${params.toString() ? `?${params.toString()}` : ""}`);
     const body = await parseJsonSafely<{ counts: Record<string, number> }>(response);
     if (response.ok && body) setCategoryCounts(body.counts ?? { Alle: 0 });
+  };
+
+  const healthIndicatorLabel = (value: string | null | undefined) => {
+    if (value === "very_positive") return "sehr positiv";
+    if (value === "counterproductive") return "eher kontraproduktiv";
+    return "neutral";
   };
 
   const saveItem = async (event: FormEvent) => {
@@ -381,6 +391,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
               <label className="settings-label">Herkunft<select className="settings-input" value={originType} onChange={(e) => setOriginType(e.target.value)}><option value="trusted_source">Trusted Source</option><option value="manufacturer">Hersteller</option><option value="community">Community</option><option value="llm">LLM</option><option value="user_self">Selbst erfasst</option></select></label>
               <label className="settings-label">Trust Level<select className="settings-input" value={trustLevel} onChange={(e) => setTrustLevel(e.target.value)}><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
               <label className="settings-label">Verifizierung<select className="settings-input" value={verificationStatus} onChange={(e) => setVerificationStatus(e.target.value)}><option value="unverified">unverified</option><option value="source_linked">source_linked</option><option value="reviewed">reviewed</option><option value="verified">verified</option></select></label>
+              <label className="settings-label">Health-Indikator<select className="settings-input" value={healthIndicator} onChange={(e) => setHealthIndicator(e.target.value as "very_positive" | "neutral" | "counterproductive")}><option value="very_positive">sehr positiv</option><option value="neutral">neutral</option><option value="counterproductive">eher kontraproduktiv</option></select></label>
               <label className="settings-label">Quelle (Label)<input className="settings-input" value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} /></label>
               <label className="settings-label nutrition-span-2">Quelle (URL)<input className="settings-input" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} /></label>
 
@@ -411,6 +422,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
                     setSelectedItem(null);
                     setName("");
                     setNameEn("");
+                    setHealthIndicator("neutral");
                   }}
                 >
                   {isProductsView ? "Neues Produkt" : "Neue Zutat"}
@@ -434,6 +446,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
               <article className={`nutrition-entry nutrition-entry-selectable ${selectedItem?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => loadIntoForm(item)}>
                 <div className="nutrition-entry-head">
                   <strong>{item.name}</strong>
+                  <span className={`health-indicator-badge health-${item.health_indicator || "neutral"}`}>{healthIndicatorLabel(item.health_indicator)}</span>
                   {isProductsView ? <span>{item.brand || "-"}</span> : null}
                   <span>{item.category || "-"}</span>
                 </div>
