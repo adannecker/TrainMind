@@ -30,14 +30,20 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [x] Trennung Zutaten vs. Produkte (eigene Navigation und Filter).
 - [x] Kategorien mit Mengenanzeige je Bereich eingebaut.
 - [x] Produkt-spezifische Felder (Marke/Hersteller, Barcode) abgetrennt.
-- [ ] Rezeptmodell (`Recipe`, `RecipeItem`) einfuehren.
+- [x] Rezeptmodell (`Recipe`, `RecipeItem`) eingefuehrt.
 - [ ] Tages-/Mahlzeit-Log als eigener Flow aufbauen.
-- [ ] Rezepte per Klick oeffnen und bestehende Rezepte bearbeiten koennen (Name, Bestandteile, Mengen, Sichtbarkeit).
-- [ ] Mengenlogik erweitern: Standard `g`, optional `Portion`, `EL` (Essloeffel), `TL` (Teeloeffel).
+- [x] Rezepte per Klick oeffnen und bestehende Rezepte bearbeiten koennen (Name, Bestandteile, Mengen, Sichtbarkeit).
+- [x] Mengenlogik erweitert: `g`, `ml`, `EL` (Essloeffel), `TL` (Teeloeffel) inkl. Gramm-Umrechnung.
+- [x] Rezeptbibliothek mit Suche fuer eigene + oeffentliche Rezepte umgesetzt.
+- [x] Rezepte duplizieren, loeschen und ueber Overlay-Menue bearbeiten.
+- [x] Rezept-Detailansicht/Overlay mit kumulierten Makro- und Mikronaehrstoffen umgesetzt.
+- [x] Rezeptfelder `Zubereitung` und `Favorit` integriert.
+- [x] Starter-Basis mit 30 Sportler-Rezepten inkl. Zubereitung angelegt.
 - [ ] Portionen je Produkt/Zutat hinterlegen (z. B. 1 Portion = 30g) und in Gramm umrechnen.
 - [ ] Umrechnungsbasis fuer EL/TL definieren (dichte-/produktspezifisch oder konfigurierbare Default-Werte).
 - [ ] Beim Erfassen via Forward-Typing den Typ anzeigen: `Rezept`, `Zutat`, `Produkt`.
 - [ ] Haeufig genutzte Eintraege/Favoriten speichern und mit zuletzt genutzter Menge direkt auswaehlbar machen.
+- [ ] Rezept-Import aus freien Quellen pruefen (z. B. TheMealDB / offene Datensaetze) inkl. Lizenz-Check und Mapping auf lokale Zutaten.
 - [ ] In Zutaten/Produkten den Bereich `Herkunft`, `Verifizierung`, `Trust Level` visuell deutlich abheben (eigener Info-Block/Badge-Bereich).
 - [ ] `Trust Level` farblich kennzeichnen (z. B. `high=gruen`, `medium=gelb`, `low=rot`) in Formular und Listenansicht.
 - [ ] Gesundheitsindikator fuer Zutaten und Produkte einfuehren als gut sichtbarer Marker mit Stufen:
@@ -84,8 +90,8 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 
 ## Priorisierte naechste 7 Schritte
 
-- [ ] 1. Rezepte per Klick editierbar machen (voller Edit-Flow).
-- [ ] 2. Mengenmodell fuer `g`, `Portion`, `EL`, `TL` inkl. Gramm-Umrechnung umsetzen.
+- [ ] 1. Portionen je Zutat/Produkt sauber definieren und in Gramm umrechnen.
+- [ ] 2. Dichte-/Umrechnungsmodell fuer `EL`, `TL`, `ml` weiter verfeinern.
 - [ ] 3. Forward-Typing in Erfassung um Typ-Badge erweitern (`Rezept`/`Zutat`/`Produkt`).
 - [ ] 4. Favoriten mit zuletzt erfasster Menge in der Erfassung anbieten.
 - [ ] 5. USDA-Lauf nach Stundenlimit erneut starten (Batch-basiert).

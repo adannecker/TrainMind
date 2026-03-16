@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from packages.db.base import Base
@@ -94,6 +94,8 @@ class UserProfile(Base):
     __table_args__ = {"schema": CORE_SCHEMA}
 
     user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), primary_key=True)
+    date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
+    gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
     current_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     start_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -505,7 +507,9 @@ class NutritionRecipe(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String(180), nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preparation: Mapped[str | None] = mapped_column(Text, nullable=True)
     visibility: Mapped[str] = mapped_column(String(20), default="private", nullable=False)
+    is_favorite: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

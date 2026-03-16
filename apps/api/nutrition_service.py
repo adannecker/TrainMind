@@ -591,6 +591,32 @@ def list_food_items(
         return {"items": merged[:limit]}
 
 
+def get_food_item(user_id: int, item_id: str) -> dict[str, Any]:
+    with SessionLocal() as session:
+        item = session.scalar(
+            select(NutritionFoodItem)
+            .where(or_(NutritionFoodItem.user_id == user_id, NutritionFoodItem.user_id.is_(None)))
+            .where(NutritionFoodItem.id == item_id)
+            .where(NutritionFoodItem.deleted_at.is_(None))
+        )
+        if item is None:
+            raise ValueError("Food item not found.")
+
+        override = session.scalar(
+            select(NutritionFoodItemOverride)
+            .where(NutritionFoodItemOverride.user_id == user_id)
+            .where(NutritionFoodItemOverride.food_item_id == item_id)
+            .where(NutritionFoodItemOverride.deleted_at.is_(None))
+            .order_by(NutritionFoodItemOverride.updated_at.desc())
+        )
+        primary_source = session.scalar(
+            select(NutritionFoodItemSource)
+            .where(NutritionFoodItemSource.food_item_id == item_id)
+            .order_by(NutritionFoodItemSource.is_primary.desc(), NutritionFoodItemSource.created_at.desc())
+        )
+        return _food_item_payload(item, override=override, primary_source=primary_source)
+
+
 def get_food_item_category_counts(user_id: int, query: str | None = None, item_kind: str | None = None) -> dict[str, Any]:
     q = (query or "").strip()
     kind_filter = _normalize_item_kind(item_kind) if (item_kind or "").strip() else ""
@@ -917,7 +943,9 @@ def _recipe_payload(session, recipe: NutritionRecipe) -> dict[str, Any]:
             "id": recipe.id,
             "name": recipe.name,
             "notes": recipe.notes,
+            "preparation": recipe.preparation,
             "visibility": recipe.visibility,
+            "is_favorite": bool(recipe.is_favorite),
             "created_at": _serialize_datetime(recipe.created_at),
             "updated_at": _serialize_datetime(recipe.updated_at),
             "deleted_at": _serialize_datetime(recipe.deleted_at),
@@ -981,7 +1009,9 @@ def _recipe_payload(session, recipe: NutritionRecipe) -> dict[str, Any]:
         "id": recipe.id,
         "name": recipe.name,
         "notes": recipe.notes,
+        "preparation": recipe.preparation,
         "visibility": recipe.visibility,
+        "is_favorite": bool(recipe.is_favorite),
         "created_at": _serialize_datetime(recipe.created_at),
         "updated_at": _serialize_datetime(recipe.updated_at),
         "deleted_at": _serialize_datetime(recipe.deleted_at),
@@ -1057,7 +1087,9 @@ def create_recipe(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             user_id=user_id,
             name=name,
             notes=(str(payload.get("notes")).strip() if payload.get("notes") else None),
+            preparation=(str(payload.get("preparation")).strip() if payload.get("preparation") else None),
             visibility=visibility,
+            is_favorite=bool(payload.get("is_favorite") or False),
             created_at=now,
             updated_at=now,
             deleted_at=None,
@@ -1082,7 +1114,13 @@ def list_recipes(user_id: int, query: str | None = None) -> dict[str, Any]:
         )
         if q:
             like = f"%{q}%"
-            stmt = stmt.where(or_(NutritionRecipe.name.ilike(like), NutritionRecipe.notes.ilike(like)))
+            stmt = stmt.where(
+                or_(
+                    NutritionRecipe.name.ilike(like),
+                    NutritionRecipe.notes.ilike(like),
+                    NutritionRecipe.preparation.ilike(like),
+                )
+            )
         rows = session.scalars(stmt.limit(200)).all()
         return {"recipes": [_recipe_payload(session, row) for row in rows]}
 
@@ -1105,8 +1143,12 @@ def update_recipe(user_id: int, recipe_id: str, payload: dict[str, Any]) -> dict
             recipe.name = name
         if "notes" in payload:
             recipe.notes = (str(payload.get("notes")).strip() if payload.get("notes") else None)
+        if "preparation" in payload:
+            recipe.preparation = (str(payload.get("preparation")).strip() if payload.get("preparation") else None)
         if "visibility" in payload:
             recipe.visibility = _normalize_recipe_visibility(str(payload.get("visibility") or "private"))
+        if "is_favorite" in payload and payload.get("is_favorite") is not None:
+            recipe.is_favorite = bool(payload.get("is_favorite"))
         if "items" in payload:
             _upsert_recipe_items(session, recipe_id=recipe.id, user_id=user_id, items=payload.get("items") or [])
 
@@ -1115,6 +1157,36 @@ def update_recipe(user_id: int, recipe_id: str, payload: dict[str, Any]) -> dict
         _record_sync_event(session, user_id, "recipe", recipe.id, "upsert", data)
         session.commit()
         return data
+
+
+def delete_recipe(user_id: int, recipe_id: str) -> dict[str, Any]:
+    now = _now()
+    with SessionLocal() as session:
+        recipe = session.scalar(
+            select(NutritionRecipe)
+            .where(NutritionRecipe.id == recipe_id)
+            .where(NutritionRecipe.user_id == user_id)
+            .where(NutritionRecipe.deleted_at.is_(None))
+        )
+        if recipe is None:
+            raise ValueError("Recipe not found.")
+
+        recipe.deleted_at = now
+        recipe.updated_at = now
+
+        items = session.scalars(
+            select(NutritionRecipeItem)
+            .where(NutritionRecipeItem.recipe_id == recipe_id)
+            .where(NutritionRecipeItem.deleted_at.is_(None))
+        ).all()
+        for item in items:
+            item.deleted_at = now
+            item.updated_at = now
+
+        payload = {"id": recipe_id, "deleted_at": _serialize_datetime(now)}
+        _record_sync_event(session, user_id, "recipe", recipe_id, "delete", payload)
+        session.commit()
+        return {"status": "deleted", "id": recipe_id}
 
 
 def create_entry_from_recipe(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1216,9 +1288,31 @@ def build_food_item_llm_prompt(name: str, brand: str | None = None, category: st
         '    "added_sugar_per_100g": <number|null>,\n'
         '    "net_carbs_per_100g": <number|null>,\n'
         '    "cholesterol_mg_per_100g": <number|null>,\n'
-        '    "vitamin_c_mg_per_100g": <number|null>,\n'
+        '    "salt_g_per_100g": <number|null>,\n'
+        '    "omega3_g_per_100g": <number|null>,\n'
+        '    "omega6_g_per_100g": <number|null>,\n'
         '    "calcium_mg_per_100g": <number|null>,\n'
-        '    "magnesium_mg_per_100g": <number|null>\n'
+        '    "magnesium_mg_per_100g": <number|null>,\n'
+        '    "phosphorus_mg_per_100g": <number|null>,\n'
+        '    "iron_mg_per_100g": <number|null>,\n'
+        '    "zinc_mg_per_100g": <number|null>,\n'
+        '    "copper_mg_per_100g": <number|null>,\n'
+        '    "manganese_mg_per_100g": <number|null>,\n'
+        '    "selenium_ug_per_100g": <number|null>,\n'
+        '    "iodine_ug_per_100g": <number|null>,\n'
+        '    "vitamin_a_ug_per_100g": <number|null>,\n'
+        '    "vitamin_b1_mg_per_100g": <number|null>,\n'
+        '    "vitamin_b2_mg_per_100g": <number|null>,\n'
+        '    "vitamin_b3_mg_per_100g": <number|null>,\n'
+        '    "vitamin_b5_mg_per_100g": <number|null>,\n'
+        '    "vitamin_b6_mg_per_100g": <number|null>,\n'
+        '    "folate_ug_per_100g": <number|null>,\n'
+        '    "vitamin_b12_ug_per_100g": <number|null>,\n'
+        '    "vitamin_c_mg_per_100g": <number|null>,\n'
+        '    "vitamin_d_ug_per_100g": <number|null>,\n'
+        '    "vitamin_e_mg_per_100g": <number|null>,\n'
+        '    "vitamin_k_ug_per_100g": <number|null>,\n'
+        '    "biotin_ug_per_100g": <number|null>\n'
         "  }\n"
         "}\n"
     )

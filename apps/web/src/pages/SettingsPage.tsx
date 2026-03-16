@@ -2,6 +2,8 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
+type SettingsTab = "personal" | "garmin" | "weight" | "llm";
+
 type CredentialStatus = {
   provider: string;
   has_encrypted_credentials: boolean;
@@ -9,7 +11,16 @@ type CredentialStatus = {
   active_source: "db" | "env" | "none";
 };
 
+type LlmStatus = {
+  provider: string;
+  configured: boolean;
+  key_hint: string | null;
+};
+
 type UserProfile = {
+  display_name: string;
+  date_of_birth: string | null;
+  gender: string | null;
   current_weight_kg: number | null;
   target_weight_kg: number | null;
   start_weight_kg: number | null;
@@ -29,11 +40,16 @@ type WeightLog = {
   created_at: string;
 };
 
+const tabs: Array<{ id: SettingsTab; label: string; description: string }> = [
+  { id: "personal", label: "Persönliche Daten", description: "Name und Zielrahmen pflegen" },
+  { id: "garmin", label: "Garmin Zugang", description: "Zugangsdaten sicher hinterlegen" },
+  { id: "weight", label: "Gewicht", description: "Verlauf und Messpunkte verwalten" },
+  { id: "llm", label: "LLM Zugang", description: "OpenAI-Konfiguration prüfen" },
+];
+
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
-  if (!text) {
-    return null;
-  }
+  if (!text) return null;
   return JSON.parse(text) as T;
 }
 
@@ -46,6 +62,8 @@ function toLocalInputValue(iso: string | null): string {
 }
 
 export function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<SettingsTab>("personal");
+
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -54,12 +72,19 @@ export function SettingsPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
+  const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
+  const [llmLoading, setLlmLoading] = useState(true);
+  const [llmError, setLlmError] = useState<string | null>(null);
+
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
   const [profileError, setProfileError] = useState<string | null>(null);
+  const [displayName, setDisplayName] = useState("");
+  const [dateOfBirth, setDateOfBirth] = useState("");
+  const [gender, setGender] = useState("unknown");
   const [currentWeight, setCurrentWeight] = useState("");
   const [targetWeight, setTargetWeight] = useState("");
   const [startWeight, setStartWeight] = useState("");
@@ -76,11 +101,7 @@ export function SettingsPage() {
       const response = await apiFetch(`${API_BASE_URL}/garmin/credentials-status`);
       const payload = await parseJsonSafely<CredentialStatus | { detail?: string }>(response);
       if (!response.ok) {
-        throw new Error(
-          typeof payload === "object" && payload && "detail" in payload && payload.detail
-            ? payload.detail
-            : "Failed to load credential status"
-        );
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Failed to load credential status");
       }
       if (!payload) {
         throw new Error("Failed to load credential status: empty response");
@@ -90,6 +111,23 @@ export function SettingsPage() {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadLlmStatus() {
+    setLlmLoading(true);
+    setLlmError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/llm/status`);
+      const payload = await parseJsonSafely<LlmStatus | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "LLM-Status konnte nicht geladen werden.");
+      }
+      setLlmStatus(payload as LlmStatus);
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLlmLoading(false);
     }
   }
 
@@ -104,21 +142,16 @@ export function SettingsPage() {
       const profileBody = await parseJsonSafely<UserProfile | { detail?: string }>(profileRes);
       const logsBody = await parseJsonSafely<{ weight_logs: WeightLog[] } | { detail?: string }>(logsRes);
       if (!profileRes.ok) {
-        throw new Error(
-          typeof profileBody === "object" && profileBody && "detail" in profileBody && profileBody.detail
-            ? profileBody.detail
-            : "Profil konnte nicht geladen werden."
-        );
+        throw new Error(typeof profileBody === "object" && profileBody && "detail" in profileBody && profileBody.detail ? profileBody.detail : "Profil konnte nicht geladen werden.");
       }
       if (!logsRes.ok) {
-        throw new Error(
-          typeof logsBody === "object" && logsBody && "detail" in logsBody && logsBody.detail
-            ? logsBody.detail
-            : "Gewichtsverlauf konnte nicht geladen werden."
-        );
+        throw new Error(typeof logsBody === "object" && logsBody && "detail" in logsBody && logsBody.detail ? logsBody.detail : "Gewichtsverlauf konnte nicht geladen werden.");
       }
       const p = profileBody as UserProfile;
       setProfile(p);
+      setDisplayName(p.display_name || "");
+      setDateOfBirth(p.date_of_birth || "");
+      setGender(p.gender || "unknown");
       setCurrentWeight(p.current_weight_kg == null ? "" : String(p.current_weight_kg));
       setTargetWeight(p.target_weight_kg == null ? "" : String(p.target_weight_kg));
       setStartWeight(p.start_weight_kg == null ? "" : String(p.start_weight_kg));
@@ -134,9 +167,7 @@ export function SettingsPage() {
 
   async function saveCredentials(e: FormEvent) {
     e.preventDefault();
-    if (!email.trim() || !password.trim() || saving) {
-      return;
-    }
+    if (!email.trim() || !password.trim() || saving) return;
     setSaving(true);
     setMessage(null);
     setError(null);
@@ -148,11 +179,7 @@ export function SettingsPage() {
       });
       const payload = await parseJsonSafely<{ status?: string; detail?: string }>(response);
       if (!response.ok) {
-        throw new Error(
-          typeof payload === "object" && payload && payload.detail
-            ? payload.detail
-            : "Failed to save credentials"
-        );
+        throw new Error(typeof payload === "object" && payload && payload.detail ? payload.detail : "Failed to save credentials");
       }
       setPassword("");
       setMessage("Garmin-Zugang verschlüsselt in der DB gespeichert.");
@@ -181,6 +208,9 @@ export function SettingsPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          display_name: displayName.trim() || null,
+          date_of_birth: dateOfBirth || null,
+          gender: gender || null,
           current_weight_kg: toNumberOrNull(currentWeight),
           target_weight_kg: toNumberOrNull(targetWeight),
           start_weight_kg: toNumberOrNull(startWeight),
@@ -190,14 +220,15 @@ export function SettingsPage() {
       });
       const payload = await parseJsonSafely<UserProfile | { detail?: string }>(response);
       if (!response.ok) {
-        throw new Error(
-          typeof payload === "object" && payload && "detail" in payload && payload.detail
-            ? payload.detail
-            : "Profil konnte nicht gespeichert werden."
-        );
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Profil konnte nicht gespeichert werden.");
       }
-      setProfile(payload as UserProfile);
-      setProfileMessage("Profil gespeichert.");
+      const next = payload as UserProfile;
+      setProfile(next);
+      setDisplayName(next.display_name || "");
+      setDateOfBirth(next.date_of_birth || "");
+      setGender(next.gender || "unknown");
+      window.dispatchEvent(new CustomEvent("trainmind:user-label-updated", { detail: { displayName: next.display_name || "" } }));
+      setProfileMessage("Persönliche Daten gespeichert.");
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -227,11 +258,7 @@ export function SettingsPage() {
       });
       const payload = await parseJsonSafely<WeightLog | { detail?: string }>(response);
       if (!response.ok) {
-        throw new Error(
-          typeof payload === "object" && payload && "detail" in payload && payload.detail
-            ? payload.detail
-            : "Gewichtseintrag konnte nicht gespeichert werden."
-        );
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Gewichtseintrag konnte nicht gespeichert werden.");
       }
       setLogWeight("");
       setLogDate("");
@@ -246,6 +273,7 @@ export function SettingsPage() {
   useEffect(() => {
     void loadStatus();
     void loadProfile();
+    void loadLlmStatus();
   }, []);
 
   return (
@@ -253,130 +281,229 @@ export function SettingsPage() {
       <div className="hero">
         <p className="eyebrow">Setup</p>
         <h1>Einstellungen</h1>
-        <p className="lead">Provider-Zugänge und persönliche Ziele zentral verwalten.</p>
+        <p className="lead">Persönliche Daten, Provider-Zugänge, Gewicht und LLM-Konfiguration an einer Stelle verwalten.</p>
       </div>
 
-      <div className="card">
-        <h2>Garmin Zugang</h2>
-        {loading ? <p>Status wird geladen...</p> : null}
-        {!loading && status ? (
-          <p className="info-text">
-            Quelle aktiv: <strong>{status.active_source}</strong> | Verschlüsselt gespeichert:{" "}
-            <strong>{status.has_encrypted_credentials ? "Ja" : "Nein"}</strong>
-          </p>
-        ) : null}
-        {error ? <p className="error-text">{error}</p> : null}
-        {message ? <p className="info-text">{message}</p> : null}
-
-        <form className="settings-form" onSubmit={(e) => void saveCredentials(e)}>
-          <label className="settings-label">
-            E-Mail
-            <input
-              className="settings-input"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="username"
-              required
-            />
-          </label>
-          <label className="settings-label">
-            Passwort
-            <input
-              className="settings-input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              required
-            />
-          </label>
-          <div className="settings-actions">
-            <button className="primary-button" type="submit" disabled={saving}>
-              {saving ? "Speichere..." : "Verschlüsselt speichern"}
+      <div className="settings-tabs-layout">
+        <aside className="settings-tabs-nav card">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              type="button"
+              className={`settings-tab-button ${activeTab === tab.id ? "active" : ""}`}
+              onClick={() => setActiveTab(tab.id)}
+            >
+              <strong>{tab.label}</strong>
+              <span>{tab.description}</span>
             </button>
-            <button className="secondary-button" type="button" disabled={loading || saving} onClick={() => void loadStatus()}>
-              Status aktualisieren
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div className="card nutrition-form-card">
-        <h2>Profil und Zielgewicht</h2>
-        {profileLoading ? <p>Profil wird geladen...</p> : null}
-        {profileError ? <p className="error-text">{profileError}</p> : null}
-        {profileMessage ? <p className="info-text">{profileMessage}</p> : null}
-
-        <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
-          <label className="settings-label">
-            Aktuelles Gewicht (kg)
-            <input className="settings-input" type="number" step="0.1" value={currentWeight} onChange={(e) => setCurrentWeight(e.target.value)} />
-          </label>
-          <label className="settings-label">
-            Zielgewicht (kg)
-            <input className="settings-input" type="number" step="0.1" value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)} />
-          </label>
-          <label className="settings-label">
-            Startgewicht (kg)
-            <input className="settings-input" type="number" step="0.1" value={startWeight} onChange={(e) => setStartWeight(e.target.value)} />
-          </label>
-          <label className="settings-label">
-            Ziel-Start
-            <input className="settings-input" type="datetime-local" value={goalStartDate} onChange={(e) => setGoalStartDate(e.target.value)} />
-          </label>
-          <label className="settings-label">
-            Ziel-Ende
-            <input className="settings-input" type="datetime-local" value={goalEndDate} onChange={(e) => setGoalEndDate(e.target.value)} />
-          </label>
-          <div className="settings-label">
-            Zeitraum
-            <div className="settings-input" style={{ display: "flex", alignItems: "center" }}>
-              {profile?.goal_period_days != null ? `${profile.goal_period_days} Tage` : "-"}
-            </div>
-          </div>
-          <div className="settings-actions nutrition-span-2">
-            <button className="primary-button" type="submit" disabled={profileSaving}>
-              {profileSaving ? "Speichere..." : "Profil speichern"}
-            </button>
-            <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
-              Aktualisieren
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div className="card nutrition-list-card">
-        <h2>Gewichtsverlauf</h2>
-        <form className="nutrition-form" onSubmit={(e) => void addLog(e)}>
-          <label className="settings-label">
-            Gewicht (kg)
-            <input className="settings-input" type="number" step="0.1" value={logWeight} onChange={(e) => setLogWeight(e.target.value)} required />
-          </label>
-          <label className="settings-label">
-            Zeitpunkt
-            <input className="settings-input" type="datetime-local" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
-          </label>
-          <label className="settings-label nutrition-span-2">
-            Notiz
-            <input className="settings-input" value={logNotes} onChange={(e) => setLogNotes(e.target.value)} placeholder="optional" />
-          </label>
-          <div className="settings-actions nutrition-span-2">
-            <button className="primary-button" type="submit">Gewicht eintragen</button>
-          </div>
-        </form>
-
-        <div className="nutrition-list" style={{ marginTop: "0.8rem" }}>
-          {weightLogs.length === 0 ? <p>Noch keine Einträge.</p> : null}
-          {weightLogs.map((row) => (
-            <article className="nutrition-entry" key={row.id}>
-              <div className="nutrition-entry-head">
-                <strong>{row.weight_kg.toFixed(1)} kg</strong>
-                <span>{new Date(row.recorded_at).toLocaleString()}</span>
-              </div>
-              {row.notes ? <p className="nutrition-notes">{row.notes}</p> : null}
-            </article>
           ))}
+        </aside>
+
+        <div className="settings-tab-panel">
+          {activeTab === "personal" ? (
+            <div className="card">
+              <div className="section-title-row">
+                <h2>Persönliche Daten</h2>
+              </div>
+              {profileLoading ? <p>Profil wird geladen...</p> : null}
+              {profileError ? <p className="error-text">{profileError}</p> : null}
+              {profileMessage ? <p className="info-text">{profileMessage}</p> : null}
+
+              <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
+                <label className="settings-label">
+                  Benutzername
+                  <input className="settings-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="z. B. Achim" />
+                </label>
+                <label className="settings-label">
+                  Geburtsdatum
+                  <input className="settings-input" type="date" value={dateOfBirth} onChange={(e) => setDateOfBirth(e.target.value)} />
+                </label>
+                <label className="settings-label">
+                  Geschlecht
+                  <select className="settings-input" value={gender} onChange={(e) => setGender(e.target.value)}>
+                    <option value="unknown">Keine Angabe</option>
+                    <option value="male">Männlich</option>
+                    <option value="female">Weiblich</option>
+                    <option value="diverse">Divers</option>
+                  </select>
+                </label>
+                <div className="settings-actions nutrition-span-2">
+                  <button className="primary-button" type="submit" disabled={profileSaving}>
+                    {profileSaving ? "Speichere..." : "Persönliche Daten speichern"}
+                  </button>
+                  <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
+                    Aktualisieren
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
+
+          {activeTab === "garmin" ? (
+            <div className="card">
+              <div className="section-title-row">
+                <h2>Garmin Zugang</h2>
+              </div>
+              {loading ? <p>Status wird geladen...</p> : null}
+              {!loading && status ? (
+                <div className="settings-status-grid">
+                  <div className="settings-status-chip">
+                    <span>Aktive Quelle</span>
+                    <strong>{status.active_source}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>DB verschlüsselt</span>
+                    <strong>{status.has_encrypted_credentials ? "Ja" : "Nein"}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Env vorhanden</span>
+                    <strong>{status.has_env_credentials ? "Ja" : "Nein"}</strong>
+                  </div>
+                </div>
+              ) : null}
+              {error ? <p className="error-text">{error}</p> : null}
+              {message ? <p className="info-text">{message}</p> : null}
+
+              <form className="settings-form settings-form-wide" onSubmit={(e) => void saveCredentials(e)}>
+                <label className="settings-label">
+                  Garmin E-Mail
+                  <input className="settings-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
+                </label>
+                <label className="settings-label">
+                  Garmin Passwort
+                  <input className="settings-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
+                </label>
+                <div className="settings-actions">
+                  <button className="primary-button" type="submit" disabled={saving}>
+                    {saving ? "Speichere..." : "Verschlüsselt speichern"}
+                  </button>
+                  <button className="secondary-button" type="button" disabled={loading || saving} onClick={() => void loadStatus()}>
+                    Status aktualisieren
+                  </button>
+                </div>
+              </form>
+            </div>
+          ) : null}
+
+          {activeTab === "weight" ? (
+            <div className="settings-weight-stack">
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Gewicht und Ziele</h2>
+                </div>
+                {profileError ? <p className="error-text">{profileError}</p> : null}
+                {profileMessage ? <p className="info-text">{profileMessage}</p> : null}
+                <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
+                  <label className="settings-label">
+                    Aktuelles Gewicht (kg)
+                    <input className="settings-input" type="number" step="0.1" value={currentWeight} onChange={(e) => setCurrentWeight(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Zielgewicht (kg)
+                    <input className="settings-input" type="number" step="0.1" value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Startgewicht (kg)
+                    <input className="settings-input" type="number" step="0.1" value={startWeight} onChange={(e) => setStartWeight(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Ziel-Start
+                    <input className="settings-input" type="datetime-local" value={goalStartDate} onChange={(e) => setGoalStartDate(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Ziel-Ende
+                    <input className="settings-input" type="datetime-local" value={goalEndDate} onChange={(e) => setGoalEndDate(e.target.value)} />
+                  </label>
+                  <div className="settings-label">
+                    Zeitraum
+                    <div className="settings-input settings-static-field">
+                      {profile?.goal_period_days != null ? `${profile.goal_period_days} Tage` : "-"}
+                    </div>
+                  </div>
+                  <div className="settings-actions nutrition-span-2">
+                    <button className="primary-button" type="submit" disabled={profileSaving}>
+                      {profileSaving ? "Speichere..." : "Gewicht und Ziele speichern"}
+                    </button>
+                    <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
+                      Aktualisieren
+                    </button>
+                  </div>
+                </form>
+
+                <form className="nutrition-form" onSubmit={(e) => void addLog(e)}>
+                  <label className="settings-label">
+                    Gewicht (kg)
+                    <input className="settings-input" type="number" step="0.1" value={logWeight} onChange={(e) => setLogWeight(e.target.value)} required />
+                  </label>
+                  <label className="settings-label">
+                    Zeitpunkt
+                    <input className="settings-input" type="datetime-local" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
+                  </label>
+                  <label className="settings-label nutrition-span-2">
+                    Notiz
+                    <input className="settings-input" value={logNotes} onChange={(e) => setLogNotes(e.target.value)} placeholder="optional" />
+                  </label>
+                  <div className="settings-actions nutrition-span-2">
+                    <button className="primary-button" type="submit">Gewicht eintragen</button>
+                  </div>
+                </form>
+              </div>
+
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Gewichtsverlauf</h2>
+                </div>
+                <div className="nutrition-list settings-weight-list">
+                  {weightLogs.length === 0 ? <p>Noch keine Einträge.</p> : null}
+                  {weightLogs.map((row) => (
+                    <article className="nutrition-entry" key={row.id}>
+                      <div className="nutrition-entry-head">
+                        <strong>{row.weight_kg.toFixed(1)} kg</strong>
+                        <span>{new Date(row.recorded_at).toLocaleString()}</span>
+                      </div>
+                      {row.notes ? <p className="nutrition-notes">{row.notes}</p> : null}
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "llm" ? (
+            <div className="card">
+              <div className="section-title-row">
+                <h2>LLM Zugang</h2>
+              </div>
+              {llmLoading ? <p>LLM-Status wird geladen...</p> : null}
+              {llmError ? <p className="error-text">{llmError}</p> : null}
+              {!llmLoading && llmStatus ? (
+                <>
+                  <div className="settings-status-grid">
+                    <div className="settings-status-chip">
+                      <span>Provider</span>
+                      <strong>{llmStatus.provider}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Konfiguriert</span>
+                      <strong>{llmStatus.configured ? "Ja" : "Nein"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Key-Hinweis</span>
+                      <strong>{llmStatus.key_hint ?? "-"}</strong>
+                    </div>
+                  </div>
+                  <p className="info-text">
+                    Der OpenAI-Schlüssel wird serverseitig aus `.env` gelesen. Änderungen an `.env` werden nach einem API-Neustart sichtbar.
+                  </p>
+                  <div className="settings-actions">
+                    <button className="secondary-button" type="button" onClick={() => void loadLlmStatus()}>
+                      Status aktualisieren
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </div>
     </section>

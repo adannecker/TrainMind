@@ -47,7 +47,25 @@ API-Endpunkte (ausser Health/Root/Login) erwarten Bearer-Token.
 - `GET /nutrition/recipes`
 - `POST /nutrition/recipes`
 - `PATCH /nutrition/recipes/{recipe_id}`
+- `DELETE /nutrition/recipes/{recipe_id}`
+- `GET /nutrition/food-items/{item_id}`
+- `GET /nutrition/food-items/category-counts`
 - `POST /nutrition/entries/from-recipe`
+
+### Rezept-Payload (relevant)
+
+`GET/POST/PATCH /nutrition/recipes` liefert bzw. erwartet zusaetzlich zu Name/Sichtbarkeit jetzt auch:
+
+- `notes`
+- `preparation`
+- `is_favorite`
+- `items[]` mit `food_item_id`, `amount_g`, `sort_index`
+
+Abgeleitete Rueckgabefelder:
+
+- `total_weight_g`
+- `kcal`, `protein_g`, `carbs_g`, `fat_g`
+- `kcal_per_100g`, `protein_per_100g`, `carbs_per_100g`, `fat_per_100g`
 
 ## Health
 

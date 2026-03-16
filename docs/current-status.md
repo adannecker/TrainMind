@@ -1,4 +1,4 @@
-# TrainMind Status (Stand: 2026-03-14)
+# TrainMind Status (Stand: 2026-03-16)
 
 Diese Datei dokumentiert den aktuellen Projektstand und die naechsten konkreten Schritte.
 
@@ -22,6 +22,14 @@ Diese Datei dokumentiert den aktuellen Projektstand und die naechsten konkreten 
 - `name_de` und `name_en` sind im Datenmodell vorhanden und im UI/API angebunden.
 - Erste grosse Seed-Basis wurde geladen (aktuell ~800 Eintraege).
 - App-Verschluesselung per `APP_ENCRYPTION_KEY` ist vorhanden und fuer sensible Keys/Token nutzbar.
+- Rezeptbereich im Web ist deutlich ausgebaut:
+  - Rezeptbibliothek rechts mit Suche fuer eigene + oeffentliche Rezepte
+  - Rezepte erstellen, bearbeiten, duplizieren, loeschen
+  - Favoriten markieren und filtern
+  - Zubereitung je Rezept pflegen
+  - Einheiten `g`, `ml`, `EL`, `TL` mit lokaler Gramm-Umrechnung
+  - Rezept-Overlay mit kumulierten Makro-/Mikronaehrstoffen und Datenabdeckung
+- Es gibt aktuell 30 lokale Starter-Rezepte fuer gesundes Sportleressen inkl. Zubereitungstexten.
 
 ## 2) Datenmodell und Migrationen (Nutrition)
 
@@ -30,6 +38,9 @@ Aktuelle relevante Migrationen:
 - `20260314_0008_nutrition_global_catalog_and_provenance.py`
 - `20260314_0009_food_item_kind_split.py`
 - `20260314_0010_food_item_names_i18n.py`
+- `20260314_0011_nutrition_recipes.py`
+- `20260315_0014_profile_birth_and_gender.py`
+- `20260316_0015_recipe_preparation_and_favorites.py`
 
 Wichtige Felder in `nutrition.food_items`:
 
@@ -37,6 +48,14 @@ Wichtige Felder in `nutrition.food_items`:
 - `name_de`
 - `name_en`
 - Herkunft/Trust/Verifizierung-Felder (fuer Datenqualitaet)
+
+Wichtige Felder in `nutrition.recipes`:
+
+- `name`
+- `notes`
+- `preparation`
+- `visibility`
+- `is_favorite`
 
 ## 3) Datenqualitaet-Stand (USDA / Uebersetzungen)
 
@@ -65,8 +84,10 @@ Aktueller Engpass:
 4. Produkte separat befuellen:
    - echte Produktdatensaetze (Marke + Barcode)
    - Zutaten bleiben Basisdaten
-5. i18n-Grundgeruest im Web vorbereiten (de/en Ressourcen statt harter Texte).
-6. UTF-8-Review in UI/Docs final abschliessen.
+5. Portionen/Dichtewerte fuer Rezepte weiter verfeinern.
+6. Freie Rezeptquellen fuer moeglichen Import pruefen (inkl. Lizenz-Check).
+7. i18n-Grundgeruest im Web vorbereiten (de/en Ressourcen statt harter Texte).
+8. UTF-8-Review in UI/Docs final abschliessen.
 
 ## 5) Naechster geplanter Arbeitsablauf
 

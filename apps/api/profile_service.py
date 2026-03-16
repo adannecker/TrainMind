@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
 
-from packages.db.models import UserProfile, UserWeightLog
+from packages.db.models import User, UserProfile, UserWeightLog
 from packages.db.session import SessionLocal
 
 
@@ -27,6 +27,16 @@ def _serialize_datetime(value: datetime | None) -> str | None:
     return value.isoformat() if value else None
 
 
+def _parse_date(value: str | None) -> date | None:
+    if not value:
+        return None
+    return date.fromisoformat(value)
+
+
+def _serialize_date(value: date | None) -> str | None:
+    return value.isoformat() if value else None
+
+
 def _validate_weight(value: float | None, field_name: str) -> float | None:
     if value is None:
         return None
@@ -36,9 +46,13 @@ def _validate_weight(value: float | None, field_name: str) -> float | None:
     return parsed
 
 
-def _profile_payload(profile: UserProfile | None) -> dict[str, Any]:
+def _profile_payload(profile: UserProfile | None, user: User | None = None) -> dict[str, Any]:
+    display_name = (user.display_name or "") if user is not None else ""
     if profile is None:
         return {
+            "display_name": display_name,
+            "date_of_birth": None,
+            "gender": None,
             "current_weight_kg": None,
             "target_weight_kg": None,
             "start_weight_kg": None,
@@ -51,6 +65,9 @@ def _profile_payload(profile: UserProfile | None) -> dict[str, Any]:
     if profile.goal_start_date and profile.goal_end_date:
         goal_period_days = int((profile.goal_end_date - profile.goal_start_date).days)
     return {
+        "display_name": display_name,
+        "date_of_birth": _serialize_date(profile.date_of_birth),
+        "gender": profile.gender,
         "current_weight_kg": profile.current_weight_kg,
         "target_weight_kg": profile.target_weight_kg,
         "start_weight_kg": profile.start_weight_kg,
@@ -63,12 +80,16 @@ def _profile_payload(profile: UserProfile | None) -> dict[str, Any]:
 
 def get_user_profile(user_id: int) -> dict[str, Any]:
     with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.id == user_id))
         profile = session.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
-        return _profile_payload(profile)
+        return _profile_payload(profile, user)
 
 
 def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.id == user_id))
+        if user is None:
+            raise ValueError("User not found.")
         profile = session.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
         now = _now()
         if profile is None:
@@ -79,6 +100,17 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
             )
             session.add(profile)
 
+        if "display_name" in payload:
+            clean_display_name = str(payload.get("display_name") or "").strip()
+            user.display_name = clean_display_name or None
+        if "date_of_birth" in payload:
+            profile.date_of_birth = _parse_date(str(payload.get("date_of_birth") or "")) if payload.get("date_of_birth") else None
+        if "gender" in payload:
+            clean_gender = str(payload.get("gender") or "").strip().lower()
+            allowed_genders = {"male", "female", "diverse", "unknown"}
+            if clean_gender and clean_gender not in allowed_genders:
+                raise ValueError("gender must be one of: male, female, diverse, unknown.")
+            profile.gender = clean_gender or None
         if "current_weight_kg" in payload:
             profile.current_weight_kg = _validate_weight(payload.get("current_weight_kg"), "current_weight_kg")
         if "target_weight_kg" in payload:
@@ -94,7 +126,7 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
 
         profile.updated_at = now
         session.commit()
-        return _profile_payload(profile)
+        return _profile_payload(profile, user)
 
 
 def add_weight_log(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:

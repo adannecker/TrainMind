@@ -129,6 +129,19 @@ function Layout() {
     void verifySession();
   }, []);
 
+  useEffect(() => {
+    function handleUserLabelUpdate(event: Event) {
+      const detail = (event as CustomEvent<{ displayName?: string }>).detail;
+      const nextLabel = (detail?.displayName || "").trim();
+      if (nextLabel) {
+        setUserLabel(nextLabel);
+      }
+    }
+
+    window.addEventListener("trainmind:user-label-updated", handleUserLabelUpdate);
+    return () => window.removeEventListener("trainmind:user-label-updated", handleUserLabelUpdate);
+  }, []);
+
   async function doLogout() {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });

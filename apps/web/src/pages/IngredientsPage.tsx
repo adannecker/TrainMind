@@ -1,4 +1,4 @@
-﻿import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
@@ -19,6 +19,7 @@ const BASE_INGREDIENT_CATEGORIES = [
   "Öle",
   "Gewürze",
 ];
+
 const PRODUCT_CATEGORIES = [
   "Alle",
   "Getränke",
@@ -35,9 +36,9 @@ const PRODUCT_CATEGORIES = [
   "Supplements",
   "Cerealien",
 ];
-const DEFAULT_DETAILS = '{"trans_fat_per_100g": null, "added_sugar_per_100g": null}';
 
 type ItemKind = "base_ingredient" | "product";
+type HealthIndicator = "very_positive" | "neutral" | "counterproductive";
 
 type FoodItem = {
   id: string;
@@ -52,7 +53,8 @@ type FoodItem = {
   origin_type: string;
   trust_level: string;
   verification_status: string;
-  health_indicator?: "very_positive" | "neutral" | "counterproductive" | null;
+  usda_status?: string | null;
+  health_indicator?: HealthIndicator | null;
   source_type: string | null;
   source_label: string | null;
   source_url: string | null;
@@ -87,17 +89,82 @@ type NumericFields = {
   potassium_mg_per_100g: string;
 };
 
-const NUMERIC_KEYS: Array<keyof NumericFields> = ["kcal_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g", "fiber_per_100g", "sugar_per_100g", "starch_per_100g", "saturated_fat_per_100g", "monounsaturated_fat_per_100g", "polyunsaturated_fat_per_100g", "sodium_mg_per_100g", "potassium_mg_per_100g"];
+type DetailField = { key: string; label: string; unit: string };
+
+const NUMERIC_FIELDS: Array<{ key: keyof NumericFields; label: string }> = [
+  { key: "kcal_per_100g", label: "kcal / 100g" },
+  { key: "protein_per_100g", label: "Protein / 100g" },
+  { key: "carbs_per_100g", label: "Kohlenhydrate / 100g" },
+  { key: "fat_per_100g", label: "Fett / 100g" },
+  { key: "fiber_per_100g", label: "Ballaststoffe / 100g" },
+  { key: "sugar_per_100g", label: "Zucker / 100g" },
+  { key: "starch_per_100g", label: "Stärke / 100g" },
+  { key: "sodium_mg_per_100g", label: "Natrium / 100g" },
+  { key: "potassium_mg_per_100g", label: "Kalium / 100g" },
+  { key: "saturated_fat_per_100g", label: "Gesättigte Fette / 100g" },
+  { key: "monounsaturated_fat_per_100g", label: "Einfach unges. Fette / 100g" },
+  { key: "polyunsaturated_fat_per_100g", label: "Mehrfach unges. Fette / 100g" },
+];
+
+const DETAIL_GROUP_ONE: DetailField[] = [
+  { key: "trans_fat_per_100g", label: "Transfette", unit: "g" },
+  { key: "added_sugar_per_100g", label: "Zugesetzter Zucker", unit: "g" },
+  { key: "net_carbs_per_100g", label: "Netto-Kohlenhydrate", unit: "g" },
+  { key: "cholesterol_mg_per_100g", label: "Cholesterin", unit: "mg" },
+  { key: "salt_g_per_100g", label: "Salz", unit: "g" },
+  { key: "omega3_g_per_100g", label: "Omega-3", unit: "g" },
+  { key: "omega6_g_per_100g", label: "Omega-6", unit: "g" },
+  { key: "calcium_mg_per_100g", label: "Calcium", unit: "mg" },
+  { key: "magnesium_mg_per_100g", label: "Magnesium", unit: "mg" },
+  { key: "phosphorus_mg_per_100g", label: "Phosphor", unit: "mg" },
+  { key: "iron_mg_per_100g", label: "Eisen", unit: "mg" },
+  { key: "zinc_mg_per_100g", label: "Zink", unit: "mg" },
+  { key: "copper_mg_per_100g", label: "Kupfer", unit: "mg" },
+  { key: "manganese_mg_per_100g", label: "Mangan", unit: "mg" },
+  { key: "selenium_ug_per_100g", label: "Selen", unit: "µg" },
+  { key: "iodine_ug_per_100g", label: "Jod", unit: "µg" },
+];
+
+const DETAIL_GROUP_TWO: DetailField[] = [
+  { key: "vitamin_a_ug_per_100g", label: "Vitamin A", unit: "µg" },
+  { key: "vitamin_b1_mg_per_100g", label: "Vitamin B1", unit: "mg" },
+  { key: "vitamin_b2_mg_per_100g", label: "Vitamin B2", unit: "mg" },
+  { key: "vitamin_b3_mg_per_100g", label: "Niacin (B3)", unit: "mg" },
+  { key: "vitamin_b5_mg_per_100g", label: "Vitamin B5", unit: "mg" },
+  { key: "vitamin_b6_mg_per_100g", label: "Vitamin B6", unit: "mg" },
+  { key: "folate_ug_per_100g", label: "Folat", unit: "µg" },
+  { key: "vitamin_b12_ug_per_100g", label: "Vitamin B12", unit: "µg" },
+  { key: "vitamin_c_mg_per_100g", label: "Vitamin C", unit: "mg" },
+  { key: "vitamin_d_ug_per_100g", label: "Vitamin D", unit: "µg" },
+  { key: "vitamin_e_mg_per_100g", label: "Vitamin E", unit: "mg" },
+  { key: "vitamin_k_ug_per_100g", label: "Vitamin K", unit: "µg" },
+  { key: "biotin_ug_per_100g", label: "Biotin", unit: "µg" },
+];
+
+const ALL_DETAIL_FIELDS = [...DETAIL_GROUP_ONE, ...DETAIL_GROUP_TWO];
 
 const emptyNumbers = (): NumericFields => ({
-  kcal_per_100g: "", protein_per_100g: "", carbs_per_100g: "", fat_per_100g: "", fiber_per_100g: "", sugar_per_100g: "", starch_per_100g: "", saturated_fat_per_100g: "", monounsaturated_fat_per_100g: "", polyunsaturated_fat_per_100g: "", sodium_mg_per_100g: "", potassium_mg_per_100g: "",
+  kcal_per_100g: "",
+  protein_per_100g: "",
+  carbs_per_100g: "",
+  fat_per_100g: "",
+  fiber_per_100g: "",
+  sugar_per_100g: "",
+  starch_per_100g: "",
+  saturated_fat_per_100g: "",
+  monounsaturated_fat_per_100g: "",
+  polyunsaturated_fat_per_100g: "",
+  sodium_mg_per_100g: "",
+  potassium_mg_per_100g: "",
 });
 
-const asNum = (value: string): number | null => {
-  const t = value.trim();
-  if (!t) return null;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : null;
+const emptyDetails = () => Object.fromEntries(ALL_DETAIL_FIELDS.map((field) => [field.key, ""])) as Record<string, string>;
+
+const asNum = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
@@ -106,183 +173,241 @@ async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   return JSON.parse(text) as T;
 }
 
-type IngredientsPageProps = {
-  initialKind?: ItemKind;
-};
+function mapDetailsToState(details: Record<string, unknown>) {
+  const next = emptyDetails();
+  for (const field of ALL_DETAIL_FIELDS) {
+    next[field.key] = typeof details[field.key] === "number" ? String(details[field.key]) : "";
+  }
+  return next;
+}
+
+function buildDetailsPayload(values: Record<string, string>) {
+  return Object.fromEntries(ALL_DETAIL_FIELDS.map((field) => [field.key, asNum(values[field.key] || "")]));
+}
+
+function healthMeta(indicator: HealthIndicator) {
+  if (indicator === "very_positive") return { label: "Sehr positiv", tone: "health-very_positive", subtitle: "Hohe Nährstoffdichte und gute Basis für eine bewusste Ernährung." };
+  if (indicator === "counterproductive") return { label: "Eher kontraproduktiv", tone: "health-counterproductive", subtitle: "Bewusst einsetzen und mit Kontext interpretieren." };
+  return { label: "Neutral", tone: "health-neutral", subtitle: "Solide Basis ohne starken Ausschlag nach oben oder unten." };
+}
+
+function prettifyOriginType(value: string | null | undefined) {
+  if (value === "trusted_source") return "Trusted Source";
+  if (value === "manufacturer") return "Hersteller";
+  if (value === "community") return "Community";
+  if (value === "llm") return "LLM";
+  if (value === "user_self") return "Selbst erfasst";
+  return value || "-";
+}
+
+function normalizeCategoryLabel(value: string | null | undefined) {
+  return (value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/ß/g, "ss")
+    .toLowerCase()
+    .trim();
+}
+
+type IngredientsPageProps = { initialKind?: ItemKind };
 
 export function IngredientsPage({ initialKind = "base_ingredient" }: IngredientsPageProps) {
+  const selectedKind = initialKind;
+  const isProductsView = selectedKind === "product";
+  const activeCategories = useMemo(() => (isProductsView ? PRODUCT_CATEGORIES : BASE_INGREDIENT_CATEGORIES), [isProductsView]);
+  const defaultCategory = activeCategories[1] ?? "";
+
   const [query, setQuery] = useState("");
   const [searchFocused, setSearchFocused] = useState(false);
-  const [suggestions, setSuggestions] = useState<FoodItem[]>([]);
-  const selectedKind = initialKind;
   const [selectedCategory, setSelectedCategory] = useState("Alle");
-  const [items, setItems] = useState<FoodItem[]>([]);
-  const [selectedItem, setSelectedItem] = useState<FoodItem | null>(null);
   const [categoryCounts, setCategoryCounts] = useState<Record<string, number>>({ Alle: 0 });
+  const [suggestions, setSuggestions] = useState<FoodItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<FoodItem | null>(null);
+  const [resultCount, setResultCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const [name, setName] = useState("");
   const [nameEn, setNameEn] = useState("");
   const [scope, setScope] = useState<"global" | "user">("user");
-  const [category, setCategory] = useState(initialKind === "product" ? "Getränke" : "Gemüse");
+  const [category, setCategory] = useState(defaultCategory);
   const [brand, setBrand] = useState("");
   const [barcode, setBarcode] = useState("");
   const [originType, setOriginType] = useState("user_self");
   const [trustLevel, setTrustLevel] = useState("medium");
   const [verificationStatus, setVerificationStatus] = useState("unverified");
-  const [healthIndicator, setHealthIndicator] = useState<"very_positive" | "neutral" | "counterproductive">("neutral");
+  const [usdaStatus, setUsdaStatus] = useState("unknown");
+  const [healthIndicator, setHealthIndicator] = useState<HealthIndicator>("neutral");
   const [sourceLabel, setSourceLabel] = useState("");
   const [sourceUrl, setSourceUrl] = useState("");
   const [numbers, setNumbers] = useState<NumericFields>(emptyNumbers());
-  const [detailsRaw, setDetailsRaw] = useState(DEFAULT_DETAILS);
+  const [detailValues, setDetailValues] = useState<Record<string, string>>(emptyDetails());
   const [llmRawText, setLlmRawText] = useState("");
+  const suggestionRequestRef = useRef(0);
+  const countRequestRef = useRef(0);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
-  const isProductsView = selectedKind === "product";
-  const activeCategories = useMemo(
-    () => (isProductsView ? PRODUCT_CATEGORIES : BASE_INGREDIENT_CATEGORIES),
-    [isProductsView],
-  );
-  const defaultCategory = activeCategories[1] ?? "";
+  const healthInfo = healthMeta(healthIndicator);
+
+  const resetForm = () => {
+    setSelectedItem(null);
+    setName("");
+    setNameEn("");
+    setScope("user");
+    setCategory(defaultCategory);
+    setBrand("");
+    setBarcode("");
+    setOriginType("user_self");
+    setTrustLevel("medium");
+    setVerificationStatus("unverified");
+    setUsdaStatus("unknown");
+    setHealthIndicator("neutral");
+    setSourceLabel("");
+    setSourceUrl("");
+    setNumbers(emptyNumbers());
+    setDetailValues(emptyDetails());
+    setLlmRawText("");
+  };
 
   const loadIntoForm = (item: FoodItem) => {
     setSelectedItem(item);
     setName(item.name_de || item.name || "");
     setNameEn(item.name_en || item.name || "");
     setScope(item.scope);
-    const loadedCategory = item.category && activeCategories.includes(item.category) ? item.category : defaultCategory;
-    setCategory(loadedCategory);
+    setCategory(item.category && activeCategories.includes(item.category) ? item.category : defaultCategory);
     setBrand(item.brand || "");
     setBarcode(item.barcode || "");
     setOriginType(item.origin_type || "user_self");
     setTrustLevel(item.trust_level || "medium");
     setVerificationStatus(item.verification_status || "unverified");
-    setHealthIndicator((item.health_indicator as "very_positive" | "neutral" | "counterproductive" | null) || "neutral");
+    setUsdaStatus(item.usda_status || "unknown");
+    setHealthIndicator(item.health_indicator || "neutral");
     setSourceLabel(item.source_label || "");
     setSourceUrl(item.source_url || "");
-    const n = emptyNumbers();
-    for (const key of NUMERIC_KEYS) n[key] = item[key] == null ? "" : String(item[key]);
-    setNumbers(n);
-    setDetailsRaw(item.details && Object.keys(item.details).length > 0 ? JSON.stringify(item.details, null, 2) : "{}");
+    setNumbers({
+      kcal_per_100g: item.kcal_per_100g == null ? "" : String(item.kcal_per_100g),
+      protein_per_100g: item.protein_per_100g == null ? "" : String(item.protein_per_100g),
+      carbs_per_100g: item.carbs_per_100g == null ? "" : String(item.carbs_per_100g),
+      fat_per_100g: item.fat_per_100g == null ? "" : String(item.fat_per_100g),
+      fiber_per_100g: item.fiber_per_100g == null ? "" : String(item.fiber_per_100g),
+      sugar_per_100g: item.sugar_per_100g == null ? "" : String(item.sugar_per_100g),
+      starch_per_100g: item.starch_per_100g == null ? "" : String(item.starch_per_100g),
+      saturated_fat_per_100g: item.saturated_fat_per_100g == null ? "" : String(item.saturated_fat_per_100g),
+      monounsaturated_fat_per_100g: item.monounsaturated_fat_per_100g == null ? "" : String(item.monounsaturated_fat_per_100g),
+      polyunsaturated_fat_per_100g: item.polyunsaturated_fat_per_100g == null ? "" : String(item.polyunsaturated_fat_per_100g),
+      sodium_mg_per_100g: item.sodium_mg_per_100g == null ? "" : String(item.sodium_mg_per_100g),
+      potassium_mg_per_100g: item.potassium_mg_per_100g == null ? "" : String(item.potassium_mg_per_100g),
+    });
+    setDetailValues(mapDetailsToState(item.details || {}));
   };
 
-  const toPayload = () => {
-    const parsed = detailsRaw.trim() ? JSON.parse(detailsRaw) : {};
+  const buildPayload = () => {
     const payload: Record<string, unknown> = {
-      name: name.trim(),
-      name_en: nameEn.trim() || null,
+      name: name.trim() || nameEn.trim(),
       name_de: name.trim() || null,
+      name_en: nameEn.trim() || null,
       scope,
       item_kind: selectedKind,
       category: category || null,
-      brand: isProductsView ? (brand.trim() || null) : null,
-      barcode: isProductsView ? (barcode.trim() || null) : null,
-      origin_type: originType || null,
-      trust_level: trustLevel || null,
-      verification_status: verificationStatus || null,
-      health_indicator: healthIndicator || "neutral",
+      brand: isProductsView ? brand.trim() || null : null,
+      barcode: isProductsView ? barcode.trim() || null : null,
+      origin_type: originType,
+      trust_level: trustLevel,
+      verification_status: verificationStatus,
+      usda_status: usdaStatus,
+      health_indicator: healthIndicator,
       source_label: sourceLabel.trim() || null,
       source_url: sourceUrl.trim() || null,
       source_type: sourceLabel.trim() || sourceUrl.trim() ? "manual" : null,
-      details: parsed,
+      details: buildDetailsPayload(detailValues),
     };
-    for (const key of NUMERIC_KEYS) payload[key] = asNum(numbers[key]);
+    for (const field of NUMERIC_FIELDS) payload[field.key] = asNum(numbers[field.key]);
     return payload;
   };
 
-  const loadItems = async (q = trimmedQuery, cat = selectedCategory, kind = selectedKind) => {
-    setLoading(true);
-    setError(null);
+  const loadCounts = async (nextQuery = trimmedQuery, nextKind = selectedKind) => {
+    const requestId = ++countRequestRef.current;
     try {
-      const params = new URLSearchParams({ limit: "80" });
-      if (q) params.set("q", q);
-      if (cat !== "Alle") params.set("category", cat);
-      params.set("item_kind", kind);
-      const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?${params.toString()}`);
-      const body = await parseJsonSafely<{ items: FoodItem[] } | { detail?: string }>(response);
-      if (!response.ok) throw new Error(body && "detail" in body && body.detail ? body.detail : "Zutaten konnten nicht geladen werden.");
-      setItems((body as { items: FoodItem[] }).items || []);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setLoading(false);
+      const params = new URLSearchParams({ item_kind: nextKind });
+      if (nextQuery) params.set("q", nextQuery);
+      const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/category-counts?${params.toString()}`);
+      const body = await parseJsonSafely<{ counts: Record<string, number> }>(response);
+      if (requestId !== countRequestRef.current) return;
+      if (!response.ok || !body) return;
+      const sourceCounts = body.counts ?? { Alle: 0 };
+      const normalizedCounts = new Map(Object.entries(sourceCounts).map(([key, value]) => [normalizeCategoryLabel(key), value]));
+      const resolvedCounts = Object.fromEntries(
+        ["Alle", ...activeCategories.filter((entry) => entry !== "Alle")].map((entry) => [
+          entry,
+          Number(normalizedCounts.get(normalizeCategoryLabel(entry)) ?? (entry === "Alle" ? sourceCounts.Alle : 0)),
+        ]),
+      ) as Record<string, number>;
+      setCategoryCounts(resolvedCounts);
+      setResultCount(resolvedCounts.Alle ?? 0);
+    } catch {
+      if (requestId !== countRequestRef.current) return;
+      setCategoryCounts(Object.fromEntries(activeCategories.map((entry) => [entry, 0])) as Record<string, number>);
+      setResultCount(0);
     }
   };
 
-  const loadSuggestions = async (q = trimmedQuery, cat = selectedCategory, kind = selectedKind) => {
-    const search = q.trim();
-    if (search.length < 2) {
+  const loadSuggestions = async (nextQuery = trimmedQuery, nextKind = selectedKind) => {
+    const requestId = ++suggestionRequestRef.current;
+    if (nextQuery.trim().length < 2) {
       setSuggestions([]);
       return;
     }
     try {
-      const params = new URLSearchParams({ q: search, limit: "8" });
-      if (cat !== "Alle") params.set("category", cat);
-      params.set("item_kind", kind);
+      const params = new URLSearchParams({ q: nextQuery.trim(), limit: "8", item_kind: nextKind });
       const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?${params.toString()}`);
       const body = await parseJsonSafely<{ items: FoodItem[] }>(response);
-      if (!response.ok || !body) {
-        setSuggestions([]);
-        return;
-      }
-      setSuggestions(body.items ?? []);
+      if (requestId !== suggestionRequestRef.current) return;
+      setSuggestions(response.ok && body ? body.items ?? [] : []);
     } catch {
+      if (requestId !== suggestionRequestRef.current) return;
       setSuggestions([]);
     }
   };
 
-  const loadCounts = async (q = trimmedQuery, kind = selectedKind) => {
-    const params = new URLSearchParams();
-    if (q) params.set("q", q);
-    params.set("item_kind", kind);
-    const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/category-counts${params.toString() ? `?${params.toString()}` : ""}`);
-    const body = await parseJsonSafely<{ counts: Record<string, number> }>(response);
-    if (response.ok && body) setCategoryCounts(body.counts ?? { Alle: 0 });
-  };
-
-  const healthIndicatorLabel = (value: string | null | undefined) => {
-    if (value === "very_positive") return "sehr positiv";
-    if (value === "counterproductive") return "eher kontraproduktiv";
-    return "neutral";
-  };
-
   const saveItem = async (event: FormEvent) => {
     event.preventDefault();
-    if (!name.trim() && !nameEn.trim()) return;
+    if (!name.trim() && !nameEn.trim()) {
+      setError("Bitte mindestens einen Namen pflegen.");
+      return;
+    }
     setError(null);
     setMessage(null);
-    try {
-      const payload = toPayload();
-      let response: Response;
-      if (selectedItem) {
-        const ok = window.confirm("Änderungen speichern? Vorhandene Werte werden überschrieben.");
-        if (!ok) return;
-        response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/${selectedItem.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      } else {
-        response = await apiFetch(`${API_BASE_URL}/nutrition/food-items`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
-      }
-      const body = await parseJsonSafely<FoodItem | { detail?: string }>(response);
-      if (!response.ok) throw new Error(body && "detail" in body && body.detail ? body.detail : "Speichern fehlgeschlagen.");
-      setMessage(isProductsView ? "Produkt gespeichert." : "Zutat gespeichert.");
-      loadIntoForm(body as FoodItem);
-      await loadItems();
-      await loadCounts();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+    const response = await apiFetch(
+      selectedItem ? `${API_BASE_URL}/nutrition/food-items/${selectedItem.id}` : `${API_BASE_URL}/nutrition/food-items`,
+      {
+        method: selectedItem ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildPayload()),
+      },
+    );
+    const body = await parseJsonSafely<FoodItem | { detail?: string }>(response);
+    if (!response.ok) {
+      setError(body && "detail" in body && body.detail ? body.detail : "Speichern fehlgeschlagen.");
+      return;
     }
+    const saved = body as FoodItem;
+    loadIntoForm(saved);
+    setQuery(saved.name);
+    setMessage(isProductsView ? "Produkt gespeichert." : "Zutat gespeichert.");
+    await loadCounts(saved.name, selectedKind);
+    await loadSuggestions(saved.name, selectedKind);
   };
 
   const copyLlmPrompt = async () => {
-    if (!name.trim()) {
-      setError("Bitte zuerst einen Zutatennamen eingeben.");
+    const lookupName = nameEn.trim() || name.trim();
+    if (!lookupName) {
+      setError("Bitte zuerst einen Namen eingeben.");
       return;
     }
     const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/llm-prompt`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: (nameEn.trim() || name.trim()), brand: brand.trim() || null, category: category || null }),
+      body: JSON.stringify({ name: lookupName, brand: brand.trim() || null, category: category || null }),
     });
     const body = await parseJsonSafely<{ prompt: string } | { detail?: string }>(response);
     if (!response.ok || !body || !("prompt" in body)) {
@@ -290,7 +415,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
       return;
     }
     await navigator.clipboard.writeText(body.prompt);
-    setMessage("LLM-Prompt in Zwischenablage kopiert.");
+    setMessage("LLM-Prompt in die Zwischenablage kopiert.");
   };
 
   const importFromLlm = async () => {
@@ -308,51 +433,85 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
       setError(body && "detail" in body && body.detail ? body.detail : "Import fehlgeschlagen.");
       return;
     }
-    loadIntoForm(body as FoodItem);
+    const imported = body as FoodItem;
+    loadIntoForm(imported);
+    setQuery(imported.name);
     setLlmRawText("");
     setMessage("Zutat aus LLM-JSON importiert.");
-    await loadItems();
-    await loadCounts();
+    await loadCounts(imported.name, selectedKind);
+    await loadSuggestions(imported.name, selectedKind);
   };
 
   useEffect(() => {
-    if (!activeCategories.includes(selectedCategory)) {
-      setSelectedCategory("Alle");
-    }
-    if (!activeCategories.includes(category)) {
-      setCategory(defaultCategory);
-    }
+    if (!activeCategories.includes(selectedCategory)) setSelectedCategory("Alle");
+    if (!activeCategories.includes(category)) setCategory(defaultCategory);
   }, [activeCategories, category, defaultCategory, selectedCategory]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadItems(trimmedQuery, selectedCategory, selectedKind);
       void loadCounts(trimmedQuery, selectedKind);
-      void loadSuggestions(trimmedQuery, selectedCategory, selectedKind);
-    }, 200);
+      void loadSuggestions(trimmedQuery, selectedKind);
+    }, 180);
     return () => clearTimeout(timer);
-  }, [trimmedQuery, selectedCategory, selectedKind]);
+  }, [activeCategories, trimmedQuery, selectedKind]);
+
+  const renderNumberField = (key: keyof NumericFields, label: string) => (
+    <label className="settings-label" key={key}>
+      {label}
+      <input
+        className="settings-input"
+        type="number"
+        value={numbers[key]}
+        onChange={(event) => setNumbers((prev) => ({ ...prev, [key]: event.target.value }))}
+      />
+    </label>
+  );
+
+  const renderDetailField = (field: DetailField) => (
+    <label className="settings-label" key={field.key}>
+      {field.label} / 100g ({field.unit})
+      <input
+        className="settings-input"
+        type="number"
+        value={detailValues[field.key] || ""}
+        onChange={(event) => setDetailValues((prev) => ({ ...prev, [field.key]: event.target.value }))}
+      />
+    </label>
+  );
 
   return (
     <section className="page">
-      <div className="hero">
-        <p className="eyebrow">Ernährung</p>
-        <h1>{isProductsView ? "Produkte" : "Zutaten"}</h1>
-        <p className="lead">{isProductsView ? "Produktdaten mit Marke/Hersteller und Barcode." : "Nur Basiszutaten ohne Produkt-Metadaten."}</p>
-      </div>
-
-      <div className="ingredients-layout">
-        <div>
-          <div className="card nutrition-form-card">
-            <h2>{isProductsView ? "Suche und Produkt bearbeiten" : "Suche und Zutat bearbeiten"}</h2>
-            <label className="settings-label">Suche ({isProductsView ? "Name, Marke, Barcode" : "Name"})
+      <div className="hero ingredients-hero">
+        <div className="ingredients-hero-head">
+          <div>
+            <p className="eyebrow">Ernährung</p>
+            <h1>{isProductsView ? "Produkte" : "Zutaten"}</h1>
+            <p className="lead">
+              {isProductsView
+                ? "Produktdaten mit Marke, Barcode und nachvollziehbarer Herkunft der Nährwerte."
+                : "Zutaten mit Makros, Mikronährstoffen und klarer Gesundheits-Einordnung pflegen."}
+            </p>
+          </div>
+          <div className="ingredients-hero-search">
+            <label className="settings-label">
+              Suche
               <input
-                className="settings-input"
+                className="settings-input ingredients-search-input"
                 value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
+                onChange={(event) => {
+                  const nextValue = event.target.value;
+                  setQuery(nextValue);
+                  setSearchFocused(true);
+                  if (selectedItem && nextValue.trim() !== (selectedItem.name || "").trim()) {
+                    setSelectedItem(null);
+                  }
+                }}
+                onFocus={() => {
+                  setSearchFocused(true);
+                  void loadSuggestions(query, selectedKind);
+                }}
                 onBlur={() => setTimeout(() => setSearchFocused(false), 140)}
-                placeholder={isProductsView ? "z.B. Skyr, Red Bull, 761..." : "z.B. Banane, Reis, Haferflocken..."}
+                placeholder={isProductsView ? "Name, Marke oder Barcode" : "Zutat suchen"}
               />
               {searchFocused && suggestions.length > 0 ? (
                 <div className="ingredient-suggest-box">
@@ -365,110 +524,246 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
                         setQuery(suggestion.name);
                         setSearchFocused(false);
                         loadIntoForm(suggestion);
-                        void loadItems(suggestion.name, selectedCategory, selectedKind);
                       }}
                     >
                       <strong>{suggestion.name}</strong>
-                      <span>
-                        {isProductsView
-                          ? [suggestion.brand, suggestion.barcode].filter(Boolean).join(" · ")
-                          : suggestion.category || "-"}
-                      </span>
+                      <span>{[suggestion.category, isProductsView ? suggestion.brand : null, suggestion.source_label || suggestion.source_type].filter(Boolean).join(" · ")}</span>
                     </button>
                   ))}
                 </div>
               ) : null}
             </label>
-
-            <form className="nutrition-form" onSubmit={(e) => void saveItem(e)}>
-              <label className="settings-label">Name (DE)<input className="settings-input" value={name} onChange={(e) => setName(e.target.value)} /></label>
-              <label className="settings-label">Name (EN / USDA)<input className="settings-input" value={nameEn} onChange={(e) => setNameEn(e.target.value)} required /></label>
-              <label className="settings-label">Typ<input className="settings-input" value={isProductsView ? "Produkt" : "Basiszutat"} readOnly /></label>
-              <label className="settings-label">Sichtbarkeit<select className="settings-input" value={scope} onChange={(e) => setScope(e.target.value as "global" | "user")}><option value="user">Nur für mich</option><option value="global">Globaler Katalog</option></select></label>
-              <label className="settings-label">Kategorie<select className="settings-input" value={category} onChange={(e) => setCategory(e.target.value)}>{activeCategories.filter((c) => c !== "Alle").map((c) => <option key={c} value={c}>{c}</option>)}</select></label>
-              {isProductsView ? <label className="settings-label">Marke/Hersteller<input className="settings-input" value={brand} onChange={(e) => setBrand(e.target.value)} /></label> : null}
-              {isProductsView ? <label className="settings-label">Barcode<input className="settings-input" value={barcode} onChange={(e) => setBarcode(e.target.value)} /></label> : null}
-              <label className="settings-label">Herkunft<select className="settings-input" value={originType} onChange={(e) => setOriginType(e.target.value)}><option value="trusted_source">Trusted Source</option><option value="manufacturer">Hersteller</option><option value="community">Community</option><option value="llm">LLM</option><option value="user_self">Selbst erfasst</option></select></label>
-              <label className="settings-label">Trust Level<select className="settings-input" value={trustLevel} onChange={(e) => setTrustLevel(e.target.value)}><option value="high">high</option><option value="medium">medium</option><option value="low">low</option></select></label>
-              <label className="settings-label">Verifizierung<select className="settings-input" value={verificationStatus} onChange={(e) => setVerificationStatus(e.target.value)}><option value="unverified">unverified</option><option value="source_linked">source_linked</option><option value="reviewed">reviewed</option><option value="verified">verified</option></select></label>
-              <label className="settings-label">Health-Indikator<select className="settings-input" value={healthIndicator} onChange={(e) => setHealthIndicator(e.target.value as "very_positive" | "neutral" | "counterproductive")}><option value="very_positive">sehr positiv</option><option value="neutral">neutral</option><option value="counterproductive">eher kontraproduktiv</option></select></label>
-              <label className="settings-label">Quelle (Label)<input className="settings-input" value={sourceLabel} onChange={(e) => setSourceLabel(e.target.value)} /></label>
-              <label className="settings-label nutrition-span-2">Quelle (URL)<input className="settings-input" value={sourceUrl} onChange={(e) => setSourceUrl(e.target.value)} /></label>
-
-              <label className="settings-label">kcal/100g<input className="settings-input" type="number" value={numbers.kcal_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, kcal_per_100g: e.target.value }))} /></label>
-              <label className="settings-label">Protein/100g<input className="settings-input" type="number" value={numbers.protein_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, protein_per_100g: e.target.value }))} /></label>
-              <label className="settings-label">Kohlenhydrate/100g<input className="settings-input" type="number" value={numbers.carbs_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, carbs_per_100g: e.target.value }))} /></label>
-              <label className="settings-label">Fett/100g<input className="settings-input" type="number" value={numbers.fat_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, fat_per_100g: e.target.value }))} /></label>
-
-              <details className="nutrition-details-section nutrition-span-2">
-                <summary>Weitere Inhaltsstoffe (aufklappen)</summary>
-                <label className="settings-label">Ballaststoffe/100g<input className="settings-input" type="number" value={numbers.fiber_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, fiber_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Zucker/100g<input className="settings-input" type="number" value={numbers.sugar_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, sugar_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Stärke/100g<input className="settings-input" type="number" value={numbers.starch_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, starch_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Gesättigte Fette/100g<input className="settings-input" type="number" value={numbers.saturated_fat_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, saturated_fat_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Einfach unges. Fette/100g<input className="settings-input" type="number" value={numbers.monounsaturated_fat_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, monounsaturated_fat_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Mehrfach unges. Fette/100g<input className="settings-input" type="number" value={numbers.polyunsaturated_fat_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, polyunsaturated_fat_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Natrium mg/100g<input className="settings-input" type="number" value={numbers.sodium_mg_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, sodium_mg_per_100g: e.target.value }))} /></label>
-                <label className="settings-label">Kalium mg/100g<input className="settings-input" type="number" value={numbers.potassium_mg_per_100g} onChange={(e) => setNumbers((p) => ({ ...p, potassium_mg_per_100g: e.target.value }))} /></label>
-                <label className="settings-label nutrition-span-2">Weitere Werte als JSON<textarea className="settings-input" rows={4} value={detailsRaw} onChange={(e) => setDetailsRaw(e.target.value)} /></label>
-              </details>
-
-              <div className="settings-actions nutrition-span-2">
-                <button className="primary-button" type="submit">{isProductsView ? "Produkt speichern" : "Zutat speichern"}</button>
-                <button
-                  className="secondary-button"
-                  type="button"
-                  onClick={() => {
-                    setSelectedItem(null);
-                    setName("");
-                    setNameEn("");
-                    setHealthIndicator("neutral");
-                  }}
-                >
-                  {isProductsView ? "Neues Produkt" : "Neue Zutat"}
-                </button>
-                <button className="secondary-button" type="button" onClick={() => void copyLlmPrompt()}>Prompt für LLM kopieren</button>
-              </div>
-            </form>
-
-            {selectedItem ? <p className="info-text">Ausgewählt: <strong>{selectedItem.name}</strong> · Typ: <strong>{isProductsView ? "Produkt" : "Basiszutat"}</strong></p> : null}
-            <label className="settings-label">LLM-JSON importieren<textarea className="settings-input" rows={8} value={llmRawText} onChange={(e) => setLlmRawText(e.target.value)} /></label>
-            <div className="settings-actions"><button className="secondary-button" type="button" onClick={() => void importFromLlm()}>JSON importieren</button></div>
-            {error ? <p className="error-text">{error}</p> : null}
-            {message ? <p className="info-text">{message}</p> : null}
-          </div>
-
-          <div className="card nutrition-list-card">
-            <h2>{isProductsView ? "Produkte" : "Zutaten"} ({items.length})</h2>
-            {loading ? <p>{isProductsView ? "Lade Produkte..." : "Lade Zutaten..."}</p> : null}
-            {!loading && items.length === 0 ? <p>{isProductsView ? "Keine Produkte gefunden." : "Keine Zutaten gefunden."}</p> : null}
-            {!loading ? <div className="nutrition-list">{items.map((item) => (
-              <article className={`nutrition-entry nutrition-entry-selectable ${selectedItem?.id === item.id ? "selected" : ""}`} key={item.id} onClick={() => loadIntoForm(item)}>
-                <div className="nutrition-entry-head">
-                  <strong>{item.name}</strong>
-                  <span className={`health-indicator-badge health-${item.health_indicator || "neutral"}`}>{healthIndicatorLabel(item.health_indicator)}</span>
-                  {isProductsView ? <span>{item.brand || "-"}</span> : null}
-                  <span>{item.category || "-"}</span>
-                </div>
-                <div className="nutrition-entry-summary">
-                  <span>kcal: {item.kcal_per_100g ?? "-"}</span><span>P: {item.protein_per_100g ?? "-"}</span><span>C: {item.carbs_per_100g ?? "-"}</span><span>F: {item.fat_per_100g ?? "-"}</span>
-                  {isProductsView ? <span>Barcode: {item.barcode || "-"}</span> : null}
-                  <span>Quelle: {item.source_label || item.source_type || "-"}</span>
-                </div>
-              </article>
-            ))}</div> : null}
+            <div className="ingredients-search-meta">
+              <span>{resultCount} Treffer</span>
+              <span>{selectedCategory === "Alle" ? "Alle Kategorien" : selectedCategory}</span>
+              <span>{selectedItem ? `Aktiv: ${selectedItem.name}` : "Neue Eingabe"}</span>
+            </div>
           </div>
         </div>
 
-        <aside className="card ingredients-categories">
-          <h2>Kategorien</h2>
-          <div className="ingredients-categories-list">{activeCategories.map((cat) => (
-            <button type="button" key={cat} className={cat === selectedCategory ? "nav-sub-link active" : "nav-sub-link"} onClick={() => setSelectedCategory(cat)}>
-              {cat} ({categoryCounts[cat] ?? 0})
+        <div className="ingredients-category-row">
+          {activeCategories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={cat === selectedCategory ? "ingredients-category-pill active" : "ingredients-category-pill"}
+              onClick={() => setSelectedCategory(cat)}
+            >
+              {cat} <span>{categoryCounts[cat] ?? 0}</span>
             </button>
-          ))}</div>
-        </aside>
+          ))}
+        </div>
       </div>
+
+      <form className="ingredients-editor" onSubmit={(event) => void saveItem(event)}>
+        <section className="card ingredients-section">
+          <div className="section-title-row">
+            <div>
+              <h2>Basis Infos</h2>
+              <p className="lead">Name, Typ, Kategorie, Sichtbarkeit und der visuelle Health-Indikator.</p>
+            </div>
+          </div>
+          <div className="ingredients-basis-layout">
+            <div className="ingredients-basis-grid">
+              <label className="settings-label">
+                Name DE
+                <input className="settings-input" value={name} onChange={(event) => setName(event.target.value)} />
+              </label>
+              <label className="settings-label">
+                Name EN / USDA
+                <input className="settings-input" value={nameEn} onChange={(event) => setNameEn(event.target.value)} />
+              </label>
+              <label className="settings-label">
+                Typ
+                <input className="settings-input" value={isProductsView ? "Produkt" : "Basiszutat"} readOnly />
+              </label>
+              <label className="settings-label">
+                Kategorie
+                <select className="settings-input" value={category} onChange={(event) => setCategory(event.target.value)}>
+                  {activeCategories.filter((cat) => cat !== "Alle").map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="settings-label">
+                Sichtbarkeit
+                <select className="settings-input" value={scope} onChange={(event) => setScope(event.target.value as "global" | "user")}>
+                  <option value="user">Nur für mich</option>
+                  <option value="global">Globaler Katalog</option>
+                </select>
+              </label>
+              {isProductsView ? (
+                <label className="settings-label">
+                  Marke / Hersteller
+                  <input className="settings-input" value={brand} onChange={(event) => setBrand(event.target.value)} />
+                </label>
+              ) : null}
+              {isProductsView ? (
+                <label className="settings-label">
+                  Barcode
+                  <input className="settings-input" value={barcode} onChange={(event) => setBarcode(event.target.value)} />
+                </label>
+              ) : null}
+            </div>
+
+            <aside className="ingredients-health-card">
+              <span className={`health-indicator-badge ${healthInfo.tone}`}>{healthInfo.label}</span>
+              <strong>Health Einschätzung</strong>
+              <p>{healthInfo.subtitle}</p>
+              <label className="settings-label">
+                Visueller Indikator
+                <select className="settings-input" value={healthIndicator} onChange={(event) => setHealthIndicator(event.target.value as HealthIndicator)}>
+                  <option value="very_positive">Sehr positiv</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="counterproductive">Eher kontraproduktiv</option>
+                </select>
+              </label>
+              <div className="settings-status-grid">
+                <div className="settings-status-chip">
+                  <span>Quelle</span>
+                  <strong>{selectedItem?.source_label || selectedItem?.source_type || "manuell"}</strong>
+                </div>
+                <div className="settings-status-chip">
+                  <span>Override</span>
+                  <strong>{selectedItem?.has_user_override ? "Ja" : "Nein"}</strong>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section className="card ingredients-section">
+          <div className="section-title-row">
+            <div>
+              <h2>Hauptinfos</h2>
+              <p className="lead">Makros und Basiswerte, die für Alltag und Auswertung direkt relevant sind.</p>
+            </div>
+          </div>
+          <div className="ingredients-macro-grid">
+            {NUMERIC_FIELDS.map((field) => renderNumberField(field.key, field.label))}
+          </div>
+        </section>
+
+        <section className="card ingredients-section">
+          <div className="section-title-row">
+            <div>
+              <h2>Herkunft der Informationen</h2>
+              <p className="lead">Quellenlage, Trustlevel, Verifizierung und USDA-Bezug.</p>
+            </div>
+          </div>
+          <div className="ingredients-origin-grid">
+            <label className="settings-label">
+              Herkunft
+              <select className="settings-input" value={originType} onChange={(event) => setOriginType(event.target.value)}>
+                <option value="trusted_source">Trusted Source</option>
+                <option value="manufacturer">Hersteller</option>
+                <option value="community">Community</option>
+                <option value="llm">LLM</option>
+                <option value="user_self">Selbst erfasst</option>
+              </select>
+            </label>
+            <label className="settings-label">
+              Trust Level
+              <select className="settings-input" value={trustLevel} onChange={(event) => setTrustLevel(event.target.value)}>
+                <option value="high">high</option>
+                <option value="medium">medium</option>
+                <option value="low">low</option>
+              </select>
+            </label>
+            <label className="settings-label">
+              Verifizierung
+              <select className="settings-input" value={verificationStatus} onChange={(event) => setVerificationStatus(event.target.value)}>
+                <option value="unverified">unverified</option>
+                <option value="source_linked">source_linked</option>
+                <option value="reviewed">reviewed</option>
+                <option value="verified">verified</option>
+              </select>
+            </label>
+            <label className="settings-label">
+              USDA Status
+              <select className="settings-input" value={usdaStatus} onChange={(event) => setUsdaStatus(event.target.value)}>
+                <option value="unknown">unknown</option>
+                <option value="valid">valid</option>
+                <option value="valid_unknown">valid_unknown</option>
+              </select>
+            </label>
+            <label className="settings-label">
+              Quellen-Label
+              <input className="settings-input" value={sourceLabel} onChange={(event) => setSourceLabel(event.target.value)} />
+            </label>
+            <label className="settings-label">
+              Quellen-URL
+              <input className="settings-input" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} />
+            </label>
+            <div className="settings-status-chip">
+              <span>Quellart</span>
+              <strong>{prettifyOriginType(selectedItem?.source_type || originType)}</strong>
+            </div>
+            <div className="settings-status-chip">
+              <span>Aktive Health-Wertung</span>
+              <strong>{healthInfo.label}</strong>
+            </div>
+          </div>
+        </section>
+
+        <div className="ingredients-details-columns">
+          <section className="card ingredients-section">
+            <div className="section-title-row">
+              <div>
+                <h2>Weitere Inhaltsstoffe 1</h2>
+                <p className="lead">Fette, Zuckerformen und wichtige Mineralstoffe für die Alltagsbewertung.</p>
+              </div>
+            </div>
+            <div className="ingredients-details-grid">{DETAIL_GROUP_ONE.map(renderDetailField)}</div>
+          </section>
+
+          <section className="card ingredients-section">
+            <div className="section-title-row">
+              <div>
+                <h2>Inhaltsstoffe 2</h2>
+                <p className="lead">Vitamine und Mikronährstoffe für gesundheitsbewusste Nutzer.</p>
+              </div>
+            </div>
+            <div className="ingredients-details-grid">{DETAIL_GROUP_TWO.map(renderDetailField)}</div>
+          </section>
+        </div>
+
+        <section className="card ingredients-section">
+          <div className="section-title-row">
+            <div>
+              <h2>LLM</h2>
+              <p className="lead">Prompt erzeugen, JSON einfügen und strukturierte Werte direkt übernehmen.</p>
+            </div>
+          </div>
+          <label className="settings-label">
+            LLM JSON
+            <textarea className="settings-input" rows={10} value={llmRawText} onChange={(event) => setLlmRawText(event.target.value)} />
+          </label>
+          <div className="settings-actions">
+            <button className="primary-button" type="submit">
+              {selectedItem ? (isProductsView ? "Produkt aktualisieren" : "Zutat aktualisieren") : isProductsView ? "Produkt speichern" : "Zutat speichern"}
+            </button>
+            <button className="secondary-button" type="button" onClick={resetForm}>
+              {isProductsView ? "Neues Produkt" : "Neue Zutat"}
+            </button>
+            <button className="secondary-button" type="button" onClick={() => void copyLlmPrompt()}>
+              Prompt kopieren
+            </button>
+            <button className="secondary-button" type="button" onClick={() => void importFromLlm()}>
+              JSON importieren
+            </button>
+          </div>
+          {selectedItem ? (
+            <p className="info-text">
+              Aktiv geladen: <strong>{selectedItem.name}</strong> - {selectedItem.category || "ohne Kategorie"} - {selectedItem.source_label || selectedItem.source_type || "manuell"}
+            </p>
+          ) : null}
+          {error ? <p className="error-text">{error}</p> : null}
+          {message ? <p className="info-text">{message}</p> : null}
+        </section>
+      </form>
     </section>
   );
 }

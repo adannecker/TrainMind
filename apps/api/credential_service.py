@@ -10,7 +10,11 @@ from packages.db.models import ServiceCredential
 from packages.db.session import SessionLocal
 
 
-_ENCRYPTION_ENV_KEYS = ("APP_ENCRYPTION_KEY", "TRAINMIND_ENCRYPTION_KEY")
+_ENCRYPTION_ENV_KEYS = (
+    "APP_ENCRYPTION_KEY",
+    "APP_ENCRYPTION_KY",
+    "TRAINMIND_ENCRYPTION_KEY",
+)
 
 
 def _get_encryption_key() -> str:
@@ -19,7 +23,7 @@ def _get_encryption_key() -> str:
         if value:
             return value
     raise ValueError(
-        "Missing encryption key. Set APP_ENCRYPTION_KEY (or TRAINMIND_ENCRYPTION_KEY) in environment/.env."
+        "Missing encryption key. Set APP_ENCRYPTION_KEY, APP_ENCRYPTION_KY, or TRAINMIND_ENCRYPTION_KEY in environment/.env."
     )
 
 
@@ -29,7 +33,7 @@ def _get_fernet() -> Fernet:
         return Fernet(key)
     except Exception as exc:
         raise ValueError(
-            "Invalid APP_ENCRYPTION_KEY format. It must be a valid Fernet key."
+            "Invalid encryption key format. It must be a valid Fernet key."
         ) from exc
 
 

@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 import json
+import os
 
 from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +18,8 @@ from apps.api.nutrition_service import (
     create_entry_from_recipe,
     create_food_item,
     create_recipe,
+    get_food_item,
+    delete_recipe,
     delete_entry,
     get_food_item_category_counts,
     import_food_item_from_llm,
@@ -113,6 +118,17 @@ def profile_update(payload: UserProfileUpdateRequest, current_user: dict = Depen
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
+
+
+@app.get("/llm/status")
+def llm_status(current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    return {
+        "provider": "openai",
+        "configured": bool(api_key),
+        "key_hint": f"...{api_key[-6:]}" if len(api_key) >= 6 else None,
+    }
 
 
 @app.get("/profile/weight-logs")
@@ -287,14 +303,18 @@ class NutritionRecipeCreateRequest(BaseModel):
     id: str | None = None
     name: str
     notes: str | None = None
+    preparation: str | None = None
     visibility: str | None = "private"
+    is_favorite: bool | None = False
     items: list[NutritionRecipeItemRequest] = Field(default_factory=list)
 
 
 class NutritionRecipeUpdateRequest(BaseModel):
     name: str | None = None
     notes: str | None = None
+    preparation: str | None = None
     visibility: str | None = None
+    is_favorite: bool | None = None
     items: list[NutritionRecipeItemRequest] | None = None
 
 
@@ -307,6 +327,9 @@ class NutritionEntryFromRecipeRequest(BaseModel):
 
 
 class UserProfileUpdateRequest(BaseModel):
+    display_name: str | None = None
+    date_of_birth: str | None = None
+    gender: str | None = None
     current_weight_kg: float | None = None
     target_weight_kg: float | None = None
     start_weight_kg: float | None = None
@@ -545,6 +568,26 @@ def nutrition_update_recipe(
 ) -> dict:
     try:
         return update_recipe(user_id=int(current_user["id"]), recipe_id=recipe_id, payload=payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected nutrition error: {exc}") from exc
+
+
+@app.delete("/nutrition/recipes/{recipe_id}")
+def nutrition_delete_recipe(recipe_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_recipe(user_id=int(current_user["id"]), recipe_id=recipe_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected nutrition error: {exc}") from exc
+
+
+@app.get("/nutrition/food-items/{item_id}")
+def nutrition_get_food_item(item_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_food_item(user_id=int(current_user["id"]), item_id=item_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
