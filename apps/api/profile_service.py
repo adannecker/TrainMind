@@ -46,6 +46,18 @@ def _validate_weight(value: float | None, field_name: str) -> float | None:
     return parsed
 
 
+def _normalize_gender(value: str | None) -> str | None:
+    clean_gender = str(value or "").strip().lower()
+    if not clean_gender:
+        return None
+    if clean_gender == "diverse":
+        return "unknown"
+    allowed_genders = {"male", "female", "unknown"}
+    if clean_gender not in allowed_genders:
+        raise ValueError("gender must be one of: male, female, unknown.")
+    return clean_gender
+
+
 def _profile_payload(profile: UserProfile | None, user: User | None = None) -> dict[str, Any]:
     display_name = (user.display_name or "") if user is not None else ""
     if profile is None:
@@ -67,7 +79,7 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
     return {
         "display_name": display_name,
         "date_of_birth": _serialize_date(profile.date_of_birth),
-        "gender": profile.gender,
+        "gender": _normalize_gender(profile.gender),
         "current_weight_kg": profile.current_weight_kg,
         "target_weight_kg": profile.target_weight_kg,
         "start_weight_kg": profile.start_weight_kg,
@@ -106,11 +118,7 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
         if "date_of_birth" in payload:
             profile.date_of_birth = _parse_date(str(payload.get("date_of_birth") or "")) if payload.get("date_of_birth") else None
         if "gender" in payload:
-            clean_gender = str(payload.get("gender") or "").strip().lower()
-            allowed_genders = {"male", "female", "diverse", "unknown"}
-            if clean_gender and clean_gender not in allowed_genders:
-                raise ValueError("gender must be one of: male, female, diverse, unknown.")
-            profile.gender = clean_gender or None
+            profile.gender = _normalize_gender(payload.get("gender"))
         if "current_weight_kg" in payload:
             profile.current_weight_kg = _validate_weight(payload.get("current_weight_kg"), "current_weight_kg")
         if "target_weight_kg" in payload:

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -139,6 +140,136 @@ def _normalize_health_indicator(value: str | None) -> str:
     raw = (value or "").strip().lower()
     allowed = {"very_positive", "neutral", "counterproductive"}
     return raw if raw in allowed else "neutral"
+
+
+def _normalized_search_text(value: str | None) -> str:
+    return " ".join((value or "").strip().lower().split())
+
+
+def _tokenize_search_text(value: str | None) -> list[str]:
+    normalized = _normalized_search_text(value)
+    if not normalized:
+        return []
+    return [token for token in re.split(r"[^\w]+", normalized) if token]
+
+
+def _search_segments(value: str | None) -> tuple[str, str]:
+    raw = " ".join((value or "").strip().split())
+    if not raw:
+        return ("", "")
+    without_brackets = re.sub(r"\s*\([^()]*\)", "", raw).strip()
+    bracket_parts = re.findall(r"\(([^()]*)\)", raw)
+    bracket_text = " ".join(part.strip() for part in bracket_parts if part.strip())
+    return (_normalized_search_text(without_brackets), _normalized_search_text(bracket_text))
+
+
+def _matches_word_start(value: str | None, query: str, *, exact_word: bool = False) -> bool:
+    normalized = _normalized_search_text(value)
+    q = _normalized_search_text(query)
+    if not normalized or not q:
+        return False
+    if exact_word:
+        return re.search(rf"\b{re.escape(q)}\b", normalized) is not None
+    return re.search(rf"\b{re.escape(q)}", normalized) is not None
+
+
+def _word_start_conditions(column, query: str, *, exact_word: bool = False):
+    q = _normalized_search_text(query)
+    if not q:
+        return []
+    if exact_word:
+        return [
+            column.ilike(f"{q} %"),
+            column.ilike(f"% {q} %"),
+            column.ilike(f"{q}(%"),
+            column.ilike(f"% {q}(%"),
+            column.ilike(f"{q}-%"),
+            column.ilike(f"% {q}-%"),
+            column.ilike(f"{q}/%"),
+            column.ilike(f"% {q}/%"),
+            column.ilike(q),
+        ]
+    return [
+        column.ilike(f"{q}%"),
+        column.ilike(f"% {q}%"),
+        column.ilike(f"%({q}%"),
+        column.ilike(f"%-{q}%"),
+        column.ilike(f"%/{q}%"),
+    ]
+
+
+def _split_variant_name(value: str | None) -> tuple[str, str | None]:
+    raw = " ".join((value or "").strip().split())
+    if not raw:
+        return ("", None)
+
+    bracket_match = re.match(r"^(?P<base>.+?)\s*\((?P<variant>[^()]+)\)\s*$", raw)
+    if bracket_match:
+        return (bracket_match.group("base").strip(), bracket_match.group("variant").strip() or None)
+
+    lower = raw.lower()
+    egg_variants = ("klein", "mittel", "gross", "groß")
+    for variant in egg_variants:
+        marker = f" {variant}"
+        if lower.startswith("ei") and lower.endswith(marker):
+            return (raw[: -len(marker)].strip(), raw[-len(variant) :].strip())
+
+    return (raw, None)
+
+
+def _derive_piece_weight_g(base_name: str | None, variant_label: str | None, details: dict[str, Any] | None = None) -> float | None:
+    if isinstance(details, dict):
+        explicit = details.get("piece_weight_g")
+        if isinstance(explicit, (int, float)) and explicit > 0:
+            return float(explicit)
+
+    base = _normalized_search_text(base_name)
+    variant = _normalized_search_text(variant_label)
+    if base != "ei":
+        return None
+    if variant in {"klein"}:
+        return 44.0
+    if variant in {"gross", "groß"}:
+        return 63.0
+    return 53.0
+
+
+def _food_item_search_rank(item: dict[str, Any], query: str) -> tuple[int, int, str]:
+    q = _normalized_search_text(query)
+    if not q:
+        return (9, 0, "")
+
+    candidates = [item.get("name"), item.get("name_en"), item.get("name_de"), item.get("base_name")]
+
+    best_rank = 5
+    best_length = 10**9
+    best_label = _normalized_search_text(item.get("name")) or _normalized_search_text(item.get("name_de")) or _normalized_search_text(item.get("name_en")) or ""
+
+    for candidate in candidates:
+        main_text, bracket_text = _search_segments(candidate)
+        if not main_text and not bracket_text:
+            continue
+        main_tokens = _tokenize_search_text(main_text)
+        rank = 5
+
+        if main_tokens and main_tokens[0].startswith(q):
+            rank = 0 if main_tokens[0] == q or main_text.startswith(q) else 1
+        elif main_tokens and q in main_tokens[0]:
+            rank = 1
+        elif any(token.startswith(q) for token in main_tokens[1:]):
+            rank = 2
+        elif any(q in token for token in main_tokens[1:]):
+            rank = 3
+        elif bracket_text and any(token.startswith(q) for token in _tokenize_search_text(bracket_text)):
+            rank = 4
+        elif bracket_text and q in bracket_text:
+            rank = 4
+        if rank < best_rank or (rank == best_rank and len(candidate) < best_length):
+            best_rank = rank
+            best_length = len(candidate)
+            best_label = _normalized_search_text(candidate)
+
+    return (best_rank, best_length, best_label)
 
 
 def _record_sync_event(session, user_id: int, entity_type: str, entity_id: str, op: str, payload: dict[str, Any]) -> None:
@@ -496,22 +627,27 @@ def _food_item_payload(
         "updated_at": _serialize_datetime(item.updated_at),
         "deleted_at": _serialize_datetime(item.deleted_at),
     }
-    if override is None:
-        return payload
+    if override is not None:
+        for field in FOOD_SCALAR_FIELDS:
+            value = getattr(override, field)
+            if value is not None:
+                payload[field] = value
 
-    for field in FOOD_SCALAR_FIELDS:
-        value = getattr(override, field)
-        if value is not None:
-            payload[field] = value
+        if override.details_json:
+            try:
+                parsed = json.loads(override.details_json)
+                if isinstance(parsed, dict):
+                    payload["details"] = parsed
+            except json.JSONDecodeError:
+                pass
+        payload["updated_at"] = _serialize_datetime(max(item.updated_at, override.updated_at))
 
-    if override.details_json:
-        try:
-            parsed = json.loads(override.details_json)
-            if isinstance(parsed, dict):
-                payload["details"] = parsed
-        except json.JSONDecodeError:
-            pass
-    payload["updated_at"] = _serialize_datetime(max(item.updated_at, override.updated_at))
+    display_name = str(payload.get("name") or "")
+    base_name, variant_label = _split_variant_name(display_name)
+    payload["base_name"] = base_name or display_name
+    payload["variant_label"] = variant_label
+    payload["is_variant"] = bool(variant_label)
+    payload["piece_weight_g"] = _derive_piece_weight_g(payload.get("base_name"), payload.get("variant_label"), payload.get("details"))
     return payload
 
 
@@ -522,7 +658,9 @@ def list_food_items(
     item_kind: str | None = None,
     limit: int = 30,
 ) -> dict[str, Any]:
-    q = (query or "").strip()
+    raw_query = query or ""
+    q = raw_query.strip()
+    exact_word = bool(raw_query and raw_query[-1].isspace())
     category_filter = (category or "").strip()
     kind_filter = _normalize_item_kind(item_kind) if (item_kind or "").strip() else ""
     with SessionLocal() as session:
@@ -533,14 +671,17 @@ def list_food_items(
             .order_by(NutritionFoodItem.updated_at.desc())
         )
         if q:
-            like = f"%{q}%"
+            name_conditions = _word_start_conditions(NutritionFoodItem.name, q, exact_word=exact_word)
+            name_en_conditions = _word_start_conditions(NutritionFoodItem.name_en, q, exact_word=exact_word)
+            name_de_conditions = _word_start_conditions(NutritionFoodItem.name_de, q, exact_word=exact_word)
+            brand_conditions = _word_start_conditions(NutritionFoodItem.brand, q, exact_word=exact_word)
             stmt = stmt.where(
                 or_(
-                    NutritionFoodItem.name.ilike(like),
-                    NutritionFoodItem.name_en.ilike(like),
-                    NutritionFoodItem.name_de.ilike(like),
-                    NutritionFoodItem.brand.ilike(like),
-                    NutritionFoodItem.barcode.ilike(like),
+                    *name_conditions,
+                    *name_en_conditions,
+                    *name_de_conditions,
+                    *brand_conditions,
+                    NutritionFoodItem.barcode.ilike(f"{q}%"),
                 )
             )
         if category_filter and category_filter.lower() != "alle":
@@ -556,7 +697,10 @@ def list_food_items(
                         ~NutritionFoodItem.category.in_(PRODUCT_CATEGORIES),
                     )
                 )
-        raw_items = session.scalars(stmt.limit(max(limit * 3, limit))).all()
+        raw_limit = max(limit * 3, limit)
+        if q:
+            raw_limit = max(limit * 25, 250)
+        raw_items = session.scalars(stmt.limit(min(raw_limit, 1000))).all()
         if not raw_items:
             return {"items": []}
 
@@ -587,7 +731,24 @@ def list_food_items(
             _food_item_payload(item, override=override_map.get(item.id), primary_source=source_map.get(item.id))
             for item in raw_items
         ]
+        if q:
+            merged = [
+                item
+                for item in merged
+                if any(
+                    _matches_word_start(candidate, q, exact_word=exact_word)
+                    for candidate in [item.get("name"), item.get("name_en"), item.get("name_de"), item.get("base_name")]
+                )
+            ]
         merged.sort(key=lambda x: x.get("updated_at") or "", reverse=True)
+        if q:
+            ranked = [(_food_item_search_rank(item, q), item) for item in merged]
+            if len(q) <= 2:
+                focused = [entry for entry in ranked if entry[0][0] <= 4]
+                if focused:
+                    ranked = focused
+            ranked.sort(key=lambda entry: entry[0])
+            merged = [item for _, item in ranked]
         return {"items": merged[:limit]}
 
 
@@ -618,7 +779,9 @@ def get_food_item(user_id: int, item_id: str) -> dict[str, Any]:
 
 
 def get_food_item_category_counts(user_id: int, query: str | None = None, item_kind: str | None = None) -> dict[str, Any]:
-    q = (query or "").strip()
+    raw_query = query or ""
+    q = raw_query.strip()
+    exact_word = bool(raw_query and raw_query[-1].isspace())
     kind_filter = _normalize_item_kind(item_kind) if (item_kind or "").strip() else ""
     with SessionLocal() as session:
         stmt = (
@@ -639,16 +802,19 @@ def get_food_item_category_counts(user_id: int, query: str | None = None, item_k
                         NutritionFoodItem.category.is_(None),
                         ~NutritionFoodItem.category.in_(PRODUCT_CATEGORIES),
                     )
-                )
+        )
         if q:
-            like = f"%{q}%"
+            name_conditions = _word_start_conditions(NutritionFoodItem.name, q, exact_word=exact_word)
+            name_en_conditions = _word_start_conditions(NutritionFoodItem.name_en, q, exact_word=exact_word)
+            name_de_conditions = _word_start_conditions(NutritionFoodItem.name_de, q, exact_word=exact_word)
+            brand_conditions = _word_start_conditions(NutritionFoodItem.brand, q, exact_word=exact_word)
             stmt = stmt.where(
                 or_(
-                    NutritionFoodItem.name.ilike(like),
-                    NutritionFoodItem.name_en.ilike(like),
-                    NutritionFoodItem.name_de.ilike(like),
-                    NutritionFoodItem.brand.ilike(like),
-                    NutritionFoodItem.barcode.ilike(like),
+                    *name_conditions,
+                    *name_en_conditions,
+                    *name_de_conditions,
+                    *brand_conditions,
+                    NutritionFoodItem.barcode.ilike(f"{q}%"),
                 )
             )
         rows = session.execute(stmt.group_by(NutritionFoodItem.category)).all()

@@ -8,6 +8,10 @@ type FoodItem = {
   item_kind: "base_ingredient" | "product";
   brand?: string | null;
   category?: string | null;
+  base_name?: string | null;
+  variant_label?: string | null;
+  is_variant?: boolean;
+  piece_weight_g?: number | null;
 };
 
 type FoodItemDetail = FoodItem & {
@@ -53,12 +57,15 @@ type Recipe = {
   items: RecipeItem[];
 };
 
-type AmountUnit = "g" | "ml" | "el" | "tl";
+type AmountUnit = "g" | "ml" | "el" | "tl" | "stk";
 
 type DraftItem = {
   food_item_id: string;
   label: string;
   category?: string | null;
+  base_name?: string | null;
+  variant_label?: string | null;
+  piece_weight_g?: number | null;
   amount: string;
   unit: AmountUnit;
 };
@@ -109,6 +116,7 @@ const UNIT_OPTIONS: Array<{ value: AmountUnit; label: string }> = [
   { value: "ml", label: "ml" },
   { value: "el", label: "EL" },
   { value: "tl", label: "TL" },
+  { value: "stk", label: "Stk" },
 ];
 
 function round(value: number | null | undefined): number {
@@ -205,6 +213,17 @@ function amountToGrams(item: DraftItem): number {
   const raw = Number(item.amount || 0);
   if (!Number.isFinite(raw) || raw <= 0) return 0;
   if (item.unit === "g") return raw;
+  if (item.unit === "stk") {
+    if (item.piece_weight_g && item.piece_weight_g > 0) return raw * item.piece_weight_g;
+    const lowerBase = (item.base_name || item.label).toLowerCase();
+    const lowerVariant = (item.variant_label || "").toLowerCase();
+    if (lowerBase === "ei") {
+      if (lowerVariant === "klein") return raw * 44;
+      if (lowerVariant === "gross" || lowerVariant === "groß") return raw * 63;
+      return raw * 53;
+    }
+    return raw * 100;
+  }
 
   const lower = item.label.toLowerCase();
   const category = (item.category || "").toLowerCase();
@@ -242,6 +261,11 @@ function amountToGrams(item: DraftItem): number {
     return milliliters * 0.7;
   }
   return milliliters * 0.65;
+}
+
+function formatFoodItemSuggestion(item: FoodItem): string {
+  if (item.base_name && item.variant_label) return `${item.base_name} (${item.variant_label})`;
+  return item.name;
 }
 
 export function RecipesPage() {
@@ -379,12 +403,11 @@ export function RecipesPage() {
   }
 
   async function searchItems(query: string) {
-    const q = query.trim();
-    if (!q) {
+    if (!query.trim()) {
       setSuggestions([]);
       return;
     }
-    const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?q=${encodeURIComponent(q)}&limit=8`);
+    const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?q=${encodeURIComponent(query)}&limit=8`);
     const payload = (await response.json()) as { items?: FoodItem[]; detail?: string };
     if (!response.ok) throw new Error(payload.detail || "Suche fehlgeschlagen.");
     setSuggestions(payload.items || []);
@@ -419,6 +442,9 @@ export function RecipesPage() {
       recipe.items.map((item) => ({
         food_item_id: item.food_item_id,
         label: item.food_name,
+        base_name: item.food_name,
+        variant_label: null,
+        piece_weight_g: null,
         amount: String(round(item.amount_g)),
         unit: "g",
       })),
@@ -426,7 +452,19 @@ export function RecipesPage() {
   }
 
   function addDraftItem(item: FoodItem) {
-    setDraftItems((prev) => [...prev, { food_item_id: item.id, label: item.name, category: item.category, amount: "100", unit: "g" }]);
+    setDraftItems((prev) => [
+      ...prev,
+      {
+        food_item_id: item.id,
+        label: formatFoodItemSuggestion(item),
+        category: item.category,
+        base_name: item.base_name || item.name,
+        variant_label: item.variant_label || null,
+        piece_weight_g: item.piece_weight_g ?? null,
+        amount: item.piece_weight_g ? "1" : "100",
+        unit: item.piece_weight_g ? "stk" : "g",
+      },
+    ]);
     setIngredientSearch("");
     setSuggestions([]);
   }
@@ -798,8 +836,8 @@ export function RecipesPage() {
                   <div className="ingredient-suggest-box">
                     {suggestions.map((item) => (
                       <button key={item.id} className="ingredient-suggest-item" type="button" onClick={() => addDraftItem(item)}>
-                        <strong>{item.name}</strong>
-                        <span>{[item.item_kind === "product" ? "Produkt" : "Zutat", item.category, item.brand].filter(Boolean).join(" · ")}</span>
+                        <strong>{formatFoodItemSuggestion(item)}</strong>
+                        <span>{[item.item_kind === "product" ? "Produkt" : "Zutat", item.category, item.variant_label ? `Variante: ${item.variant_label}` : null, item.brand].filter(Boolean).join(" · ")}</span>
                       </button>
                     ))}
                   </div>

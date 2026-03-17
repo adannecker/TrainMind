@@ -325,7 +325,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     return payload;
   };
 
-  const loadCounts = async (nextQuery = trimmedQuery, nextKind = selectedKind) => {
+  const loadCounts = async (nextQuery = query, nextKind = selectedKind) => {
     const requestId = ++countRequestRef.current;
     try {
       const params = new URLSearchParams({ item_kind: nextKind });
@@ -351,14 +351,14 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     }
   };
 
-  const loadSuggestions = async (nextQuery = trimmedQuery, nextKind = selectedKind) => {
+  const loadSuggestions = async (nextQuery = query, nextKind = selectedKind) => {
     const requestId = ++suggestionRequestRef.current;
     if (nextQuery.trim().length < 2) {
       setSuggestions([]);
       return;
     }
     try {
-      const params = new URLSearchParams({ q: nextQuery.trim(), limit: "8", item_kind: nextKind });
+      const params = new URLSearchParams({ q: nextQuery, limit: "8", item_kind: nextKind });
       const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?${params.toString()}`);
       const body = await parseJsonSafely<{ items: FoodItem[] }>(response);
       if (requestId !== suggestionRequestRef.current) return;
@@ -449,11 +449,11 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      void loadCounts(trimmedQuery, selectedKind);
-      void loadSuggestions(trimmedQuery, selectedKind);
+      void loadCounts(query, selectedKind);
+      void loadSuggestions(query, selectedKind);
     }, 180);
     return () => clearTimeout(timer);
-  }, [activeCategories, trimmedQuery, selectedKind]);
+  }, [activeCategories, query, selectedKind]);
 
   const renderNumberField = (key: keyof NumericFields, label: string) => (
     <label className="settings-label" key={key}>

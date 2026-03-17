@@ -53,12 +53,21 @@ async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   return JSON.parse(text) as T;
 }
 
+function normalizeGender(value: string | null | undefined): "male" | "female" | "unknown" {
+  if (value === "male" || value === "female" || value === "unknown") return value;
+  return "unknown";
+}
+
 function toLocalInputValue(iso: string | null): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function normalizeTextValue(value: string | null | undefined): string {
+  return (value || "").trim();
 }
 
 export function SettingsPage() {
@@ -93,6 +102,11 @@ export function SettingsPage() {
   const [logWeight, setLogWeight] = useState("");
   const [logDate, setLogDate] = useState("");
   const [logNotes, setLogNotes] = useState("");
+
+  const personalDataChanged =
+    normalizeTextValue(displayName) !== normalizeTextValue(profile?.display_name) ||
+    dateOfBirth !== (profile?.date_of_birth || "") ||
+    normalizeGender(gender) !== normalizeGender(profile?.gender);
 
   async function loadStatus() {
     setLoading(true);
@@ -151,7 +165,7 @@ export function SettingsPage() {
       setProfile(p);
       setDisplayName(p.display_name || "");
       setDateOfBirth(p.date_of_birth || "");
-      setGender(p.gender || "unknown");
+      setGender(normalizeGender(p.gender));
       setCurrentWeight(p.current_weight_kg == null ? "" : String(p.current_weight_kg));
       setTargetWeight(p.target_weight_kg == null ? "" : String(p.target_weight_kg));
       setStartWeight(p.start_weight_kg == null ? "" : String(p.start_weight_kg));
@@ -210,7 +224,7 @@ export function SettingsPage() {
         body: JSON.stringify({
           display_name: displayName.trim() || null,
           date_of_birth: dateOfBirth || null,
-          gender: gender || null,
+          gender: normalizeGender(gender),
           current_weight_kg: toNumberOrNull(currentWeight),
           target_weight_kg: toNumberOrNull(targetWeight),
           start_weight_kg: toNumberOrNull(startWeight),
@@ -226,7 +240,12 @@ export function SettingsPage() {
       setProfile(next);
       setDisplayName(next.display_name || "");
       setDateOfBirth(next.date_of_birth || "");
-      setGender(next.gender || "unknown");
+      setGender(normalizeGender(next.gender));
+      setCurrentWeight(next.current_weight_kg == null ? "" : String(next.current_weight_kg));
+      setTargetWeight(next.target_weight_kg == null ? "" : String(next.target_weight_kg));
+      setStartWeight(next.start_weight_kg == null ? "" : String(next.start_weight_kg));
+      setGoalStartDate(toLocalInputValue(next.goal_start_date));
+      setGoalEndDate(toLocalInputValue(next.goal_end_date));
       window.dispatchEvent(new CustomEvent("trainmind:user-label-updated", { detail: { displayName: next.display_name || "" } }));
       setProfileMessage("Persönliche Daten gespeichert.");
     } catch (err) {
@@ -311,7 +330,7 @@ export function SettingsPage() {
 
               <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
                 <label className="settings-label">
-                  Benutzername
+                  Name
                   <input className="settings-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="z. B. Achim" />
                 </label>
                 <label className="settings-label">
@@ -324,11 +343,10 @@ export function SettingsPage() {
                     <option value="unknown">Keine Angabe</option>
                     <option value="male">Männlich</option>
                     <option value="female">Weiblich</option>
-                    <option value="diverse">Divers</option>
                   </select>
                 </label>
                 <div className="settings-actions nutrition-span-2">
-                  <button className="primary-button" type="submit" disabled={profileSaving}>
+                  <button className="primary-button" type="submit" disabled={profileSaving || !personalDataChanged}>
                     {profileSaving ? "Speichere..." : "Persönliche Daten speichern"}
                   </button>
                   <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
