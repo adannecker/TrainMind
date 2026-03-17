@@ -4,6 +4,7 @@ import { apiFetch } from "./api";
 import { clearAuthToken, getAuthToken } from "./auth";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
+import { FitRepairPage } from "./pages/FitRepairPage";
 import { HomePage } from "./pages/HomePage";
 import { IngredientsPage } from "./pages/IngredientsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -30,6 +31,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Einstellungen", to: "/setup/settings" },
       { label: "Neue Rides prüfen", to: "/setup/check-rides" },
+      { label: "Fix FIT file", to: "/setup/fix-fit-file" },
     ],
   },
   {
@@ -223,6 +225,7 @@ function Layout() {
           <Route path="/" element={<HomePage />} />
           <Route path="/setup/settings" element={<SettingsPage />} />
           <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+          <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
           <Route path="/activities/week" element={<ActivitiesWeekPage />} />
           <Route path="/nutrition/entries" element={<NutritionPage />} />
           <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />

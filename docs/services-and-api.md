@@ -32,6 +32,40 @@ API-Endpunkte (ausser Health/Root/Login) erwarten Bearer-Token.
 - `GET /garmin/credentials-status`
 - `POST /garmin/credentials`
 
+## FIT Fix Endpoints
+
+- `POST /fit-fix/inspect`
+- `POST /fit-fix/apply`
+
+### FIT Fix Flow
+
+`POST /fit-fix/inspect`
+
+- erwartet `multipart/form-data` mit Datei-Feld `file`
+- liest die FIT-Datei ein und liefert:
+  - Dateiname
+  - Dauer
+  - Anzahl Power-Records
+  - Durchschnitts- und Max-Watt
+  - aggregierte Power-Serie fuer die Web-Vorschau
+
+`POST /fit-fix/apply`
+
+- erwartet `multipart/form-data` mit:
+  - `file`
+  - `adjustments_json`
+- `adjustments_json` ist eine Liste von Bereichsanpassungen mit:
+  - `start_second`
+  - `end_second`
+  - `mode` (`percent` oder `fixed`)
+  - `value`
+- Antwort:
+  - neue FIT-Datei als Download
+  - Header mit Kurzinfos:
+    - `X-TrainMind-Changed-Records`
+    - `X-TrainMind-Avg-Power`
+    - `X-TrainMind-Max-Power`
+
 ## Activities-Endpoints
 
 - `GET /activities/week`

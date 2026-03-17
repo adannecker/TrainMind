@@ -1,4 +1,4 @@
-# TrainMind Status (Stand: 2026-03-16)
+# TrainMind Status (Stand: 2026-03-17)
 
 Diese Datei dokumentiert den aktuellen Projektstand und die naechsten konkreten Schritte.
 
@@ -30,6 +30,12 @@ Diese Datei dokumentiert den aktuellen Projektstand und die naechsten konkreten 
   - Einheiten `g`, `ml`, `EL`, `TL` mit lokaler Gramm-Umrechnung
   - Rezept-Overlay mit kumulierten Makro-/Mikronaehrstoffen und Datenabdeckung
 - Es gibt aktuell 30 lokale Starter-Rezepte fuer gesundes Sportleressen inkl. Zubereitungstexten.
+- `Fix FIT file` ist als neuer Setup-Bereich im Web verfuegbar:
+  - FIT-Datei Upload
+  - Power-Analyse und Chart-Vorschau
+  - Bereichsauswahl direkt im Chart oder per Dual-Slider
+  - Watt-Anpassung pro Bereich als `prozentual` oder `fix`
+  - Export der angepassten FIT-Datei
 
 ## 2) Datenmodell und Migrationen (Nutrition)
 
@@ -88,6 +94,10 @@ Aktueller Engpass:
 6. Freie Rezeptquellen fuer moeglichen Import pruefen (inkl. Lizenz-Check).
 7. i18n-Grundgeruest im Web vorbereiten (de/en Ressourcen statt harter Texte).
 8. UTF-8-Review in UI/Docs final abschliessen.
+9. `Fix FIT file` weiter ausbauen:
+   - weitere Metriken neben Power
+   - feinere Editierlogik fuer Reduktion/Steigerung
+   - optionaler Mehrfach-Export (z. B. TCX)
 
 ## 5) Naechster geplanter Arbeitsablauf
 
@@ -103,3 +113,15 @@ Aktueller Engpass:
 - Seed Basisdaten: `infra/scripts/seed_global_ingredients.py`
 - USDA Verify: `infra/scripts/usda_verify_ingredients.py`
 - Name-Uebersetzung: `infra/scripts/translate_food_names_openai.py`
+
+## 7) FIT Fix Technischer Stand
+
+- API-Endpunkte vorhanden:
+  - `POST /fit-fix/inspect`
+  - `POST /fit-fix/apply`
+- Backend-Logik:
+  - `packages/fit/fit_fix_service.py`
+- Web-UI:
+  - `Setup > Fix FIT file`
+  - Datei-Upload, Analyse, Bereichsauswahl, Power-Anpassung, Download
+- Aktuelle erste Ausbaustufe konzentriert sich bewusst auf Power-Korrekturen in bestehenden Power-Records.

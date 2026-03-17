@@ -12,6 +12,7 @@ matplotlib
 numpy
 pandas
 psycopg2-binary
+python-multipart
 python-dotenv
 requests
 sqlalchemy

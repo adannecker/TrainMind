@@ -38,6 +38,12 @@ docker compose -f infra/docker/docker-compose.yml down
 - `APP_ENCRYPTION_KEY` muss in `.env` gesetzt sein, damit Provider-Credentials verschluesselt gespeichert werden.
 - API-Endpunkte sind login-geschuetzt (Bearer Token, Session in DB).
 - Garmin-Credentials werden pro User in `core.service_credentials` verschluesselt abgelegt.
+- Im Hub unter `Setup > Fix FIT file` gibt es jetzt einen ersten FIT-Korrekturflow:
+  - FIT-Datei hochladen
+  - Power-Verlauf analysieren
+  - Zeitbereich im Chart markieren oder per Slider eingrenzen
+  - Watt-Anpassung pro Bereich als `prozentual` oder `fix`
+  - neue FIT-Datei direkt herunterladen
 
 Account manuell anlegen:
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -32,6 +32,7 @@ from apps.api.nutrition_service import (
     update_recipe,
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
+from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 
 app = FastAPI(title="TrainMind API", version="0.1.0")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -375,6 +376,56 @@ def garmin_import_rides(payload: GarminImportRequest, current_user: dict = Depen
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.post("/fit-fix/inspect")
+async def fit_fix_inspect(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitFixError("Bitte eine FIT-Datei auswählen.")
+        return inspect_fit_file(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+    except FitFixError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
+
+
+@app.post("/fit-fix/apply")
+async def fit_fix_apply(
+    file: UploadFile = File(...),
+    adjustments_json: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitFixError("Bitte eine FIT-Datei auswählen.")
+        raw_adjustments = json.loads(adjustments_json)
+        adjustments = normalize_adjustments(raw_adjustments)
+        output_bytes, summary = apply_power_adjustments(file_bytes=file_bytes, adjustments=adjustments)
+
+        source_name = (file.filename or "uploaded.fit").strip() or "uploaded.fit"
+        if source_name.lower().endswith(".fit"):
+            download_name = f"{source_name[:-4]}_power_fixed.fit"
+        else:
+            download_name = f"{source_name}_power_fixed.fit"
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "X-TrainMind-Changed-Records": str(summary["changed_records"]),
+            "X-TrainMind-Avg-Power": str(summary["avg_power"]),
+            "X-TrainMind-Max-Power": str(summary["max_power"]),
+        }
+        return Response(content=output_bytes, media_type="application/octet-stream", headers=headers)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid adjustments JSON: {exc}") from exc
+    except FitFixError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
 
 
 @app.get("/activities/week")
