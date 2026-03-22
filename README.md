@@ -2,6 +2,13 @@
 
 TrainMind ist als modularer Monorepo aufgebaut und aktuell als Hub + API lauffaehig.
 
+## Aktueller Produktstand
+
+- Garmin-Import mit Vergleich, Auswahl-Import, Fortschritts-Overlay und komplettem Reset fuer Re-Import-Tests
+- Training-Bereich mit historischen Grunddaten fuer `FTP` und `MaxHF`
+- Achievement-Bereich mit datenbasierten Rad-Achievements und persistenter Rekord-Historie
+- Wochenansicht fuer Aktivitaeten als erste Analyseflaeche
+
 ## Quick Start
 
 Vollstaendiger Stack (Hub, API, DB):
@@ -38,6 +45,7 @@ docker compose -f infra/docker/docker-compose.yml down
 - `APP_ENCRYPTION_KEY` muss in `.env` gesetzt sein, damit Provider-Credentials verschluesselt gespeichert werden.
 - API-Endpunkte sind login-geschuetzt (Bearer Token, Session in DB).
 - Garmin-Credentials werden pro User in `core.service_credentials` verschluesselt abgelegt.
+- Importierte Garmin-Fahrten koennen im Hub komplett geloescht und anschliessend erneut importiert werden.
 - Im Hub unter `Setup > Fix FIT file` gibt es jetzt einen ersten FIT-Korrekturflow:
   - FIT-Datei hochladen
   - Power-Verlauf analysieren
@@ -54,6 +62,7 @@ Account manuell anlegen:
 ## Detaillierte Doku
 
 - [Doku Index](docs/README.md)
+- [Roadmap / TODO](docs/todo-roadmap.md)
 - [Architektur](docs/architecture.md)
 - [Services und API](docs/services-and-api.md)
 - [Datenbank und Schemata](docs/database-and-schemas.md)

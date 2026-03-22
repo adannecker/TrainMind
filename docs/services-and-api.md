@@ -29,8 +29,26 @@ API-Endpunkte (ausser Health/Root/Login) erwarten Bearer-Token.
 
 - `GET /garmin/new-rides`
 - `POST /garmin/import-rides`
+- `POST /garmin/reset-imported`
 - `GET /garmin/credentials-status`
 - `POST /garmin/credentials`
+
+### Garmin Reset
+
+`POST /garmin/reset-imported`
+
+- loescht lokal importierte Garmin-Fahrten und zugehoerige FIT-Dateien
+- Fahrten bleiben bei Garmin selbst unveraendert
+- optional kann `delete_derived_metrics=true` mitgegeben werden, um automatisch erzeugte `MaxHF`-Werte ebenfalls zu loeschen
+- gedacht fuer komplette Re-Import-Tests und Neuaufbau abgeleiteter Analysen
+
+Beispiel-Body:
+
+```json
+{
+  "delete_derived_metrics": true
+}
+```
 
 ## FIT Fix Endpoints
 
@@ -70,6 +88,32 @@ API-Endpunkte (ausser Health/Root/Login) erwarten Bearer-Token.
 
 - `GET /activities/week`
 - `GET /activities/weeks-available`
+
+## Training-Endpoints
+
+- `GET /training/metrics`
+- `POST /training/metrics`
+- `PATCH /training/metrics/{metric_id}`
+- `DELETE /training/metrics/{metric_id}`
+
+## Achievement-Endpoints
+
+- `GET /achievements/{section_key}`
+
+Aktuell verfuegbare `section_key`:
+
+- `cycling`
+- `nutrition`
+- `health`
+
+### Achievement-Response
+
+Fuer `cycling` wird die Achievement-Welt live aus importierten Aktivitaeten berechnet und in der DB persistiert:
+
+- Achievement-Status (`erreicht` / `noch offen`)
+- Datum, wann ein Achievement erreicht wurde
+- aktueller Rekordwert mit Datum
+- Rekord-Historie als Liste von Verbesserungen mit Datum
 
 ## Nutrition-Endpoints (V1)
 

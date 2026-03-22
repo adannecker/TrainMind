@@ -48,6 +48,27 @@
 - [x] Add weekly performance visualizer (distance/time target progress)
 - [ ] Build food tracking views
 - [ ] Build training comparison visualizations (time range/provider)
+- [x] Add achievement navigation and first live achievement experience
+- [x] Persist achievement state and record history in DB
+- [x] Add Garmin reset flow for complete re-import testing
+- [ ] Expand cycling achievements with more computed milestones and special cases
+- [ ] Add visual progress indicators for achievement completion
+- [ ] Add many more record types and derived record analytics
+- [ ] Add hover/overlay drilldowns for non-record achievements as needed
+- [ ] Add activity analytics engine to derive more achievements automatically
+
+## Training Product
+- [x] Add training navigation with basics, configuration and plans
+- [x] Persist FTP and MaxHF history
+- [ ] Support configurable zone models (Coggan, simplified, Seiler, MaxHF, LTHR, Karvonen)
+- [ ] Build horizontal zone editor with compact sliders and manual overrides
+- [ ] Build full training self-assessment with goals, availability and athlete type
+- [ ] Persist training configuration profiles and goal sets
+- [ ] Generate suggested plans from training configuration
+- [ ] Offer multiple plan variants per focus area (for example many VO2max session styles)
+- [ ] Make suggested plans editable before saving
+- [ ] Export workouts/plans for Rouvy and Zwift
+- [ ] Add source-backed plan libraries and interval collections
 
 ## Ops
 - [ ] Add CI for tests + lint

@@ -80,6 +80,25 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] Monatsansicht (kompakt, trendfaehig).
 - [ ] Trend-Indikator nach Zeitraum einbauen (Richtung, Tempo, Zielerreichung).
 
+## Phase 3b: Training und Achievements
+
+- [x] Training-Navigation mit `Grunddaten`, `Training Konfiguration` und `Trainingsplaene` angelegt.
+- [x] FTP- und MaxHF-Historie inklusive manueller Pflege und automatischem MaxHF-Peak aus Aktivitaeten umgesetzt.
+- [x] Erste Achievement-Welt fuer Radfahren eingefuehrt und live an Aktivitaeten gekoppelt.
+- [x] Achievement- und Rekord-Historie persistent in DB gespeichert.
+- [x] Garmin-Reset fuer kompletten Re-Import-Flow eingebaut.
+- [ ] Weitere Rad-Achievements aufbauen, auch solche mit echter Ableitungslogik aus Aktivitaeten.
+- [ ] Visuellen Fortschritt pro Achievement-Kategorie und global einbauen.
+- [ ] Rekordwelt deutlich ausbauen (mehr Peak-/Fensterwerte, mehr automatisch abgeleitete Bestwerte).
+- [ ] Unterschiedliche Zonenmodelle konfigurierbar machen:
+  `Coggan`, vereinfachte Modelle, `Seiler 3-Zonen`, `MaxHF`, `LTHR`, `Karvonen`.
+- [ ] Kompakte horizontale Zonenansicht mit kleinen Schiebereglern fuer manuelle Anpassungen bauen.
+- [ ] Trainingskonfiguration als echten gefuehrten Fragebogen umsetzen:
+  Ziele, Verfuegbarkeit, Leistungsstand, Rennfokus, Gewicht, Triathlon-Kontext.
+- [ ] Trainingsplaene aus Konfiguration und Zielen ableiten und mehrere Varianten pro Fokusbereich vorschlagen.
+- [ ] Trainingsplaene editierbar machen und Export fuer `Rouvy` und `Zwift` vorbereiten.
+- [ ] Aktivitaeten automatisch auf weitere Analysen und Signale auswerten; Ideenpool dafuer separat sammeln.
+
 ## Phase 4: Mobile Synchronisierung
 
 - [x] Android-Emulator Setup dokumentiert und lokal lauffaehig.
@@ -97,3 +116,10 @@ Diese Datei zeigt den aktuellen Fortschritt und die naechsten Umsetzungsphasen.
 - [ ] 5. USDA-Lauf nach Stundenlimit erneut starten (Batch-basiert).
 - [ ] 6. Ergebnisquoten auswerten und Matching-Regeln nachschaerfen.
 - [ ] 7. Trust-Level und Verifizierung bei sicheren Treffern automatisch setzen.
+
+## Offene Ideensammlung Aktivitaeten
+
+- [ ] Automatische Erkennung besonderer Tagesmuster, Streaks, Doppel-Tage, Fruehstarts, Nachtfahrten.
+- [ ] Rekord-Analysen ueber weitere Zeitfenster und Signale ausbauen.
+- [ ] Mehr Aktivitaetsqualitaet aus Rohdaten ziehen:
+  Pacing, Belastungscharakter, Wiederholungsmuster, Erholungshinweise, auffaellige Ausreisser.
