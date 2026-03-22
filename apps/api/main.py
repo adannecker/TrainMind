@@ -8,10 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from apps.api.achievement_service import get_achievement_section
 from apps.api.activity_service import get_available_activity_weeks, get_weekly_activities
 from apps.api.auth_service import get_current_user_from_token, login_user, logout_user
 from apps.api.credential_service import get_service_credentials_status, set_service_credentials
-from apps.api.garmin_service import get_missing_garmin_rides, import_selected_garmin_rides
+from apps.api.garmin_service import get_missing_garmin_rides, import_selected_garmin_rides, reset_imported_garmin_data
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
     create_entry,
@@ -32,6 +33,7 @@ from apps.api.nutrition_service import (
     update_recipe,
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
+from apps.api.training_service import create_training_metric, delete_training_metric, list_training_metrics, update_training_metric
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 
 app = FastAPI(title="TrainMind API", version="0.1.0")
@@ -176,6 +178,10 @@ class GarminImportRequest(BaseModel):
 class GarminCredentialsRequest(BaseModel):
     email: str
     password: str
+
+
+class GarminResetRequest(BaseModel):
+    delete_derived_metrics: bool = False
 
 
 class NutritionEntryItemRequest(BaseModel):
@@ -346,6 +352,22 @@ class WeightLogCreateRequest(BaseModel):
     notes: str | None = None
 
 
+class TrainingMetricCreateRequest(BaseModel):
+    metric_type: str
+    recorded_at: str | None = None
+    value: float
+    source: str
+    notes: str | None = None
+
+
+class TrainingMetricUpdateRequest(BaseModel):
+    metric_type: str | None = None
+    recorded_at: str | None = None
+    value: float | None = None
+    source: str | None = None
+    notes: str | None = None
+
+
 @app.get("/garmin/credentials-status")
 def garmin_credentials_status(current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -354,6 +376,50 @@ def garmin_credentials_status(current_user: dict = Depends(get_current_user)) ->
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected credential error: {exc}") from exc
+
+
+@app.get("/training/metrics")
+def training_metrics_get(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return list_training_metrics(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/metrics")
+def training_metric_create(payload: TrainingMetricCreateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return create_training_metric(user_id=int(current_user["id"]), payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.patch("/training/metrics/{metric_id}")
+def training_metric_patch(
+    metric_id: int,
+    payload: TrainingMetricUpdateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return update_training_metric(user_id=int(current_user["id"]), metric_id=metric_id, payload=payload.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.delete("/training/metrics/{metric_id}")
+def training_metric_delete(metric_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_training_metric(user_id=int(current_user["id"]), metric_id=metric_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
 
 
 @app.post("/garmin/credentials")
@@ -376,6 +442,29 @@ def garmin_import_rides(payload: GarminImportRequest, current_user: dict = Depen
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.post("/garmin/reset-imported")
+def garmin_reset_imported(payload: GarminResetRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return reset_imported_garmin_data(
+            user_id=int(current_user["id"]),
+            delete_derived_metrics=payload.delete_derived_metrics,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.get("/achievements/{section_key}")
+def achievements_section(section_key: str, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_achievement_section(user_id=int(current_user["id"]), section_key=section_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected achievement error: {exc}") from exc
 
 
 @app.post("/fit-fix/inspect")

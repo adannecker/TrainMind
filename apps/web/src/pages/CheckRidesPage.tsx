@@ -24,6 +24,16 @@ type RidesResponse = {
   rides: Ride[];
 };
 
+type InterestingUpdate = {
+  kind: "new_max_hr_peak";
+  metric_id: number;
+  value: number;
+  recorded_at: string;
+  source: string;
+  activity_name: string;
+  activity_id: string;
+};
+
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) {
@@ -70,6 +80,10 @@ export function CheckRidesPage() {
   const [importCurrent, setImportCurrent] = useState(0);
   const [importTotal, setImportTotal] = useState(0);
   const [importCurrentName, setImportCurrentName] = useState<string>("");
+  const [celebration, setCelebration] = useState<InterestingUpdate | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [deleteDerivedMetrics, setDeleteDerivedMetrics] = useState(false);
 
   async function loadRides() {
     setLoading(true);
@@ -112,6 +126,7 @@ export function CheckRidesPage() {
       let loaded = 0;
       let skipped = 0;
       let errors = 0;
+      const interestingUpdates: InterestingUpdate[] = [];
 
       for (let i = 0; i < selectedList.length; i += 1) {
         const ride = selectedList[i];
@@ -124,10 +139,20 @@ export function CheckRidesPage() {
         });
 
         const payload = (await parseJsonSafely<
-          | { loaded: number; skipped: number; errors: Array<{ activity_id: string; reason: string }> }
+          | {
+              loaded: number;
+              skipped: number;
+              errors: Array<{ activity_id: string; reason: string }>;
+              interesting_updates?: InterestingUpdate[];
+            }
           | { detail?: string }
         >(response)) as
-          | { loaded: number; skipped: number; errors: Array<{ activity_id: string; reason: string }> }
+          | {
+              loaded: number;
+              skipped: number;
+              errors: Array<{ activity_id: string; reason: string }>;
+              interesting_updates?: InterestingUpdate[];
+            }
           | { detail?: string }
           | null;
 
@@ -150,16 +175,50 @@ export function CheckRidesPage() {
         loaded += okPayload.loaded;
         skipped += okPayload.skipped;
         errors += okPayload.errors.length;
+        interestingUpdates.push(...(okPayload.interesting_updates ?? []));
         setImportCurrent(i + 1);
       }
 
       setImportMessage(`Import finished: loaded ${loaded}, skipped ${skipped}, errors ${errors}.`);
       await loadRides();
+      if (interestingUpdates.length > 0) {
+        const newestPeak = [...interestingUpdates]
+          .filter((item) => item.kind === "new_max_hr_peak")
+          .sort((a, b) => b.value - a.value)[0];
+        if (newestPeak) {
+          setCelebration(newestPeak);
+        }
+      }
     } catch (err) {
       setImportMessage(err instanceof Error ? err.message : "Import failed");
     } finally {
       setImporting(false);
       setImportCurrentName("");
+    }
+  }
+
+  async function resetImported() {
+    setResetting(true);
+    setImportMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/garmin/reset-imported`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ delete_derived_metrics: deleteDerivedMetrics }),
+      });
+      const payload = (await parseJsonSafely<{ deleted_activities?: number; deleted_fit_files?: number; deleted_derived_metrics?: number; detail?: string }>(response)) ?? {};
+      if (!response.ok) {
+        throw new Error(payload.detail || "Reset fehlgeschlagen");
+      }
+      setImportMessage(
+        `Reset fertig: ${payload.deleted_activities ?? 0} Aktivitäten, ${payload.deleted_fit_files ?? 0} FIT-Dateien und ${payload.deleted_derived_metrics ?? 0} abgeleitete MaxHF-Werte gelöscht.`
+      );
+      setShowResetConfirm(false);
+      await loadRides();
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Reset fehlgeschlagen");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -224,6 +283,14 @@ export function CheckRidesPage() {
                 onClick={() => void loadRides()}
               >
                 Neu laden
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={importing || resetting}
+                onClick={() => setShowResetConfirm(true)}
+              >
+                Alle importierten Fahrten löschen
               </button>
             </div>
           )}
@@ -324,6 +391,72 @@ export function CheckRidesPage() {
             <p className="import-overlay-subtitle">
               {importCurrentName ? `Aktuell: ${importCurrentName}` : "Bitte warten..."}
             </p>
+          </div>
+        </div>
+      ) : null}
+
+      {celebration ? (
+        <div className="celebration-overlay" role="dialog" aria-modal="true" aria-label="Neuer Spitzenwert gefunden">
+          <div className="celebration-fireworks" aria-hidden="true">
+            <span className="firework firework-a" />
+            <span className="firework firework-b" />
+            <span className="firework firework-c" />
+            <span className="firework firework-d" />
+            <span className="firework firework-e" />
+          </div>
+          <div className="celebration-card">
+            <p className="eyebrow">Import Highlight</p>
+            <h2>Neuer MaxHF-Spitzenwert erkannt</h2>
+            <p className="lead">
+              Beim Import wurde ein neuer Spitzenwert gefunden und direkt in den Grunddaten gespeichert.
+            </p>
+            <div className="settings-status-grid">
+              <div className="settings-status-chip">
+                <span>MaxHF</span>
+                <strong>{Math.round(celebration.value)} bpm</strong>
+              </div>
+              <div className="settings-status-chip">
+                <span>Aktivität</span>
+                <strong>{celebration.activity_name}</strong>
+              </div>
+              <div className="settings-status-chip">
+                <span>Datum</span>
+                <strong>{formatDateTime(celebration.recorded_at)}</strong>
+              </div>
+            </div>
+            <div className="confirm-actions">
+              <button className="primary-button" type="button" onClick={() => setCelebration(null)}>
+                Super
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showResetConfirm ? (
+        <div className="confirm-overlay" role="dialog" aria-modal="true" aria-label="Importierte Fahrten löschen">
+          <div className="confirm-card">
+            <h2>Garmin-Import zurücksetzen</h2>
+            <p>Alle lokal importierten Garmin-Fahrten werden gelöscht und können danach erneut importiert werden.</p>
+            <label className="settings-label">
+              <span>Zusatzoption</span>
+              <span className="settings-static-field">
+                <input
+                  type="checkbox"
+                  checked={deleteDerivedMetrics}
+                  onChange={(event) => setDeleteDerivedMetrics(event.target.checked)}
+                />
+                <span style={{ marginLeft: "0.5rem" }}>Automatisch erzeugte MaxHF-Werte ebenfalls löschen</span>
+              </span>
+            </label>
+            <div className="confirm-actions">
+              <button className="secondary-button" type="button" disabled={resetting} onClick={() => setShowResetConfirm(false)}>
+                Abbrechen
+              </button>
+              <button className="primary-button" type="button" disabled={resetting} onClick={() => void resetImported()}>
+                {resetting ? "Lösche..." : "Jetzt löschen"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

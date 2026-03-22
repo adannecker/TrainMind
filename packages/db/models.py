@@ -53,6 +53,12 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     weight_logs: Mapped[list["UserWeightLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    training_metrics: Mapped[list["UserTrainingMetric"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    achievements: Mapped[list["UserAchievement"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    achievement_record_events: Mapped[list["UserAchievementRecordEvent"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class ServiceCredential(Base):
@@ -124,6 +130,78 @@ class UserWeightLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="weight_logs")
+
+
+class UserTrainingMetric(Base):
+    __tablename__ = "user_training_metrics"
+    __table_args__ = (
+        Index("ix_user_training_metrics_user_metric_recorded", "user_id", "metric_type", "recorded_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    metric_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    value: Mapped[float] = mapped_column(Float, nullable=False)
+    source: Mapped[str] = mapped_column(String(120), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="training_metrics")
+
+
+class UserAchievement(Base):
+    __tablename__ = "user_achievements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "achievement_key", name="uq_user_achievements_user_key"),
+        Index("ix_user_achievements_user_section_category", "user_id", "section_key", "category_key"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    section_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    category_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    achievement_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    detail: Mapped[str] = mapped_column(Text, nullable=False)
+    icon: Mapped[str] = mapped_column(String(24), nullable=False)
+    accent: Mapped[str] = mapped_column(String(24), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    hint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    achieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    current_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_value_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    sort_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="achievements")
+
+
+class UserAchievementRecordEvent(Base):
+    __tablename__ = "user_achievement_record_events"
+    __table_args__ = (
+        Index("ix_user_achievement_record_events_user_key_date", "user_id", "achievement_key", "achieved_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    section_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    category_key: Mapped[str] = mapped_column(String(40), nullable=False)
+    achievement_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    achieved_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    value_numeric: Mapped[float | None] = mapped_column(Float, nullable=True)
+    value_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    activity_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="achievement_record_events")
 
 
 class FitFile(Base):

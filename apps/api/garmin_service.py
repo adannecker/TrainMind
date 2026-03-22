@@ -10,11 +10,13 @@ from typing import Any
 
 from dotenv import load_dotenv
 from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnectConnectionError
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
+from apps.api.achievement_service import reset_achievement_data
 from apps.api.credential_service import get_service_credentials
-from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload
+from apps.api.training_service import create_imported_max_hr_metric_if_new_peak
+from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, UserTrainingMetric
 from packages.db.session import SessionLocal
 
 
@@ -253,12 +255,13 @@ def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[
     cleaned_ids = [str(x).strip() for x in activity_ids if str(x).strip()]
     deduped_ids = list(dict.fromkeys(cleaned_ids))
     if not deduped_ids:
-        return {"loaded": 0, "skipped": 0, "errors": [], "imported_ids": []}
+        return {"loaded": 0, "skipped": 0, "errors": [], "imported_ids": [], "interesting_updates": []}
 
     client = _build_client(user_id=user_id)
     loaded_ids: list[str] = []
     skipped_ids: list[str] = []
     errors: list[dict[str, str]] = []
+    interesting_updates: list[dict[str, Any]] = []
 
     for activity_id in deduped_ids:
         try:
@@ -357,6 +360,30 @@ def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[
                     _upsert_laps_for_activity(session, created_activity.id, summary)
 
                 session.commit()
+                max_hr_bpm = _pick_value(summary, "maxHR")
+                if max_hr_bpm is not None:
+                    try:
+                        new_metric = create_imported_max_hr_metric_if_new_peak(
+                            user_id=user_id,
+                            value=max_hr_bpm,
+                            recorded_at=started_local,
+                            source="Automatisch aus Aktivitäten",
+                            notes=f"Import aus Garmin: {name}",
+                        )
+                        if new_metric is not None:
+                            interesting_updates.append(
+                                {
+                                    "kind": "new_max_hr_peak",
+                                    "metric_id": new_metric["id"],
+                                    "value": new_metric["value"],
+                                    "recorded_at": new_metric["recorded_at"],
+                                    "source": new_metric["source"],
+                                    "activity_name": name,
+                                    "activity_id": activity_id,
+                                }
+                            )
+                    except Exception:
+                        pass
                 loaded_ids.append(activity_id)
             except IntegrityError:
                 session.rollback()
@@ -370,6 +397,7 @@ def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[
         "skipped": len(skipped_ids),
         "errors": errors,
         "imported_ids": loaded_ids,
+        "interesting_updates": interesting_updates,
     }
 
 
@@ -432,3 +460,41 @@ def repair_garmin_activities_from_raw() -> dict[str, Any]:
         session.commit()
 
     return {"updated_activities": updated, "activities_with_new_laps": laps_created}
+
+
+def reset_imported_garmin_data(user_id: int, delete_derived_metrics: bool = False) -> dict[str, Any]:
+    with SessionLocal() as session:
+        activity_ids = session.scalars(
+            select(Activity.id).where(Activity.user_id == user_id, Activity.provider == "garmin")
+        ).all()
+        fit_file_ids = session.scalars(
+            select(FitFile.id).where(FitFile.user_id == user_id, FitFile.provider == "garmin")
+        ).all()
+
+        deleted_metrics = 0
+        if delete_derived_metrics:
+            deleted_metrics = session.execute(
+                delete(UserTrainingMetric).where(
+                    UserTrainingMetric.user_id == user_id,
+                    UserTrainingMetric.metric_type == "max_hr",
+                    UserTrainingMetric.source == "Automatisch aus Aktivitäten",
+                )
+            ).rowcount or 0
+
+        deleted_activities = session.execute(
+            delete(Activity).where(Activity.user_id == user_id, Activity.provider == "garmin")
+        ).rowcount or 0
+        deleted_fit_files = session.execute(
+            delete(FitFile).where(FitFile.user_id == user_id, FitFile.provider == "garmin")
+        ).rowcount or 0
+        session.commit()
+
+    reset_achievement_data(user_id=user_id)
+    return {
+        "status": "deleted",
+        "deleted_activities": deleted_activities,
+        "deleted_fit_files": deleted_fit_files,
+        "deleted_derived_metrics": deleted_metrics,
+        "activity_ids_found": len(activity_ids),
+        "fit_file_ids_found": len(fit_file_ids),
+    }
