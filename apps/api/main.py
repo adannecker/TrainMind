@@ -9,10 +9,23 @@ from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from apps.api.achievement_service import get_achievement_section
-from apps.api.activity_service import get_available_activity_weeks, get_weekly_activities
+from apps.api.activity_service import (
+    delete_activity,
+    get_available_activity_weeks,
+    get_activity_detail,
+    list_activities,
+    get_weekly_activities,
+    rebuild_historical_max_hr_from_activities,
+)
 from apps.api.auth_service import get_current_user_from_token, login_user, logout_user
 from apps.api.credential_service import get_service_credentials_status, set_service_credentials
-from apps.api.garmin_service import get_missing_garmin_rides, import_selected_garmin_rides, reset_imported_garmin_data
+from apps.api.garmin_service import (
+    get_imported_garmin_summary,
+    get_missing_garmin_rides,
+    get_missing_garmin_rides_for_period,
+    import_selected_garmin_rides,
+    reset_imported_garmin_data,
+)
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
     create_entry,
@@ -33,7 +46,13 @@ from apps.api.nutrition_service import (
     update_recipe,
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
-from apps.api.training_service import create_training_metric, delete_training_metric, list_training_metrics, update_training_metric
+from apps.api.training_service import (
+    create_training_metric,
+    delete_training_metric,
+    list_training_metrics,
+    update_training_metric,
+    upsert_training_zone_setting,
+)
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 
 app = FastAPI(title="TrainMind API", version="0.1.0")
@@ -75,6 +94,26 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
 class AuthLoginRequest(BaseModel):
     email: str
     password: str
+
+
+class UserProfileUpdateRequest(BaseModel):
+    display_name: str | None = None
+    date_of_birth: str | None = None
+    gender: str | None = None
+    current_weight_kg: float | None = None
+    target_weight_kg: float | None = None
+    start_weight_kg: float | None = None
+    goal_start_date: str | None = None
+    goal_end_date: str | None = None
+    nav_group_order: list[str] | None = None
+
+
+class WeightLogCreateRequest(BaseModel):
+    recorded_at: str | None = None
+    weight_kg: float
+    source_type: str | None = "manual"
+    source_label: str | None = None
+    notes: str | None = None
 
 
 @app.post("/auth/login")
@@ -171,6 +210,40 @@ def garmin_new_rides(limit: int = Query(default=50, ge=1, le=200), current_user:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
 
 
+@app.get("/garmin/month-rides")
+def garmin_month_rides(
+    start_year: int = Query(..., ge=2000, le=2100),
+    start_month: int = Query(..., ge=1, le=12),
+    end_year: int = Query(..., ge=2000, le=2100),
+    end_month: int = Query(..., ge=1, le=12),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return get_missing_garmin_rides_for_period(
+            user_id=int(current_user["id"]),
+            start_year=start_year,
+            start_month=start_month,
+            end_year=end_year,
+            end_month=end_month,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.get("/garmin/imported-summary")
+def garmin_imported_summary(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_imported_garmin_summary(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
 class GarminImportRequest(BaseModel):
     activity_ids: list[str]
 
@@ -182,6 +255,10 @@ class GarminCredentialsRequest(BaseModel):
 
 class GarminResetRequest(BaseModel):
     delete_derived_metrics: bool = False
+
+
+class ActivityHistoricalRecheckRequest(BaseModel):
+    rebuild_max_hr: bool = True
 
 
 class NutritionEntryItemRequest(BaseModel):
@@ -333,25 +410,6 @@ class NutritionEntryFromRecipeRequest(BaseModel):
     notes: str | None = None
 
 
-class UserProfileUpdateRequest(BaseModel):
-    display_name: str | None = None
-    date_of_birth: str | None = None
-    gender: str | None = None
-    current_weight_kg: float | None = None
-    target_weight_kg: float | None = None
-    start_weight_kg: float | None = None
-    goal_start_date: str | None = None
-    goal_end_date: str | None = None
-
-
-class WeightLogCreateRequest(BaseModel):
-    recorded_at: str | None = None
-    weight_kg: float
-    source_type: str | None = "manual"
-    source_label: str | None = None
-    notes: str | None = None
-
-
 class TrainingMetricCreateRequest(BaseModel):
     metric_type: str
     recorded_at: str | None = None
@@ -366,6 +424,40 @@ class TrainingMetricUpdateRequest(BaseModel):
     value: float | None = None
     source: str | None = None
     notes: str | None = None
+
+
+class TrainingZoneSettingUpdateRequest(BaseModel):
+    metric_type: str
+    model_key: str
+    config: dict | None = None
+
+
+for request_model in (
+    AuthLoginRequest,
+    GarminImportRequest,
+    GarminCredentialsRequest,
+    GarminResetRequest,
+    ActivityHistoricalRecheckRequest,
+    NutritionEntryItemRequest,
+    NutritionEntryCreateRequest,
+    NutritionEntryUpdateRequest,
+    NutritionSyncChangeRequest,
+    NutritionSyncRequest,
+    NutritionFoodItemCreateRequest,
+    NutritionFoodItemUpdateRequest,
+    NutritionFoodItemPromptRequest,
+    NutritionFoodItemImportRequest,
+    NutritionRecipeItemRequest,
+    NutritionRecipeCreateRequest,
+    NutritionRecipeUpdateRequest,
+    NutritionEntryFromRecipeRequest,
+    UserProfileUpdateRequest,
+    WeightLogCreateRequest,
+    TrainingMetricCreateRequest,
+    TrainingMetricUpdateRequest,
+    TrainingZoneSettingUpdateRequest,
+):
+    request_model.model_rebuild()
 
 
 @app.get("/garmin/credentials-status")
@@ -422,6 +514,16 @@ def training_metric_delete(metric_id: int, current_user: dict = Depends(get_curr
         raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
 
 
+@app.put("/training/zone-settings")
+def training_zone_setting_put(payload: TrainingZoneSettingUpdateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return upsert_training_zone_setting(user_id=int(current_user["id"]), payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
 @app.post("/garmin/credentials")
 def garmin_credentials_save(payload: GarminCredentialsRequest, current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -455,6 +557,22 @@ def garmin_reset_imported(payload: GarminResetRequest, current_user: dict = Depe
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.post("/activities/recheck-history")
+def activities_recheck_history(
+    payload: ActivityHistoricalRecheckRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        result: dict[str, object] = {"status": "ok"}
+        if payload.rebuild_max_hr:
+            result["max_hr"] = rebuild_historical_max_hr_from_activities(user_id=int(current_user["id"]))
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity recheck error: {exc}") from exc
 
 
 @app.get("/achievements/{section_key}")
@@ -534,6 +652,76 @@ def activities_week(
 def activities_weeks_available(current_user: dict = Depends(get_current_user)) -> dict:
     try:
         return get_available_activity_weeks(user_id=int(current_user["id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.get("/activities")
+def activities_list(
+    q: str | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    sport: str | None = Query(default=None),
+    date_from: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    avg_power_min: float | None = Query(default=None),
+    avg_power_max: float | None = Query(default=None),
+    avg_hr_min: float | None = Query(default=None),
+    avg_hr_max: float | None = Query(default=None),
+    avg_speed_min: float | None = Query(default=None),
+    avg_speed_max: float | None = Query(default=None),
+    distance_min_km: float | None = Query(default=None),
+    distance_max_km: float | None = Query(default=None),
+    duration_min_min: float | None = Query(default=None),
+    duration_max_min: float | None = Query(default=None),
+    sort_by: str = Query(default="started_at"),
+    sort_dir: str = Query(default="desc", pattern=r"^(asc|desc)$"),
+    limit: int = Query(default=250, ge=1, le=1000),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return list_activities(
+            user_id=int(current_user["id"]),
+            query=q,
+            provider=provider,
+            sport=sport,
+            date_from=date_from,
+            date_to=date_to,
+            avg_power_min=avg_power_min,
+            avg_power_max=avg_power_max,
+            avg_hr_min=avg_hr_min,
+            avg_hr_max=avg_hr_max,
+            avg_speed_min=avg_speed_min,
+            avg_speed_max=avg_speed_max,
+            distance_min_km=distance_min_km,
+            distance_max_km=distance_max_km,
+            duration_min_min=duration_min_min,
+            duration_max_min=duration_max_min,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.delete("/activities/{activity_id}")
+def activity_delete(activity_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_activity(user_id=int(current_user["id"]), activity_id=activity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.get("/activities/{activity_id}")
+def activity_detail(activity_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_activity_detail(user_id=int(current_user["id"]), activity_id=activity_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
 

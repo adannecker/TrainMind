@@ -1,17 +1,17 @@
 # TrainMind
 
-TrainMind ist als modularer Monorepo aufgebaut und aktuell als Hub + API lauffaehig.
+TrainMind ist als modularer Monorepo aufgebaut und aktuell als Hub + API lauffähig.
 
 ## Aktueller Produktstand
 
-- Garmin-Import mit Vergleich, Auswahl-Import, Fortschritts-Overlay und komplettem Reset fuer Re-Import-Tests
-- Training-Bereich mit historischen Grunddaten fuer `FTP` und `MaxHF`
+- Garmin-Import mit Vergleich, Auswahl-Import, Fortschritts-Overlay und komplettem Reset für Re-Import-Tests
+- Training-Bereich mit historischen Grunddaten für `FTP` und `MaxHF`
 - Achievement-Bereich mit datenbasierten Rad-Achievements und persistenter Rekord-Historie
-- Wochenansicht fuer Aktivitaeten als erste Analyseflaeche
+- Wochenansicht für Aktivitäten als erste Analysefläche
 
 ## Quick Start
 
-Vollstaendiger Stack (Hub, API, DB):
+Vollständiger Stack (Hub, API, DB):
 
 ```powershell
 docker compose -f infra/docker/docker-compose.yml up -d --build
@@ -31,7 +31,7 @@ docker compose -f infra/docker/docker-compose.yml down
 
 ## Projektstruktur
 
-- `apps/web`: Hub Frontend (React + Vite), laeuft auf `:8000`
+- `apps/web`: Hub Frontend (React + Vite), läuft auf `:8000`
 - `apps/api`: zentrale API (Garmin + Auth + Nutrition-Endpunkte), laeuft auf `:8010`
 - `apps/mobile`: Expo/React-Native Prototyp fuer Login + Nutrition
 - `apps/worker`: optionale Service-Entrypoints (Withings/Nutrition Placeholder)
@@ -42,10 +42,11 @@ docker compose -f infra/docker/docker-compose.yml down
 
 ## Wichtige Hinweise
 
-- `APP_ENCRYPTION_KEY` muss in `.env` gesetzt sein, damit Provider-Credentials verschluesselt gespeichert werden.
-- API-Endpunkte sind login-geschuetzt (Bearer Token, Session in DB).
-- Garmin-Credentials werden pro User in `core.service_credentials` verschluesselt abgelegt.
-- Importierte Garmin-Fahrten koennen im Hub komplett geloescht und anschliessend erneut importiert werden.
+- `APP_ENCRYPTION_KEY` muss in `.env` gesetzt sein, damit Provider-Credentials verschlüsselt gespeichert werden.
+- API-Endpunkte sind login-geschützt (Bearer Token, Session in DB).
+- Garmin-Credentials werden pro User in `core.service_credentials` verschlüsselt abgelegt.
+- Importierte Garmin-Fahrten können im Hub komplett gelöscht und anschließend erneut importiert werden.
+- Für sichtbare deutsche UI-Texte bitte normale Umlaute und `ß` verwenden; ASCII-Schreibweisen wie `ae`, `oe`, `ue` nur bei technischem Grund.
 - Im Hub unter `Setup > Fix FIT file` gibt es jetzt einen ersten FIT-Korrekturflow:
   - FIT-Datei hochladen
   - Power-Verlauf analysieren
@@ -69,3 +70,8 @@ Account manuell anlegen:
 - [Integrationen](docs/integrations.md)
 - [Mobile App](docs/mobile-app.md)
 - [Runbook und Betrieb](docs/runbook.md)
+
+## Analyse-Leitlinie
+
+- AktivitÃ¤tsanalysen mÃ¼ssen immer zeitbezogen mit dem zum AktivitÃ¤tszeitpunkt gÃ¼ltigen `FTP` und dem bis dahin hÃ¶chsten gÃ¼ltigen `MaxHF`-Wert rechnen.
+- Diese Referenzwerte beeinflussen insbesondere Zonenlogik, Intervall-Erkennung und Stress-/Load-Bewertungen.

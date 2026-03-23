@@ -246,7 +246,6 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
   const suggestionRequestRef = useRef(0);
   const countRequestRef = useRef(0);
 
-  const trimmedQuery = useMemo(() => query.trim(), [query]);
   const healthInfo = healthMeta(healthIndicator);
 
   const resetForm = () => {

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -7,6 +8,10 @@ from sqlalchemy import select
 
 from packages.db.models import User, UserProfile, UserWeightLog
 from packages.db.session import SessionLocal
+
+
+DEFAULT_NAV_GROUP_ORDER = ["setup", "activities", "nutrition", "training", "achievements"]
+VALID_NAV_GROUP_KEYS = set(DEFAULT_NAV_GROUP_ORDER)
 
 
 def _now() -> datetime:
@@ -58,6 +63,34 @@ def _normalize_gender(value: str | None) -> str | None:
     return clean_gender
 
 
+def _normalize_nav_group_order(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    parsed = value
+    if isinstance(value, str):
+        clean_value = value.strip()
+        if not clean_value:
+            return None
+        try:
+            parsed = json.loads(clean_value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("nav_group_order must be valid JSON.") from exc
+    if not isinstance(parsed, list):
+        raise ValueError("nav_group_order must be a list of group keys.")
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for entry in parsed:
+        key = str(entry or "").strip()
+        if key not in VALID_NAV_GROUP_KEYS:
+            raise ValueError("nav_group_order contains an unknown group key.")
+        if key in seen:
+            continue
+        seen.add(key)
+        normalized.append(key)
+    missing = [key for key in DEFAULT_NAV_GROUP_ORDER if key not in seen]
+    return normalized + missing
+
+
 def _profile_payload(profile: UserProfile | None, user: User | None = None) -> dict[str, Any]:
     display_name = (user.display_name or "") if user is not None else ""
     if profile is None:
@@ -71,6 +104,7 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
             "goal_start_date": None,
             "goal_end_date": None,
             "goal_period_days": None,
+            "nav_group_order": None,
             "updated_at": None,
         }
     goal_period_days = None
@@ -86,6 +120,7 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
         "goal_start_date": _serialize_datetime(profile.goal_start_date),
         "goal_end_date": _serialize_datetime(profile.goal_end_date),
         "goal_period_days": goal_period_days,
+        "nav_group_order": _normalize_nav_group_order(profile.nav_group_order_json),
         "updated_at": _serialize_datetime(profile.updated_at),
     }
 
@@ -129,6 +164,9 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
             profile.goal_start_date = _parse_datetime(str(payload.get("goal_start_date") or "")) if payload.get("goal_start_date") else None
         if "goal_end_date" in payload:
             profile.goal_end_date = _parse_datetime(str(payload.get("goal_end_date") or "")) if payload.get("goal_end_date") else None
+        if "nav_group_order" in payload:
+            nav_group_order = _normalize_nav_group_order(payload.get("nav_group_order"))
+            profile.nav_group_order_json = json.dumps(nav_group_order) if nav_group_order else None
         if profile.goal_start_date and profile.goal_end_date and profile.goal_end_date < profile.goal_start_date:
             raise ValueError("goal_end_date must be on or after goal_start_date.")
 

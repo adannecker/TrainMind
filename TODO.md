@@ -24,6 +24,7 @@
 
 ## Integrations
 - [x] Integrate Garmin pull/import flow via API endpoints and frontend selection UI
+- [ ] Review Garmin-derived activity detail content again and identify missing fields/visuals from stored FIT payloads
 - [ ] Integrate Withings OAuth flow in API
 - [ ] Build normalization layer for provider data
 
@@ -56,11 +57,15 @@
 - [ ] Add many more record types and derived record analytics
 - [ ] Add hover/overlay drilldowns for non-record achievements as needed
 - [ ] Add activity analytics engine to derive more achievements automatically
+- [ ] Fix sorting in activities list for missing numeric values (`-` currently still behaves incorrectly for e.g. avg power / avg HR)
+- [ ] Add map integration on activity detail pages
+- [ ] Add zoom-out overview with overlay/minimap for activity charts
 
 ## Training Product
 - [x] Add training navigation with basics, configuration and plans
 - [x] Persist FTP and MaxHF history
-- [ ] Support configurable zone models (Coggan, simplified, Seiler, MaxHF, LTHR, Karvonen)
+- [ ] Build activity analytics consistently against time-valid FTP and MaxHF
+- [~] Support configurable zone models (Coggan, simplified, Seiler, MaxHF; LTHR and Karvonen pending)
 - [ ] Build horizontal zone editor with compact sliders and manual overrides
 - [ ] Build full training self-assessment with goals, availability and athlete type
 - [ ] Persist training configuration profiles and goal sets

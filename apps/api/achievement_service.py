@@ -8,6 +8,7 @@ from typing import Any
 
 from sqlalchemy import delete, select
 
+from apps.api.training_service import get_user_zone_model_settings, get_zone_model
 from packages.db.models import Activity, ActivityRecord, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
 from packages.db.session import SessionLocal
 
@@ -225,11 +226,13 @@ def _best_average(series: list[float], window_seconds: int) -> float | None:
     return best
 
 
-def _longest_zone1_seconds(records: list[ActivityRecord], max_hr_value: float | None) -> int:
+def _longest_zone1_seconds(records: list[ActivityRecord], max_hr_value: float | None, zone_model_key: str | None) -> int:
     if max_hr_value is None or max_hr_value <= 0:
         return 0
-    lower = max_hr_value * 0.50
-    upper = max_hr_value * 0.60
+    zone_model = get_zone_model("max_hr", zone_model_key)
+    first_zone = zone_model["zones"][0]
+    lower = max_hr_value * float(first_zone["min"])
+    upper = max_hr_value * float(first_zone["max"])
     streak = 0
     best = 0
     for value in _expand_series(_records_to_series(records, "heart_rate_bpm"), None):
@@ -292,6 +295,8 @@ def _serialize_achievement(row: UserAchievement, record_events: list[UserAchieve
 
 
 def _compute_cycling_payload(user_id: int) -> dict[str, Any]:
+    zone_settings = get_user_zone_model_settings(user_id)
+    max_hr_zone_model_key = zone_settings.get("max_hr", {}).get("model_key")
     with SessionLocal() as session:
         activities = session.scalars(
             select(Activity).where(Activity.user_id == user_id, Activity.started_at.is_not(None)).order_by(Activity.started_at.asc(), Activity.id.asc())
@@ -338,7 +343,11 @@ def _compute_cycling_payload(user_id: int) -> dict[str, Any]:
 
         longest_zone1_minutes = 0.0
         for activity in activities:
-            zone1_seconds = _longest_zone1_seconds(records_by_activity.get(activity.id, []), _effective_max_hr(metrics, activity.started_at))
+            zone1_seconds = _longest_zone1_seconds(
+                records_by_activity.get(activity.id, []),
+                _effective_max_hr(metrics, activity.started_at),
+                max_hr_zone_model_key,
+            )
             longest_zone1_minutes = max(longest_zone1_minutes, zone1_seconds / 60.0)
             for definition in ZONE_DEFINITIONS:
                 result = results[definition.key]

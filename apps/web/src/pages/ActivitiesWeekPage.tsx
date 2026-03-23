@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
@@ -133,6 +134,7 @@ function formatNumber(value: number | null, digits = 0): string {
 }
 
 export function ActivitiesWeekPage() {
+  const navigate = useNavigate();
   const [data, setData] = useState<WeekResponse | null>(null);
   const [availableWeeks, setAvailableWeeks] = useState<AvailableWeek[]>([]);
   const [loading, setLoading] = useState(true);
@@ -328,7 +330,7 @@ export function ActivitiesWeekPage() {
               ) : (
                 <div className="week-activities-list">
                   {day.activities.map((activity) => (
-                    <div className="week-activity-item" key={activity.id}>
+                    <div className="week-activity-item" key={activity.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/activities/${activity.id}`)}>
                       <p className="week-activity-name">{activity.name}</p>
                       <p className="week-activity-meta">
                         {formatTime(activity.start_time)} - {formatTime(activity.end_time)} |{" "}

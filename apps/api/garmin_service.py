@@ -99,6 +99,32 @@ def _duration_label(total_seconds: int | None) -> str | None:
     return f"{m:02d}:{s:02d}"
 
 
+def _serialize_missing_ride(item: dict[str, Any]) -> dict[str, Any] | None:
+    activity_id = _extract_activity_id(item)
+    if activity_id is None:
+        return None
+    start_local_raw = _pick_value(item, "startTimeLocal", "activityStartTimeLocal")
+    start_utc_raw = _pick_value(item, "startTimeGMT", "startTimeUtc")
+    start_local = _to_datetime(start_local_raw)
+    start_utc = _to_datetime(start_utc_raw)
+    duration_s = _get_duration_seconds(item)
+    return {
+        "activity_id": activity_id,
+        "name": item.get("activityName") or "Unnamed activity",
+        "start_local": start_local.isoformat() if start_local else None,
+        "start_utc": start_utc.isoformat() if start_utc else None,
+        "duration_s": duration_s,
+        "duration_label": _duration_label(duration_s),
+        "distance_m": _pick_value(item, "distance"),
+        "avg_power_w": _pick_value(item, "avgPower", "averagePower"),
+        "avg_hr_bpm": _pick_value(item, "averageHR"),
+        "avg_speed_mps": _pick_value(item, "averageSpeed", "averageMovingSpeed"),
+        "avg_cadence_rpm": _pick_value(item, "averageBikingCadenceInRevPerMinute", "averageBikeCadence"),
+        "calories_kcal": _pick_value(item, "calories"),
+        "elevation_gain_m": _pick_value(item, "elevationGain"),
+    }
+
+
 def _upsert_laps_for_activity(session, activity_id: int, summary_payload: dict[str, Any]) -> None:
     split_summaries = summary_payload.get("splitSummaries")
     if not isinstance(split_summaries, list) or not split_summaries:
@@ -205,49 +231,156 @@ def get_missing_garmin_rides(user_id: int, limit: int = 50) -> dict[str, Any]:
     already_loaded_count = 0
 
     for item in recent:
-        activity_id = _extract_activity_id(item)
-        if activity_id is None:
+        serialized = _serialize_missing_ride(item)
+        if serialized is None:
             continue
+        activity_id = serialized["activity_id"]
         is_loaded = activity_id in loaded_ids
         if is_loaded:
             already_loaded_count += 1
             continue
-
-        start_local_raw = _pick_value(item, "startTimeLocal", "activityStartTimeLocal")
-        start_utc_raw = _pick_value(item, "startTimeGMT", "startTimeUtc")
-        start_local = _to_datetime(start_local_raw)
-        start_utc = _to_datetime(start_utc_raw)
-        duration_s = _get_duration_seconds(item)
-
-        missing.append(
-            {
-                "activity_id": activity_id,
-                "name": item.get("activityName") or "Unnamed activity",
-                "start_local": start_local.isoformat() if start_local else None,
-                "start_utc": start_utc.isoformat() if start_utc else None,
-                "duration_s": duration_s,
-                "duration_label": _duration_label(duration_s),
-                "distance_m": _pick_value(item, "distance"),
-                "avg_power_w": _pick_value(item, "avgPower", "averagePower"),
-                "avg_hr_bpm": _pick_value(item, "averageHR"),
-                "avg_speed_mps": _pick_value(item, "averageSpeed", "averageMovingSpeed"),
-                "avg_cadence_rpm": _pick_value(item, "averageBikingCadenceInRevPerMinute", "averageBikeCadence"),
-                "calories_kcal": _pick_value(item, "calories"),
-                "elevation_gain_m": _pick_value(item, "elevationGain"),
-            }
-        )
+        missing.append(serialized)
 
     missing.sort(key=lambda r: r["start_local"] or "", reverse=True)
     checked = len(recent)
 
     return {
         "generated_at": datetime.utcnow().isoformat(),
+        "mode": "recent",
         "summary": {
             "checked_recent_rides": checked,
             "already_loaded": already_loaded_count,
             "missing": len(missing),
         },
         "rides": missing,
+    }
+
+
+def get_missing_garmin_rides_for_period(
+    user_id: int,
+    start_year: int,
+    start_month: int,
+    end_year: int,
+    end_month: int,
+    page_size: int = 100,
+    max_pages: int = 24,
+) -> dict[str, Any]:
+    if start_year < 2000 or start_year > 2100 or end_year < 2000 or end_year > 2100:
+        raise ValueError("year must be between 2000 and 2100.")
+    if start_month < 1 or start_month > 12 or end_month < 1 or end_month > 12:
+        raise ValueError("month must be between 1 and 12.")
+
+    safe_page_size = max(20, min(page_size, 100))
+    safe_max_pages = max(1, min(max_pages, 60))
+    client = _build_client(user_id=user_id)
+    loaded_ids = _collect_loaded_ids(user_id=user_id)
+
+    target_start = datetime(start_year, start_month, 1)
+    target_end = datetime(end_year + (1 if end_month == 12 else 0), 1 if end_month == 12 else end_month + 1, 1)
+    if target_end <= target_start:
+        raise ValueError("end period must be the same as or after start period.")
+
+    missing: list[dict[str, Any]] = []
+    already_loaded_count = 0
+    checked_total = 0
+    pages_scanned = 0
+    reached_older_activities = False
+
+    for page_index in range(safe_max_pages):
+      start = page_index * safe_page_size
+      batch = client.get_activities(start, safe_page_size)
+      pages_scanned += 1
+      if not batch:
+          break
+
+      batch_has_target_month = False
+      batch_is_entirely_older = True
+
+      for item in batch:
+          serialized = _serialize_missing_ride(item)
+          if serialized is None:
+              continue
+          checked_total += 1
+          activity_time = _to_datetime(_pick_value(item, "startTimeLocal", "activityStartTimeLocal")) or _to_datetime(
+              _pick_value(item, "startTimeGMT", "startTimeUtc")
+          )
+          if activity_time is None:
+              continue
+          if activity_time >= target_end:
+              batch_is_entirely_older = False
+              continue
+          if activity_time < target_start:
+              continue
+
+          batch_has_target_month = True
+          batch_is_entirely_older = False
+          activity_id = serialized["activity_id"]
+          if activity_id in loaded_ids:
+              already_loaded_count += 1
+              continue
+          missing.append(serialized)
+
+      if batch_has_target_month:
+          continue
+
+      latest_item_time = _to_datetime(_pick_value(batch[0], "startTimeLocal", "activityStartTimeLocal")) or _to_datetime(
+          _pick_value(batch[0], "startTimeGMT", "startTimeUtc")
+      )
+      oldest_item_time = _to_datetime(_pick_value(batch[-1], "startTimeLocal", "activityStartTimeLocal")) or _to_datetime(
+          _pick_value(batch[-1], "startTimeGMT", "startTimeUtc")
+      )
+
+      if latest_item_time is not None and latest_item_time < target_start:
+          reached_older_activities = True
+          break
+      if oldest_item_time is not None and oldest_item_time < target_start and batch_is_entirely_older:
+          reached_older_activities = True
+          break
+
+    missing.sort(key=lambda r: r["start_local"] or r["start_utc"] or "", reverse=True)
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "mode": "period",
+        "period": {
+            "start_year": start_year,
+            "start_month": start_month,
+            "end_year": end_year,
+            "end_month": end_month,
+        },
+        "summary": {
+            "checked_recent_rides": checked_total,
+            "already_loaded": already_loaded_count,
+            "missing": len(missing),
+            "pages_scanned": pages_scanned,
+            "reached_older_activities": reached_older_activities,
+        },
+        "rides": missing,
+    }
+
+
+def get_imported_garmin_summary(user_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        activity_count = len(
+            session.scalars(select(Activity.id).where(Activity.user_id == user_id, Activity.provider == "garmin")).all()
+        )
+        fit_file_count = len(
+            session.scalars(select(FitFile.id).where(FitFile.user_id == user_id, FitFile.provider == "garmin")).all()
+        )
+        auto_max_hr_count = len(
+            session.scalars(
+                select(UserTrainingMetric.id).where(
+                    UserTrainingMetric.user_id == user_id,
+                    UserTrainingMetric.metric_type == "max_hr",
+                    UserTrainingMetric.source == "Automatisch aus Aktivitäten",
+                )
+            ).all()
+        )
+    return {
+        "status": "ok",
+        "activities": activity_count,
+        "fit_files": fit_file_count,
+        "derived_max_hr_metrics": auto_max_hr_count,
     }
 
 

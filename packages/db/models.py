@@ -54,6 +54,10 @@ class User(Base):
     )
     weight_logs: Mapped[list["UserWeightLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     training_metrics: Mapped[list["UserTrainingMetric"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    training_zone_settings: Mapped[list["UserTrainingZoneSetting"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     achievements: Mapped[list["UserAchievement"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     achievement_record_events: Mapped[list["UserAchievementRecordEvent"]] = relationship(
         back_populates="user",
@@ -107,6 +111,7 @@ class UserProfile(Base):
     start_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     goal_start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     goal_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    nav_group_order_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -150,6 +155,25 @@ class UserTrainingMetric(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="training_metrics")
+
+
+class UserTrainingZoneSetting(Base):
+    __tablename__ = "user_training_zone_settings"
+    __table_args__ = (
+        UniqueConstraint("user_id", "metric_type", name="uq_user_training_zone_settings_user_metric"),
+        Index("ix_user_training_zone_settings_user_metric", "user_id", "metric_type"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    metric_type: Mapped[str] = mapped_column(String(24), nullable=False)
+    model_key: Mapped[str] = mapped_column(String(60), nullable=False)
+    config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="training_zone_settings")
 
 
 class UserAchievement(Base):

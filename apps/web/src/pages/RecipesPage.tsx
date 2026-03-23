@@ -334,7 +334,6 @@ export function RecipesPage() {
     });
     return entries;
   }, [sortBy, sortDirection, filteredRecipes]);
-  const activeRecipe = useMemo(() => sortedRecipes.find((recipe) => recipe.id === activeRecipeId) || null, [activeRecipeId, sortedRecipes]);
   const previewRecipe = useMemo(
     () => sortedRecipes.find((recipe) => recipe.id === (openMenuRecipeId || hoveredRecipeId)) || null,
     [hoveredRecipeId, openMenuRecipeId, sortedRecipes],

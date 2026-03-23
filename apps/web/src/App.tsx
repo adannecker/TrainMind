@@ -3,7 +3,10 @@ import type { DragEvent as ReactDragEvent } from "react";
 import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { apiFetch } from "./api";
 import { clearAuthToken, getAuthToken } from "./auth";
+import { API_BASE_URL } from "./config";
 import { AchievementsPage } from "./pages/AchievementsPage";
+import { ActivityDetailPage } from "./pages/ActivityDetailPage";
+import { ActivitiesAllPage } from "./pages/ActivitiesAllPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
@@ -11,7 +14,7 @@ import { HomePage } from "./pages/HomePage";
 import { IngredientsPage } from "./pages/IngredientsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NutritionPage } from "./pages/NutritionPage";
-import { PlaceholderPage } from "./pages/PlaceholderPage";
+import { RecheckRidesPage } from "./pages/RecheckRidesPage";
 import { RecipesPage } from "./pages/RecipesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TrainingBasicsPage, TrainingConfigPage, TrainingPlansPage } from "./pages/TrainingPages";
@@ -27,6 +30,10 @@ type NavGroup = {
   items: NavItem[];
 };
 
+type UserProfileNavSettings = {
+  nav_group_order: string[] | null;
+};
+
 const navGroups: NavGroup[] = [
   {
     key: "setup",
@@ -34,6 +41,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Einstellungen", to: "/setup/settings" },
       { label: "Neue Rides prüfen", to: "/setup/check-rides" },
+      { label: "Recheck all Rides", to: "/setup/recheck-rides" },
       { label: "Fix FIT file", to: "/setup/fix-fit-file" },
     ],
   },
@@ -76,6 +84,21 @@ const navGroups: NavGroup[] = [
 ];
 
 const NAV_GROUP_ORDER_STORAGE_KEY = "trainmind.navGroupOrder";
+
+function getDefaultNavGroupOrder(): string[] {
+  return navGroups.map((group) => group.key);
+}
+
+function normalizeNavGroupOrder(order: string[] | null | undefined): string[] {
+  const validKeys = new Set(navGroups.map((group) => group.key));
+  const normalized = (order ?? []).filter((key) => validKeys.has(key));
+  const missing = getDefaultNavGroupOrder().filter((key) => !normalized.includes(key));
+  return normalized.length ? [...normalized, ...missing] : getDefaultNavGroupOrder();
+}
+
+function navOrdersEqual(left: string[] | null, right: string[]): boolean {
+  return Array.isArray(left) && left.length === right.length && left.every((value, index) => value === right[index]);
+}
 
 function SidebarGroup({
   groupKey,
@@ -147,22 +170,21 @@ function Layout() {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [groupOrder, setGroupOrder] = useState(() => {
     if (typeof window === "undefined") {
-      return navGroups.map((group) => group.key);
+      return getDefaultNavGroupOrder();
     }
     const stored = window.localStorage.getItem(NAV_GROUP_ORDER_STORAGE_KEY);
     if (!stored) {
-      return navGroups.map((group) => group.key);
+      return getDefaultNavGroupOrder();
     }
     try {
       const parsed = JSON.parse(stored) as string[];
-      const validKeys = new Set(navGroups.map((group) => group.key));
-      const normalized = parsed.filter((key) => validKeys.has(key));
-      const missing = navGroups.map((group) => group.key).filter((key) => !normalized.includes(key));
-      return normalized.length ? [...normalized, ...missing] : navGroups.map((group) => group.key);
+      return normalizeNavGroupOrder(parsed);
     } catch {
-      return navGroups.map((group) => group.key);
+      return getDefaultNavGroupOrder();
     }
   });
+  const [profileNavOrderLoaded, setProfileNavOrderLoaded] = useState(false);
+  const [savedGroupOrder, setSavedGroupOrder] = useState<string[] | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     setup: true,
     activities: true,
@@ -184,29 +206,65 @@ function Layout() {
       const token = getAuthToken();
       if (!token) {
         setAuthenticated(false);
+        setProfileNavOrderLoaded(true);
         setAuthReady(true);
         return;
       }
       try {
-        const response = await apiFetch("/api/auth/me");
+        const response = await apiFetch(`${API_BASE_URL}/auth/me`);
         if (!response.ok) {
           clearAuthToken();
           setAuthenticated(false);
+          setProfileNavOrderLoaded(true);
         } else {
           const me = (await response.json()) as { email?: string; display_name?: string };
           const fallbackFromEmail = (me.email ?? "").split("@")[0] || "User";
           setUserLabel((me.display_name || "").trim() || fallbackFromEmail);
           setAuthenticated(true);
+          setProfileNavOrderLoaded(false);
         }
       } catch {
         clearAuthToken();
         setAuthenticated(false);
+        setProfileNavOrderLoaded(true);
       } finally {
         setAuthReady(true);
       }
     }
     void verifySession();
   }, []);
+
+  useEffect(() => {
+    if (!authenticated || profileNavOrderLoaded) return;
+    let cancelled = false;
+
+    async function loadProfileNavOrder() {
+      try {
+        const profileResponse = await apiFetch(`${API_BASE_URL}/profile`);
+        const profilePayload = (await profileResponse.json()) as UserProfileNavSettings;
+        if (!profileResponse.ok) {
+          throw new Error("Profil konnte nicht geladen werden.");
+        }
+        const nextOrder = normalizeNavGroupOrder(profilePayload.nav_group_order);
+        if (cancelled) return;
+        setGroupOrder(nextOrder);
+        setSavedGroupOrder(nextOrder);
+        window.localStorage.setItem(NAV_GROUP_ORDER_STORAGE_KEY, JSON.stringify(nextOrder));
+      } catch {
+        if (cancelled) return;
+        setSavedGroupOrder(null);
+      } finally {
+        if (!cancelled) {
+          setProfileNavOrderLoaded(true);
+        }
+      }
+    }
+
+    void loadProfileNavOrder();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, profileNavOrderLoaded]);
 
   useEffect(() => {
     function handleUserLabelUpdate(event: Event) {
@@ -225,6 +283,31 @@ function Layout() {
     window.localStorage.setItem(NAV_GROUP_ORDER_STORAGE_KEY, JSON.stringify(groupOrder));
   }, [groupOrder]);
 
+  useEffect(() => {
+    if (!authenticated || !profileNavOrderLoaded) return;
+    if (navOrdersEqual(savedGroupOrder, groupOrder)) return;
+    const timeoutId = window.setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await apiFetch(`${API_BASE_URL}/profile`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              nav_group_order: groupOrder,
+            }),
+          });
+          if (!response.ok) {
+            throw new Error("Profil konnte nicht gespeichert werden.");
+          }
+          setSavedGroupOrder(groupOrder);
+        } catch {
+          // localStorage remains as fallback
+        }
+      })();
+    }, 350);
+    return () => window.clearTimeout(timeoutId);
+  }, [authenticated, groupOrder, profileNavOrderLoaded, savedGroupOrder]);
+
   async function doLogout() {
     try {
       await apiFetch("/api/auth/logout", { method: "POST" });
@@ -234,6 +317,8 @@ function Layout() {
     clearAuthToken();
     setAuthenticated(false);
     setUserLabel("User");
+    setSavedGroupOrder(null);
+    setProfileNavOrderLoaded(false);
     setShowLogoutConfirm(false);
   }
 
@@ -357,8 +442,10 @@ function Layout() {
           <Route path="/" element={<HomePage />} />
           <Route path="/setup/settings" element={<SettingsPage />} />
           <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+          <Route path="/setup/recheck-rides" element={<RecheckRidesPage />} />
           <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
           <Route path="/activities/week" element={<ActivitiesWeekPage />} />
+          <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
           <Route path="/nutrition/entries" element={<NutritionPage />} />
           <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />
           <Route path="/nutrition/products" element={<IngredientsPage initialKind="product" />} />
@@ -369,16 +456,7 @@ function Layout() {
           <Route path="/achievements/cycling" element={<AchievementsPage initialSection="Radfahren" />} />
           <Route path="/achievements/nutrition" element={<AchievementsPage initialSection="Ernährung" />} />
           <Route path="/achievements/health" element={<AchievementsPage initialSection="Gesundheit" />} />
-          <Route
-            path="/activities/all"
-            element={
-              <PlaceholderPage
-                badge="Aktivitäten"
-                title="Alle Aktivitäten"
-                description="Diese Seite wird die komplette Aktivitätsliste mit Filter und Suche enthalten."
-              />
-            }
-          />
+          <Route path="/activities/all" element={<ActivitiesAllPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
