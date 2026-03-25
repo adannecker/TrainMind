@@ -17,9 +17,11 @@ from apps.api.activity_service import (
     get_weekly_activities,
     rebuild_historical_max_hr_from_activities,
 )
-from apps.api.auth_service import get_current_user_from_token, login_user, logout_user
+from apps.api.admin_service import delete_user_as_admin, invite_user_as_admin, list_users
+from apps.api.auth_service import get_current_user_from_token, login_user, logout_user, set_password_from_invite
 from apps.api.credential_service import get_service_credentials_status, set_service_credentials
 from apps.api.garmin_service import (
+    ingest_recent_garmin_rides,
     get_imported_garmin_summary,
     get_missing_garmin_rides,
     get_missing_garmin_rides_for_period,
@@ -55,17 +57,26 @@ from apps.api.training_service import (
 )
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 
+def _parse_cors_origins() -> list[str]:
+    configured = os.getenv("APP_CORS_ORIGINS", "").strip()
+    if configured:
+        origins = [origin.strip() for origin in configured.split(",") if origin.strip()]
+        if origins:
+            return origins
+    return [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+        "http://127.0.0.1:8000",
+        "http://localhost:8000",
+    ]
+
+
 app = FastAPI(title="TrainMind API", version="0.1.0")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:8000",
-        "http://localhost:8000",
-    ],
+    allow_origins=_parse_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -89,6 +100,12 @@ def get_current_user(credentials: HTTPAuthorizationCredentials | None = Depends(
         return get_current_user_from_token(credentials.credentials)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
+    if not bool(current_user.get("is_admin")):
+        raise HTTPException(status_code=403, detail="Admin access required.")
+    return current_user
 
 
 class AuthLoginRequest(BaseModel):
@@ -116,6 +133,16 @@ class WeightLogCreateRequest(BaseModel):
     notes: str | None = None
 
 
+class AdminUserCreateRequest(BaseModel):
+    email: str
+    is_admin: bool = False
+
+
+class SetPasswordFromInviteRequest(BaseModel):
+    token: str
+    password: str
+
+
 @app.post("/auth/login")
 def auth_login(payload: AuthLoginRequest) -> dict:
     try:
@@ -140,6 +167,46 @@ def auth_logout(credentials: HTTPAuthorizationCredentials | None = Depends(beare
 @app.get("/auth/me")
 def auth_me(current_user: dict = Depends(get_current_user)) -> dict:
     return current_user
+
+
+@app.get("/admin/users")
+def admin_users_list(_admin_user: dict = Depends(get_admin_user)) -> dict:
+    return list_users()
+
+
+@app.post("/admin/users")
+def admin_users_create(payload: AdminUserCreateRequest, _admin_user: dict = Depends(get_admin_user)) -> dict:
+    try:
+        app_base_url = os.getenv("APP_BASE_URL", "https://trainmind.de")
+        return invite_user_as_admin(
+            email=payload.email,
+            app_base_url=app_base_url,
+            is_admin=payload.is_admin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected admin error: {exc}") from exc
+
+
+@app.delete("/admin/users/{user_id}")
+def admin_users_delete(user_id: int, admin_user: dict = Depends(get_admin_user)) -> dict:
+    try:
+        return delete_user_as_admin(user_id=user_id, actor_user_id=int(admin_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected admin error: {exc}") from exc
+
+
+@app.post("/auth/set-password")
+def auth_set_password(payload: SetPasswordFromInviteRequest) -> dict:
+    try:
+        return set_password_from_invite(payload.token, payload.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected auth error: {exc}") from exc
 
 
 @app.get("/profile")
@@ -246,6 +313,12 @@ def garmin_imported_summary(current_user: dict = Depends(get_current_user)) -> d
 
 class GarminImportRequest(BaseModel):
     activity_ids: list[str]
+
+
+class GarminRecentIngestRequest(BaseModel):
+    days_back: int = Field(default=3, ge=0, le=30)
+    batch_size: int = Field(default=20, ge=1, le=100)
+    sleep_seconds: float = Field(default=1.0, ge=0, le=5)
 
 
 class GarminCredentialsRequest(BaseModel):
@@ -546,6 +619,23 @@ def garmin_import_rides(payload: GarminImportRequest, current_user: dict = Depen
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
 
 
+@app.post("/garmin/ingest-recent")
+def garmin_ingest_recent(payload: GarminRecentIngestRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return ingest_recent_garmin_rides(
+            user_id=int(current_user["id"]),
+            days_back=payload.days_back,
+            batch_size=payload.batch_size,
+            sleep_seconds=payload.sleep_seconds,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
 @app.post("/garmin/reset-imported")
 def garmin_reset_imported(payload: GarminResetRequest, current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -625,6 +715,12 @@ async def fit_fix_apply(
             "X-TrainMind-Changed-Records": str(summary["changed_records"]),
             "X-TrainMind-Avg-Power": str(summary["avg_power"]),
             "X-TrainMind-Max-Power": str(summary["max_power"]),
+            "X-TrainMind-Normalized-Power": str(summary["normalized_power"]),
+            "X-TrainMind-Estimated-Calories": str(summary["estimated_calories"]),
+            "X-TrainMind-Total-Work-KJ": str(summary["total_work_kj"]),
+            "X-TrainMind-Intensity-Factor": str(summary["intensity_factor"] or ""),
+            "X-TrainMind-Training-Stress-Score": str(summary["training_stress_score"] or ""),
+            "X-TrainMind-Updated-Fields": ",".join(summary["updated_fields"]),
         }
         return Response(content=output_bytes, media_type="application/octet-stream", headers=headers)
     except json.JSONDecodeError as exc:

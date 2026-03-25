@@ -16,7 +16,9 @@ import { LoginPage } from "./pages/LoginPage";
 import { NutritionPage } from "./pages/NutritionPage";
 import { RecheckRidesPage } from "./pages/RecheckRidesPage";
 import { RecipesPage } from "./pages/RecipesPage";
+import { SetPasswordPage } from "./pages/SetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { ImpressumPage, PrivacyPage } from "./pages/LegalPages";
 import { TrainingBasicsPage, TrainingConfigPage, TrainingPlansPage } from "./pages/TrainingPages";
 
 type NavItem = {
@@ -166,7 +168,9 @@ function Layout() {
   const location = useLocation();
   const [authReady, setAuthReady] = useState(false);
   const [authenticated, setAuthenticated] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [userLabel, setUserLabel] = useState("User");
+  const [userRoleLabel, setUserRoleLabel] = useState("Nutzer");
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [groupOrder, setGroupOrder] = useState(() => {
     if (typeof window === "undefined") {
@@ -217,14 +221,17 @@ function Layout() {
           setAuthenticated(false);
           setProfileNavOrderLoaded(true);
         } else {
-          const me = (await response.json()) as { email?: string; display_name?: string };
+          const me = (await response.json()) as { email?: string; display_name?: string; is_admin?: boolean };
           const fallbackFromEmail = (me.email ?? "").split("@")[0] || "User";
+          setIsAdmin(Boolean(me.is_admin));
           setUserLabel((me.display_name || "").trim() || fallbackFromEmail);
+          setUserRoleLabel(me.is_admin ? "Admin" : "Nutzer");
           setAuthenticated(true);
           setProfileNavOrderLoaded(false);
         }
       } catch {
         clearAuthToken();
+        setIsAdmin(false);
         setAuthenticated(false);
         setProfileNavOrderLoaded(true);
       } finally {
@@ -268,10 +275,16 @@ function Layout() {
 
   useEffect(() => {
     function handleUserLabelUpdate(event: Event) {
-      const detail = (event as CustomEvent<{ displayName?: string }>).detail;
+      const detail = (event as CustomEvent<{ displayName?: string; roleLabel?: string; isAdmin?: boolean }>).detail;
       const nextLabel = (detail?.displayName || "").trim();
       if (nextLabel) {
         setUserLabel(nextLabel);
+      }
+      if (detail?.roleLabel) {
+        setUserRoleLabel(detail.roleLabel);
+      }
+      if (typeof detail?.isAdmin === "boolean") {
+        setIsAdmin(detail.isAdmin);
       }
     }
 
@@ -316,9 +329,11 @@ function Layout() {
     }
     clearAuthToken();
     setAuthenticated(false);
+    setIsAdmin(false);
     setUserLabel("User");
     setSavedGroupOrder(null);
     setProfileNavOrderLoaded(false);
+    setUserRoleLabel("Nutzer");
     setShowLogoutConfirm(false);
   }
 
@@ -379,8 +394,15 @@ function Layout() {
 
   if (!authenticated) {
     return (
-      <main className="content">
-        <LoginPage onLoggedIn={() => setAuthenticated(true)} />
+      <main className="content content-login content-with-footer">
+        <div className="content-stack">
+          <Routes>
+            <Route path="/set-password" element={<SetPasswordPage />} />
+            <Route path="/impressum" element={<ImpressumPage />} />
+            <Route path="/datenschutz" element={<PrivacyPage />} />
+            <Route path="*" element={<LoginPage onLoggedIn={() => setAuthenticated(true)} />} />
+          </Routes>
+        </div>
       </main>
     );
   }
@@ -393,8 +415,8 @@ function Layout() {
             <div className="brand-dot" />
             <div>
               <p className="brand-name">TrainMind</p>
-              <p className="brand-sub">Prototype UI</p>
               <p className="brand-user">{userLabel}</p>
+              <p className="brand-sub">{userRoleLabel}</p>
             </div>
           </div>
           <button
@@ -408,57 +430,79 @@ function Layout() {
         </div>
 
         <nav className="nav">
-          <Link to="/" className={`nav-link ${isHomeActive ? "active" : ""}`}>
-            Startseite
-          </Link>
+          {isAdmin ? (
+            <NavLink to="/setup/settings" className={({ isActive }) => `nav-link ${isActive ? "active" : ""}`}>
+              Nutzerverwaltung
+            </NavLink>
+          ) : (
+            <>
+              <Link to="/" className={`nav-link ${isHomeActive ? "active" : ""}`}>
+                Startseite
+              </Link>
 
-          {orderedGroups.map((group) => (
-            <SidebarGroup
-              key={group.key}
-              groupKey={group.key}
-              label={group.label}
-              open={Boolean(openGroups[group.key])}
-              onToggle={() =>
-                setOpenGroups((prev) => ({
-                  ...prev,
-                  [group.key]: !prev[group.key],
-                }))
-              }
-              items={group.items}
-              draggable
-              dragging={draggedGroupKey === group.key}
-              dropTarget={dropTargetGroupKey === group.key}
-              onDragStart={handleGroupDragStart}
-              onDragEnd={handleGroupDragEnd}
-              onDragOver={handleGroupDragOver}
-              onDrop={handleGroupDrop}
-            />
-          ))}
+              {orderedGroups.map((group) => (
+                <SidebarGroup
+                  key={group.key}
+                  groupKey={group.key}
+                  label={group.label}
+                  open={Boolean(openGroups[group.key])}
+                  onToggle={() =>
+                    setOpenGroups((prev) => ({
+                      ...prev,
+                      [group.key]: !prev[group.key],
+                    }))
+                  }
+                  items={group.items}
+                  draggable
+                  dragging={draggedGroupKey === group.key}
+                  dropTarget={dropTargetGroupKey === group.key}
+                  onDragStart={handleGroupDragStart}
+                  onDragEnd={handleGroupDragEnd}
+                  onDragOver={handleGroupDragOver}
+                  onDrop={handleGroupDrop}
+                />
+              ))}
+            </>
+          )}
         </nav>
       </aside>
 
-      <main className="content">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/setup/settings" element={<SettingsPage />} />
-          <Route path="/setup/check-rides" element={<CheckRidesPage />} />
-          <Route path="/setup/recheck-rides" element={<RecheckRidesPage />} />
-          <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
-          <Route path="/activities/week" element={<ActivitiesWeekPage />} />
-          <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
-          <Route path="/nutrition/entries" element={<NutritionPage />} />
-          <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />
-          <Route path="/nutrition/products" element={<IngredientsPage initialKind="product" />} />
-          <Route path="/nutrition/recipes" element={<RecipesPage />} />
-          <Route path="/training/basics" element={<TrainingBasicsPage />} />
-          <Route path="/training/configuration" element={<TrainingConfigPage />} />
-          <Route path="/training/plans" element={<TrainingPlansPage />} />
-          <Route path="/achievements/cycling" element={<AchievementsPage initialSection="Radfahren" />} />
-          <Route path="/achievements/nutrition" element={<AchievementsPage initialSection="Ernährung" />} />
-          <Route path="/achievements/health" element={<AchievementsPage initialSection="Gesundheit" />} />
-          <Route path="/activities/all" element={<ActivitiesAllPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+      <main className="content content-with-footer">
+        <div className="content-stack">
+          {isAdmin ? (
+            <Routes>
+              <Route path="/setup/settings" element={<SettingsPage />} />
+              <Route path="/impressum" element={<ImpressumPage />} />
+              <Route path="/datenschutz" element={<PrivacyPage />} />
+              <Route path="*" element={<Navigate to="/setup/settings" replace />} />
+            </Routes>
+          ) : (
+            <Routes>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/setup/settings" element={<SettingsPage />} />
+              <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+              <Route path="/setup/recheck-rides" element={<RecheckRidesPage />} />
+              <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
+              <Route path="/activities/week" element={<ActivitiesWeekPage />} />
+              <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
+              <Route path="/nutrition/entries" element={<NutritionPage />} />
+              <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />
+              <Route path="/nutrition/products" element={<IngredientsPage initialKind="product" />} />
+              <Route path="/nutrition/recipes" element={<RecipesPage />} />
+              <Route path="/training/basics" element={<TrainingBasicsPage />} />
+              <Route path="/training/configuration" element={<TrainingConfigPage />} />
+              <Route path="/training/plans" element={<TrainingPlansPage />} />
+              <Route path="/achievements/cycling" element={<AchievementsPage initialSection="Radfahren" />} />
+              <Route path="/achievements/nutrition" element={<AchievementsPage initialSection="Ernährung" />} />
+              <Route path="/achievements/health" element={<AchievementsPage initialSection="Gesundheit" />} />
+              <Route path="/set-password" element={<SetPasswordPage />} />
+              <Route path="/impressum" element={<ImpressumPage />} />
+              <Route path="/datenschutz" element={<PrivacyPage />} />
+              <Route path="/activities/all" element={<ActivitiesAllPage />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          )}
+        </div>
       </main>
 
       {showLogoutConfirm ? (

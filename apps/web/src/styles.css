@@ -28,10 +28,13 @@ body {
   font-family: "Manrope", "Segoe UI", sans-serif;
   color: var(--text);
   background:
-    radial-gradient(circle at 10% 10%, #d7efe6 0%, transparent 40%),
-    radial-gradient(circle at 90% 95%, #fbe5cf 0%, transparent 30%),
+    linear-gradient(rgba(243, 248, 246, 0.52), rgba(243, 248, 246, 0.58)),
+    url("/trainmind-sport-background.svg"),
     var(--bg);
   overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
 
 #root {
@@ -50,9 +53,10 @@ body {
 .sidebar {
   border-right: 1px solid var(--line);
   padding: 1.2rem;
-  background: linear-gradient(180deg, #f8fffb 0%, #edf7f3 100%);
+  background: linear-gradient(180deg, rgba(248, 255, 251, 0.82) 0%, rgba(237, 247, 243, 0.72) 100%);
   height: 100vh;
   overflow: auto;
+  backdrop-filter: blur(10px);
 }
 
 .brand {
@@ -95,6 +99,12 @@ body {
   color: #2b5a51;
   font-size: 0.86rem;
   font-weight: 700;
+}
+
+.brand-sub {
+  margin: 0.12rem 0 0;
+  color: #57706a;
+  font-size: 0.8rem;
 }
 
 .brand-logout-icon {
@@ -219,6 +229,25 @@ body {
   padding: 1.4rem;
   height: 100vh;
   overflow: auto;
+  background: linear-gradient(180deg, rgba(243, 248, 246, 0.18) 0%, rgba(243, 248, 246, 0.06) 100%);
+}
+
+.content-with-footer {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.content-stack {
+  flex: 1;
+}
+
+.content-login {
+  min-height: 100vh;
+  background:
+    radial-gradient(circle at 18% 22%, rgba(102, 190, 163, 0.26) 0%, rgba(102, 190, 163, 0) 38%),
+    radial-gradient(circle at 82% 78%, rgba(233, 160, 99, 0.22) 0%, rgba(233, 160, 99, 0) 31%),
+    linear-gradient(180deg, rgba(243, 248, 246, 0.1) 0%, rgba(243, 248, 246, 0.02) 100%);
 }
 
 .page {
@@ -226,21 +255,72 @@ body {
   margin: 0 auto;
 }
 
+.legal-card {
+  max-width: 760px;
+}
+
+.legal-copy {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.legal-copy p {
+  margin: 0;
+}
+
+.app-footer {
+  margin-top: 1.2rem;
+  padding: 0.9rem 0 0.2rem;
+}
+
+.app-footer-inner {
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 0.85rem 1rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-top: 1px solid rgba(122, 172, 159, 0.24);
+  color: var(--text-soft);
+  font-size: 0.92rem;
+}
+
+.app-footer-links {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-footer a {
+  color: var(--text-soft);
+  text-decoration: none;
+}
+
+.app-footer a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
 .login-page {
-  min-height: calc(100vh - 3rem);
+  min-height: calc(100vh - 2.8rem);
   display: grid;
   place-items: center;
 }
 
 .login-card {
   width: min(460px, calc(100vw - 2.2rem));
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(212, 229, 223, 0.76);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 24px 70px rgba(14, 42, 38, 0.18);
 }
 
 .hero {
   padding: 1.4rem 1.5rem;
   border-radius: 1.2rem;
   border: 1px solid #dcebe5;
-  background: var(--bg-panel);
+  background: rgba(255, 255, 255, 0.76);
   backdrop-filter: blur(8px);
   box-shadow: var(--shadow);
 }
@@ -1164,6 +1244,22 @@ h1 {
   align-items: center;
 }
 
+.settings-invite-box {
+  margin-top: 0.9rem;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.settings-invite-box strong {
+  color: #1d433b;
+  font-size: 0.92rem;
+}
+
+.settings-password-rules {
+  display: grid;
+  gap: 0.1rem;
+}
+
 .settings-tabs-layout {
   margin-top: 1rem;
   display: grid;
@@ -1652,6 +1748,15 @@ h1 {
   background: var(--surface-strong);
   border-color: var(--surface-strong);
   color: var(--text-on-strong);
+}
+
+.fit-mode-button:disabled,
+.fit-mode-button-disabled {
+  background: #eef4f1;
+  border-color: #d5e1dc;
+  color: #8aa198;
+  cursor: not-allowed;
+  opacity: 0.9;
 }
 
 .fit-adjustment-list {
@@ -2372,6 +2477,35 @@ h1 {
 .info-text {
   margin-top: 0.75rem;
   color: #2d5f55;
+}
+
+.muted-text {
+  color: var(--text-soft);
+}
+
+.password-rule-text {
+  margin: 0;
+  font-size: 0.92rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
+}
+
+.password-rule-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  font-weight: 700;
+}
+
+.password-rule-icon-success {
+  color: #1f7a53;
+}
+
+.password-rule-icon-fail {
+  color: #d11f1f;
 }
 
 .import-overlay {

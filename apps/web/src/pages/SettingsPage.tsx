@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
-type SettingsTab = "personal" | "garmin" | "weight" | "llm";
+type SettingsTab = "personal" | "garmin" | "weight" | "llm" | "admin";
 
 type CredentialStatus = {
   provider: string;
@@ -40,7 +40,29 @@ type WeightLog = {
   created_at: string;
 };
 
-const tabs: Array<{ id: SettingsTab; label: string; description: string }> = [
+type AdminUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  is_admin: boolean;
+  has_password: boolean;
+  created_at: string | null;
+};
+
+type InviteDelivery = {
+  attempted?: boolean;
+  sent?: boolean;
+  detail?: string;
+};
+
+type AuthMe = {
+  id: number;
+  email: string;
+  display_name: string;
+  is_admin?: boolean;
+};
+
+const baseTabs: Array<{ id: Exclude<SettingsTab, "admin">; label: string; description: string }> = [
   { id: "personal", label: "Persönliche Daten", description: "Name und Zielrahmen pflegen" },
   { id: "garmin", label: "Garmin Zugang", description: "Zugangsdaten sicher hinterlegen" },
   { id: "weight", label: "Gewicht", description: "Verlauf und Messpunkte verwalten" },
@@ -72,6 +94,8 @@ function normalizeTextValue(value: string | null | undefined): string {
 
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("personal");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const [status, setStatus] = useState<CredentialStatus | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,6 +126,16 @@ export function SettingsPage() {
   const [logWeight, setLogWeight] = useState("");
   const [logDate, setLogDate] = useState("");
   const [logNotes, setLogNotes] = useState("");
+  const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [adminSaving, setAdminSaving] = useState(false);
+  const [adminMessage, setAdminMessage] = useState<string | null>(null);
+  const [adminError, setAdminError] = useState<string | null>(null);
+  const [newUserEmail, setNewUserEmail] = useState("");
+  const [newUserIsAdmin, setNewUserIsAdmin] = useState(false);
+  const [latestInviteUrl, setLatestInviteUrl] = useState("");
+
+  const tabs = isAdmin ? [{ id: "admin" as const, label: "Admin", description: "Nutzer anlegen und löschen" }] : baseTabs;
 
   const personalDataChanged =
     normalizeTextValue(displayName) !== normalizeTextValue(profile?.display_name) ||
@@ -176,6 +210,108 @@ export function SettingsPage() {
       setProfileError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setProfileLoading(false);
+    }
+  }
+
+  async function loadAuthMe() {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/auth/me`);
+      const payload = await parseJsonSafely<AuthMe | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Session konnte nicht geladen werden.");
+      }
+      const me = payload as AuthMe;
+      setIsAdmin(Boolean(me.is_admin));
+      setCurrentUserId(me.id);
+      window.dispatchEvent(
+        new CustomEvent("trainmind:user-label-updated", {
+          detail: {
+            displayName: me.display_name || me.email.split("@")[0] || "User",
+            roleLabel: me.is_admin ? "Admin" : "Nutzer",
+          },
+        }),
+      );
+    } catch {
+      setIsAdmin(false);
+      setCurrentUserId(null);
+    }
+  }
+
+  async function loadAdminUsers() {
+    if (!isAdmin) return;
+    setAdminLoading(true);
+    setAdminError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/users`);
+      const payload = await parseJsonSafely<{ users: AdminUser[] } | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Nutzer konnten nicht geladen werden.");
+      }
+      setAdminUsers((payload as { users: AdminUser[] }).users ?? []);
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setAdminLoading(false);
+    }
+  }
+
+  async function createAdminUser(e: FormEvent) {
+    e.preventDefault();
+    if (!newUserEmail.trim() || adminSaving) return;
+    setAdminSaving(true);
+    setAdminError(null);
+    setAdminMessage(null);
+    setLatestInviteUrl("");
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/users`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: newUserEmail.trim(),
+          is_admin: newUserIsAdmin,
+        }),
+      });
+      const payload = await parseJsonSafely<{ invite_url: string; email_delivery?: InviteDelivery; detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Nutzer konnte nicht angelegt werden.");
+      }
+      setNewUserEmail("");
+      setNewUserIsAdmin(false);
+      const invitePayload = payload as { invite_url: string; email_delivery?: InviteDelivery };
+      setLatestInviteUrl(invitePayload.invite_url);
+      if (invitePayload.email_delivery?.sent) {
+        setAdminMessage("Einladung erstellt und per E-Mail versendet.");
+      } else if (invitePayload.email_delivery?.attempted) {
+        setAdminMessage(
+          `Einladung erstellt, aber der Mailversand ist fehlgeschlagen${invitePayload.email_delivery.detail ? `: ${invitePayload.email_delivery.detail}` : "."}`
+        );
+      } else {
+        setAdminMessage("Einladung erstellt. SMTP ist noch nicht konfiguriert, daher bitte den Link manuell teilen.");
+      }
+      await loadAdminUsers();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setAdminSaving(false);
+    }
+  }
+
+  async function deleteAdminUser(userId: number) {
+    if (!window.confirm("Diesen Nutzer wirklich löschen?")) return;
+    setAdminError(null);
+    setAdminMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/admin/users/${userId}`, {
+        method: "DELETE",
+      });
+      const payload = await parseJsonSafely<{ status?: string; detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && payload.detail ? payload.detail : "Nutzer konnte nicht gelöscht werden.");
+      }
+      setAdminMessage("Nutzer gelöscht.");
+      await loadAdminUsers();
+    } catch (err) {
+      setAdminError(err instanceof Error ? err.message : "Unknown error");
     }
   }
 
@@ -290,10 +426,25 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
-    void loadStatus();
-    void loadProfile();
-    void loadLlmStatus();
+    void loadAuthMe();
+    if (!isAdmin) {
+      void loadStatus();
+      void loadProfile();
+      void loadLlmStatus();
+    }
   }, []);
+
+  useEffect(() => {
+    if (!isAdmin) {
+      setAdminUsers([]);
+      if (activeTab === "admin") {
+        setActiveTab("personal");
+      }
+      return;
+    }
+    setActiveTab("admin");
+    void loadAdminUsers();
+  }, [isAdmin]);
 
   return (
     <section className="page">
@@ -520,6 +671,79 @@ export function SettingsPage() {
                   </div>
                 </>
               ) : null}
+            </div>
+          ) : null}
+
+          {activeTab === "admin" && isAdmin ? (
+            <div className="settings-weight-stack">
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Admin Nutzerverwaltung</h2>
+                </div>
+                {adminError ? <p className="error-text">{adminError}</p> : null}
+                {adminMessage ? <p className="info-text">{adminMessage}</p> : null}
+                <form className="nutrition-form" onSubmit={(e) => void createAdminUser(e)}>
+                  <label className="settings-label">
+                    E-Mail
+                    <input className="settings-input" type="email" value={newUserEmail} onChange={(e) => setNewUserEmail(e.target.value)} required />
+                  </label>
+                  <label className="settings-label">
+                    Rolle
+                    <select className="settings-input" value={newUserIsAdmin ? "admin" : "user"} onChange={(e) => setNewUserIsAdmin(e.target.value === "admin")}>
+                      <option value="user">Normaler Nutzer</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+                  <div className="settings-actions nutrition-span-2">
+                    <button className="primary-button" type="submit" disabled={adminSaving}>
+                      {adminSaving ? "Lege an..." : "Nutzer anlegen"}
+                    </button>
+                    <button className="secondary-button" type="button" onClick={() => void loadAdminUsers()} disabled={adminLoading || adminSaving}>
+                      Aktualisieren
+                    </button>
+                  </div>
+                </form>
+                {latestInviteUrl ? (
+                  <div className="settings-invite-box">
+                    <strong>Einladungslink</strong>
+                    <input className="settings-input" value={latestInviteUrl} readOnly onFocus={(e) => e.currentTarget.select()} />
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Vorhandene Nutzer</h2>
+                </div>
+                {adminLoading ? <p>Nutzer werden geladen...</p> : null}
+                <div className="nutrition-list settings-weight-list">
+                  {adminUsers.length === 0 && !adminLoading ? <p>Noch keine Nutzer vorhanden.</p> : null}
+                  {adminUsers.map((user) => (
+                    <article className="nutrition-entry" key={user.id}>
+                      <div className="nutrition-entry-head">
+                        <strong>{user.email}</strong>
+                        <span>{user.is_admin ? "Admin" : "Nutzer"}</span>
+                      </div>
+                      <p className="nutrition-notes">
+                        Status: {user.has_password ? "Aktiv" : "Eingeladen"}
+                      </p>
+                      <p className="nutrition-notes">
+                        Erstellt: {user.created_at ? new Date(user.created_at).toLocaleString() : "-"}
+                      </p>
+                      <div className="settings-actions">
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => void deleteAdminUser(user.id)}
+                          disabled={currentUserId === user.id}
+                        >
+                          {currentUserId === user.id ? "Aktueller Admin" : "Nutzer löschen"}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

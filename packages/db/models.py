@@ -17,6 +17,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(120), nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     sessions: Mapped[list["UserSession"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -63,6 +64,7 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    invite_tokens: Mapped[list["UserInviteToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class ServiceCredential(Base):
@@ -97,6 +99,24 @@ class UserSession(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="sessions")
+
+
+class UserInviteToken(Base):
+    __tablename__ = "user_invite_tokens"
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_user_invite_tokens_token_hash"),
+        Index("ix_user_invite_tokens_user_expires", "user_id", "expires_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    user: Mapped[User] = relationship(back_populates="invite_tokens")
 
 
 class UserProfile(Base):

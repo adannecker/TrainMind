@@ -21,6 +21,7 @@ import os
 import re
 import json
 import time
+from hashlib import sha256
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List
@@ -46,6 +47,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).resolve().parents[4]  # .../TrainMind
 EXPORT_DIR = REPO_ROOT / "data" / "exports"
 MANIFEST_PATH = EXPORT_DIR / "_index.json"
+TOKENSTORE_ROOT = REPO_ROOT / "data" / "garmin_tokens" / "standalone"
 MAX_TO_FETCH = 40  # user requirement
 
 
@@ -65,6 +67,38 @@ def sanitize_filename(s: str, maxlen: int = 60) -> str:
 
 def ensure_dirs() -> None:
     EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def ensure_private_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
+def tokenstore_path_for_email(email: str) -> Path:
+    email_hash = sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
+    return TOKENSTORE_ROOT / email_hash
+
+
+def tokenstore_has_session(path: Path) -> bool:
+    return path.exists() and any(path.glob("*.json"))
+
+
+def persist_client_session(client: Garmin, tokenstore_path: Path) -> None:
+    garth_client = getattr(client, "garth", None)
+    dump = getattr(garth_client, "dump", None)
+    if dump is None:
+        return
+
+    ensure_private_dir(tokenstore_path)
+    dump(str(tokenstore_path))
+    for json_file in tokenstore_path.glob("*.json"):
+        try:
+            os.chmod(json_file, 0o600)
+        except OSError:
+            pass
 
 def load_manifest() -> Dict[str, Any]:
     if MANIFEST_PATH.exists():
@@ -117,15 +151,27 @@ def login_garmin() -> Garmin:
         raise SystemExit(
             "Please set GARMIN_EMAIL and GARMIN_PASSWORD (env or .env in repo root)."
         )
+    tokenstore_path = tokenstore_path_for_email(email)
+    if tokenstore_has_session(tokenstore_path):
+        try:
+            g = Garmin()
+            g.login(str(tokenstore_path))
+            return g
+        except Exception:
+            pass
+
+    ensure_private_dir(tokenstore_path)
     g = Garmin(email, password)
     try:
         g.login()
+        persist_client_session(g, tokenstore_path)
     except GarminConnectAuthenticationError as e:
         raise SystemExit(f"Garmin auth failed: {e}")
     except GarminConnectConnectionError as e:
         # transient network: retry briefly
         time.sleep(2)
         g.login()
+        persist_client_session(g, tokenstore_path)
     return g
 
 def fetch_last_activities(client: Garmin, limit: int = 100) -> List[Dict[str, Any]]:

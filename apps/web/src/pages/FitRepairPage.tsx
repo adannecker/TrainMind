@@ -15,6 +15,17 @@ type PowerSeriesBucket = {
   max_power: number;
 };
 
+type SummaryFieldAnalysis = {
+  key: string;
+  label: string;
+  present: boolean;
+  scopes: string[];
+  field_names: string[];
+  auto_update_possible: boolean;
+  estimated_value: number | null;
+  note: string | null;
+};
+
 type FitInspectResponse = {
   file_name: string;
   duration_seconds: number;
@@ -22,11 +33,19 @@ type FitInspectResponse = {
   power_record_count: number;
   avg_power: number;
   max_power: number;
+  normalized_power: number;
+  total_work_kj: number;
+  estimated_calories: number;
+  intensity_factor: number | null;
+  training_stress_score: number | null;
+  ftp_inferred_w: number | null;
   power_records: PowerRecord[];
   power_series: PowerSeriesBucket[];
+  summary_fields: SummaryFieldAnalysis[];
 };
 
 type AdjustmentMode = "percent" | "fixed";
+type RepairTab = "power" | "hr" | "cadence";
 
 type PowerAdjustment = {
   id: string;
@@ -119,6 +138,67 @@ function summarizeRange(records: PowerRecord[], startSecond: number, endSecond: 
   };
 }
 
+function buildPowerMetrics(records: PowerRecord[], ftpInferredW: number | null) {
+  if (records.length === 0) {
+    return {
+      avg_power: 0,
+      max_power: 0,
+      normalized_power: 0,
+      total_work_kj: 0,
+      estimated_calories: 0,
+      intensity_factor: null as number | null,
+      training_stress_score: null as number | null,
+    };
+  }
+
+  const powers = records.map((row) => row.power);
+  const avgPower = Math.round(powers.reduce((sum, value) => sum + value, 0) / powers.length);
+  const maxPower = Math.max(...powers);
+
+  const durationSeconds = Math.max(records[records.length - 1]?.offset_seconds ?? 0, 0);
+  const powerBySecond = Array.from({ length: durationSeconds + 1 }, () => 0);
+  for (let index = 0; index < records.length; index += 1) {
+    const row = records[index];
+    const nextOffset =
+      index === records.length - 1 ? durationSeconds + 1 : Math.max(row.offset_seconds + 1, records[index + 1]?.offset_seconds ?? durationSeconds + 1);
+    for (let second = row.offset_seconds; second < Math.min(nextOffset, durationSeconds + 1); second += 1) {
+      powerBySecond[second] = row.power;
+    }
+  }
+
+  const totalWorkKj = Math.round(powerBySecond.reduce((sum, value) => sum + Math.max(value, 0), 0) / 1000);
+  const estimatedCalories = Math.round(totalWorkKj / 0.24 / 4.184);
+
+  let runningSum = 0;
+  const rollingAverages = powerBySecond.map((value, index) => {
+    runningSum += value;
+    if (index >= 30) {
+      runningSum -= powerBySecond[index - 30];
+    }
+    return runningSum / Math.min(index + 1, 30);
+  });
+  const normalizedPower =
+    rollingAverages.length > 0
+      ? Math.round((rollingAverages.reduce((sum, value) => sum + value ** 4, 0) / rollingAverages.length) ** 0.25)
+      : 0;
+
+  const intensityFactor = ftpInferredW && ftpInferredW > 0 ? Number((normalizedPower / ftpInferredW).toFixed(3)) : null;
+  const trainingStressScore =
+    ftpInferredW && ftpInferredW > 0 && intensityFactor !== null
+      ? Number((((powerBySecond.length * normalizedPower * intensityFactor) / (ftpInferredW * 3600)) * 100).toFixed(1))
+      : null;
+
+  return {
+    avg_power: avgPower,
+    max_power: maxPower,
+    normalized_power: normalizedPower,
+    total_work_kj: totalWorkKj,
+    estimated_calories: estimatedCalories,
+    intensity_factor: intensityFactor,
+    training_stress_score: trainingStressScore,
+  };
+}
+
 function parseDownloadFilename(contentDisposition: string | null): string | null {
   if (!contentDisposition) return null;
   const match = /filename="([^"]+)"/i.exec(contentDisposition);
@@ -142,6 +222,7 @@ export function FitRepairPage() {
   const [viewStart, setViewStart] = useState(0);
   const [viewEnd, setViewEnd] = useState(0);
   const [mode, setMode] = useState<AdjustmentMode>("percent");
+  const [activeTab, setActiveTab] = useState<RepairTab>("power");
   const [value, setValue] = useState("5");
   const [adjustments, setAdjustments] = useState<PowerAdjustment[]>([]);
   const [dragSelection, setDragSelection] = useState<DragSelection | null>(null);
@@ -173,6 +254,7 @@ export function FitRepairPage() {
       setViewStart(0);
       setViewEnd(next.duration_seconds);
       setMode("percent");
+      setActiveTab("power");
       setValue("5");
       setDragSelection(null);
       setHoveredBucket(null);
@@ -228,6 +310,27 @@ export function FitRepairPage() {
     if (!inspectData) return { count: 0, avg: 0, max: 0 };
     return summarizeRange(previewRecords, 0, inspectData.duration_seconds);
   }, [inspectData, previewRecords]);
+
+  const beforeMetrics = useMemo(() => {
+    if (!inspectData) return null;
+    return buildPowerMetrics(inspectData.power_records, inspectData.ftp_inferred_w);
+  }, [inspectData]);
+
+  const afterMetrics = useMemo(() => {
+    if (!inspectData) return null;
+    return buildPowerMetrics(previewRecords, inspectData.ftp_inferred_w);
+  }, [inspectData, previewRecords]);
+
+  const relevantPowerFields = useMemo(() => {
+    if (!inspectData || !beforeMetrics || !afterMetrics) return [];
+    return inspectData.summary_fields
+      .filter((field) => field.present || ["avg_power", "max_power", "normalized_power", "total_work_kj", "estimated_calories"].includes(field.key))
+      .map((field) => ({
+        ...field,
+        before: beforeMetrics[field.key as keyof typeof beforeMetrics] ?? null,
+        after: afterMetrics[field.key as keyof typeof afterMetrics] ?? null,
+      }));
+  }, [afterMetrics, beforeMetrics, inspectData]);
 
   const activeHighlight = useMemo(() => {
     if (!visibleSeries.length || !dragSelection) return null;
@@ -346,7 +449,13 @@ export function FitRepairPage() {
       const changed = response.headers.get("X-TrainMind-Changed-Records");
       const avgPower = response.headers.get("X-TrainMind-Avg-Power");
       const maxPower = response.headers.get("X-TrainMind-Max-Power");
-      setMessage(`Neue FIT-Datei erstellt. Geänderte Records: ${changed ?? "-"}, Ø Watt: ${avgPower ?? "-"}, Max Watt: ${maxPower ?? "-"}.`);
+      const normalizedPower = response.headers.get("X-TrainMind-Normalized-Power");
+      const estimatedCalories = response.headers.get("X-TrainMind-Estimated-Calories");
+      const totalWorkKj = response.headers.get("X-TrainMind-Total-Work-KJ");
+      const updatedFields = response.headers.get("X-TrainMind-Updated-Fields");
+      setMessage(
+        `Neue FIT-Datei erstellt. Geänderte Records: ${changed ?? "-"}, Ø Watt: ${avgPower ?? "-"}, Max Watt: ${maxPower ?? "-"}, NP: ${normalizedPower ?? "-"}, Arbeit: ${totalWorkKj ?? "-"} kJ, Kalorien: ${estimatedCalories ?? "-"}.${updatedFields ? ` Aktualisierte Summary-Felder: ${updatedFields}.` : ""}`,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
@@ -480,6 +589,25 @@ export function FitRepairPage() {
           {inspectData ? (
             <>
               <div className="card">
+                <div className="section-title-row">
+                  <h2>Bereiche</h2>
+                </div>
+                <div className="fit-mode-row" role="tablist" aria-label="FIT Korrektur Bereiche">
+                  <button className={`fit-mode-button ${activeTab === "power" ? "active" : ""}`} type="button" onClick={() => setActiveTab("power")}>
+                    Power
+                  </button>
+                  <button className="fit-mode-button fit-mode-button-disabled" type="button" disabled aria-disabled="true">
+                    HF
+                  </button>
+                  <button className="fit-mode-button fit-mode-button-disabled" type="button" disabled aria-disabled="true">
+                    Cadence
+                  </button>
+                </div>
+              </div>
+
+              {activeTab === "power" ? (
+                <>
+              <div className="card">
                 <div className="section-title-row fit-section-head">
                   <h2>Übersicht</h2>
                   <span className="fit-repair-pill fit-file-pill" title={inspectData.file_name}>
@@ -502,6 +630,22 @@ export function FitRepairPage() {
                   <div className="settings-status-chip">
                     <span>Ø Watt Vorschau</span>
                     <strong>{overallAfter.avg} W</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>NP original</span>
+                    <strong>{inspectData.normalized_power} W</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Arbeit</span>
+                    <strong>{inspectData.total_work_kj} kJ</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Kalorien</span>
+                    <strong>{inspectData.estimated_calories} kcal</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>FTP ableitbar</span>
+                    <strong>{inspectData.ftp_inferred_w ? `${Math.round(inspectData.ftp_inferred_w)} W` : "Nein"}</strong>
                   </div>
                 </div>
 
@@ -584,6 +728,29 @@ export function FitRepairPage() {
                 <div className="fit-chart-legend">
                   <span><i className="legend-swatch original" /> Original</span>
                   <span><i className="legend-swatch preview" /> Änderung oben drauf</span>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Power Felder Vorher / Nachher</h2>
+                </div>
+                <p className="fit-chart-caption">
+                  Hier siehst du alle relevanten Power-Felder aus dem FIT, inklusive der Werte vor der Anpassung und der aktuellen Vorschau danach.
+                </p>
+                <div className="fit-adjustment-list">
+                  {relevantPowerFields.map((field) => (
+                    <article className="fit-adjustment-item" key={field.key}>
+                      <div>
+                        <strong>
+                          {field.label}
+                          {field.present ? ` · ${field.scopes.join(", ")}` : " · nicht vorhanden"}
+                        </strong>
+                        <p>Vorher: {field.before ?? "-"} · Nachher: {field.after ?? "-"}</p>
+                        <p>{field.note ?? ""}</p>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </div>
 
@@ -741,6 +908,8 @@ export function FitRepairPage() {
                   ))}
                 </div>
               </div>
+                </>
+              ) : null}
             </>
           ) : null}
         </div>

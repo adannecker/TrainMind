@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import json
 import re
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -21,6 +23,10 @@ from packages.db.session import SessionLocal
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+GARMIN_RATE_LIMIT_COOLDOWN = timedelta(minutes=15)
+_garmin_rate_limited_until_by_user: dict[int, datetime] = {}
+_GARMIN_TOKENSTORE_ROOT = REPO_ROOT / "data" / "garmin_tokens"
+logger = logging.getLogger(__name__)
 
 
 def _sanitize_filename(value: str, max_len: int = 80) -> str:
@@ -60,6 +66,25 @@ def _pick_value(item: dict[str, Any], *keys: str) -> Any:
         if summary.get(key) is not None:
             return summary.get(key)
     return None
+
+
+def _activity_type_key(item: dict[str, Any]) -> str:
+    activity_type = _nested_dict(item, "activityType")
+    activity_type_dto = _nested_dict(item, "activityTypeDTO")
+    type_key = (
+        item.get("typeKey")
+        or activity_type.get("typeKey")
+        or activity_type_dto.get("typeKey")
+        or item.get("activityType")
+    )
+    return str(type_key or "").strip().lower()
+
+
+def _is_cycling_activity(item: dict[str, Any]) -> bool:
+    type_key = _activity_type_key(item)
+    if not type_key:
+        return False
+    return "cycling" in type_key or "biking" in type_key
 
 
 def _to_datetime(value: str | None) -> datetime | None:
@@ -192,7 +217,52 @@ def _collect_loaded_ids(user_id: int) -> set[str]:
     return loaded_ids
 
 
+def _is_rate_limit_error(exc: Exception) -> bool:
+    message = str(exc)
+    return "429" in message or "Too Many Requests" in message
+
+
+def _garmin_tokenstore_path(user_id: int, email: str) -> Path:
+    email_hash = sha256(email.strip().lower().encode("utf-8")).hexdigest()[:16]
+    return _GARMIN_TOKENSTORE_ROOT / f"user_{user_id}" / email_hash
+
+
+def _ensure_private_dir(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
+def _tokenstore_has_session(path: Path) -> bool:
+    return path.exists() and any(path.glob("*.json"))
+
+
+def _persist_client_session(client: Garmin, tokenstore_path: Path) -> None:
+    garth_client = getattr(client, "garth", None)
+    dump = getattr(garth_client, "dump", None)
+    if dump is None:
+        return
+
+    _ensure_private_dir(tokenstore_path)
+    dump(str(tokenstore_path))
+    for json_file in tokenstore_path.glob("*.json"):
+        try:
+            os.chmod(json_file, 0o600)
+        except OSError:
+            pass
+
+
 def _build_client(user_id: int) -> Garmin:
+    blocked_until = _garmin_rate_limited_until_by_user.get(user_id)
+    if blocked_until and blocked_until > datetime.utcnow():
+        retry_minutes = max(1, int((blocked_until - datetime.utcnow()).total_seconds() // 60) + 1)
+        raise RuntimeError(
+            f"Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
+            f"Bitte in etwa {retry_minutes} Minute(n) erneut versuchen."
+        )
+
     load_dotenv(dotenv_path=REPO_ROOT / ".env")
     stored = get_service_credentials("garmin", user_id=user_id)
     if stored is not None:
@@ -203,12 +273,47 @@ def _build_client(user_id: int) -> Garmin:
     if not email or not password:
         raise ValueError("GARMIN_EMAIL and GARMIN_PASSWORD must be set in environment or .env")
 
+    tokenstore_path = _garmin_tokenstore_path(user_id=user_id, email=email)
+    if _tokenstore_has_session(tokenstore_path):
+        try:
+            logger.info("Attempting Garmin token login for user_id=%s", user_id)
+            client = Garmin()
+            client.login(str(tokenstore_path))
+            _garmin_rate_limited_until_by_user.pop(user_id, None)
+            logger.info("Garmin token login successful for user_id=%s", user_id)
+            return client
+        except Exception as exc:
+            if _is_rate_limit_error(exc):
+                _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
+                raise RuntimeError(
+                    "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
+                    "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
+                ) from exc
+            logger.warning("Garmin token login failed for user_id=%s: %s", user_id, exc)
+
+    _ensure_private_dir(tokenstore_path)
     client = Garmin(email, password)
     try:
+        logger.info("Attempting Garmin credential login for user_id=%s", user_id)
         client.login()
+        _persist_client_session(client, tokenstore_path)
+        _garmin_rate_limited_until_by_user.pop(user_id, None)
+        logger.info("Garmin credential login successful for user_id=%s", user_id)
     except GarminConnectAuthenticationError as exc:
+        if _is_rate_limit_error(exc):
+            _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
+            raise RuntimeError(
+                "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
+                "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
+            ) from exc
         raise RuntimeError(f"Garmin authentication failed: {exc}") from exc
     except GarminConnectConnectionError as exc:
+        if _is_rate_limit_error(exc):
+            _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
+            raise RuntimeError(
+                "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
+                "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
+            ) from exc
         raise RuntimeError(f"Garmin connection failed: {exc}") from exc
     return client
 
@@ -384,17 +489,22 @@ def get_imported_garmin_summary(user_id: int) -> dict[str, Any]:
     }
 
 
-def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[str, Any]:
+def _import_selected_garmin_rides_with_client(
+    client: Garmin,
+    user_id: int,
+    activity_ids: list[str],
+    sleep_seconds: float = 0.0,
+) -> dict[str, Any]:
     cleaned_ids = [str(x).strip() for x in activity_ids if str(x).strip()]
     deduped_ids = list(dict.fromkeys(cleaned_ids))
     if not deduped_ids:
         return {"loaded": 0, "skipped": 0, "errors": [], "imported_ids": [], "interesting_updates": []}
 
-    client = _build_client(user_id=user_id)
     loaded_ids: list[str] = []
     skipped_ids: list[str] = []
     errors: list[dict[str, str]] = []
     interesting_updates: list[dict[str, Any]] = []
+    safe_sleep_seconds = max(0.0, float(sleep_seconds))
 
     for activity_id in deduped_ids:
         try:
@@ -525,12 +635,114 @@ def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[
                 session.rollback()
                 errors.append({"activity_id": activity_id, "reason": f"DB save failed: {exc}"})
 
+        if safe_sleep_seconds > 0:
+            time.sleep(safe_sleep_seconds)
+
     return {
         "loaded": len(loaded_ids),
         "skipped": len(skipped_ids),
         "errors": errors,
         "imported_ids": loaded_ids,
         "interesting_updates": interesting_updates,
+    }
+
+
+def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[str, Any]:
+    client = _build_client(user_id=user_id)
+    return _import_selected_garmin_rides_with_client(client=client, user_id=user_id, activity_ids=activity_ids)
+
+
+def ingest_recent_garmin_rides(
+    user_id: int,
+    days_back: int = 3,
+    batch_size: int = 20,
+    sleep_seconds: float = 1.0,
+) -> dict[str, Any]:
+    safe_days_back = max(0, min(days_back, 30))
+    safe_batch_size = max(1, min(batch_size, 100))
+    safe_sleep_seconds = max(0.0, min(float(sleep_seconds), 5.0))
+
+    client = _build_client(user_id=user_id)
+    loaded_ids = _collect_loaded_ids(user_id=user_id)
+    cutoff_date = datetime.utcnow().date() - timedelta(days=safe_days_back)
+
+    start = 0
+    checked_total = 0
+    pages_scanned = 0
+    skipped_non_cycling = 0
+    skipped_missing_date = 0
+    skipped_already_loaded = 0
+    selected_ids: list[str] = []
+    stop_reason = "exhausted"
+
+    while True:
+        activities = client.get_activities(start, safe_batch_size)
+        pages_scanned += 1
+        if not activities:
+            break
+
+        reached_cutoff = False
+
+        for activity in activities:
+            checked_total += 1
+            activity_id = _extract_activity_id(activity)
+            if not activity_id:
+                continue
+
+            if not _is_cycling_activity(activity):
+                skipped_non_cycling += 1
+                continue
+
+            activity_time = _to_datetime(_pick_value(activity, "startTimeLocal", "activityStartTimeLocal")) or _to_datetime(
+                _pick_value(activity, "startTimeGMT", "startTimeUtc")
+            )
+            if activity_time is None:
+                skipped_missing_date += 1
+                continue
+
+            if activity_time.date() < cutoff_date:
+                stop_reason = "cutoff_reached"
+                reached_cutoff = True
+                break
+
+            if activity_id in loaded_ids:
+                skipped_already_loaded += 1
+                continue
+
+            selected_ids.append(activity_id)
+            loaded_ids.add(activity_id)
+
+        if reached_cutoff:
+            break
+
+        start += safe_batch_size
+
+    import_result = _import_selected_garmin_rides_with_client(
+        client=client,
+        user_id=user_id,
+        activity_ids=selected_ids,
+        sleep_seconds=safe_sleep_seconds,
+    )
+
+    return {
+        "generated_at": datetime.utcnow().isoformat(),
+        "mode": "recent-ingest",
+        "window": {
+            "days_back": safe_days_back,
+            "batch_size": safe_batch_size,
+            "sleep_seconds": safe_sleep_seconds,
+            "cutoff_date": cutoff_date.isoformat(),
+        },
+        "summary": {
+            "checked_recent_rides": checked_total,
+            "pages_scanned": pages_scanned,
+            "selected_for_import": len(selected_ids),
+            "already_loaded": skipped_already_loaded,
+            "skipped_non_cycling": skipped_non_cycling,
+            "skipped_missing_date": skipped_missing_date,
+            "stop_reason": stop_reason,
+        },
+        "import_result": import_result,
     }
 
 
