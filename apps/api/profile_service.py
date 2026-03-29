@@ -12,6 +12,7 @@ from packages.db.session import SessionLocal
 
 DEFAULT_NAV_GROUP_ORDER = ["setup", "activities", "nutrition", "training", "achievements"]
 VALID_NAV_GROUP_KEYS = set(DEFAULT_NAV_GROUP_ORDER)
+TRAINING_CONFIG_SECTION_KEYS = ("profile", "goals", "week", "sources")
 
 
 def _now() -> datetime:
@@ -91,6 +92,71 @@ def _normalize_nav_group_order(value: Any) -> list[str] | None:
     return normalized + missing
 
 
+def _parse_json_object(value: Any, field_name: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    parsed = value
+    if isinstance(value, str):
+        clean_value = value.strip()
+        if not clean_value:
+            return None
+        try:
+            parsed = json.loads(clean_value)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{field_name} must be valid JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError(f"{field_name} must be an object.")
+    return parsed
+
+
+def _normalize_training_config(value: Any) -> dict[str, Any] | None:
+    payload = _parse_json_object(value, "training_config")
+    if payload is None:
+        return None
+
+    raw_sections = payload.get("sections")
+    if raw_sections is None:
+        raw_sections = {}
+    if not isinstance(raw_sections, dict):
+        raise ValueError("training_config.sections must be an object.")
+
+    normalized_sections: dict[str, dict[str, Any]] = {}
+    for section_key in TRAINING_CONFIG_SECTION_KEYS:
+        raw_section = raw_sections.get(section_key) or {}
+        if not isinstance(raw_section, dict):
+            raise ValueError("training_config.sections entries must be objects.")
+
+        raw_focus_ids = raw_section.get("focus_ids") or []
+        if not isinstance(raw_focus_ids, list):
+            raise ValueError("training_config.sections.focus_ids must be a list.")
+        focus_ids: list[str] = []
+        seen_ids: set[str] = set()
+        for entry in raw_focus_ids:
+            focus_id = str(entry or "").strip()
+            if not focus_id or focus_id in seen_ids:
+                continue
+            seen_ids.add(focus_id)
+            focus_ids.append(focus_id)
+
+        notes = str(raw_section.get("notes") or "").strip()
+        normalized_sections[section_key] = {
+            "focus_ids": focus_ids,
+            "notes": notes,
+        }
+
+    return {
+        "sections": normalized_sections,
+        "updated_at": _now().isoformat(),
+    }
+
+
+def _normalize_training_plan(value: Any) -> dict[str, Any] | None:
+    payload = _parse_json_object(value, "training_plan")
+    if payload is None:
+        return None
+    return payload
+
+
 def _profile_payload(profile: UserProfile | None, user: User | None = None) -> dict[str, Any]:
     display_name = (user.display_name or "") if user is not None else ""
     if profile is None:
@@ -105,6 +171,8 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
             "goal_end_date": None,
             "goal_period_days": None,
             "nav_group_order": None,
+            "training_config": None,
+            "training_plan": None,
             "updated_at": None,
         }
     goal_period_days = None
@@ -121,6 +189,8 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
         "goal_end_date": _serialize_datetime(profile.goal_end_date),
         "goal_period_days": goal_period_days,
         "nav_group_order": _normalize_nav_group_order(profile.nav_group_order_json),
+        "training_config": _parse_json_object(profile.training_config_json, "training_config"),
+        "training_plan": _parse_json_object(profile.training_plan_json, "training_plan"),
         "updated_at": _serialize_datetime(profile.updated_at),
     }
 
@@ -167,6 +237,12 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
         if "nav_group_order" in payload:
             nav_group_order = _normalize_nav_group_order(payload.get("nav_group_order"))
             profile.nav_group_order_json = json.dumps(nav_group_order) if nav_group_order else None
+        if "training_config" in payload:
+            training_config = _normalize_training_config(payload.get("training_config"))
+            profile.training_config_json = json.dumps(training_config) if training_config else None
+        if "training_plan" in payload:
+            training_plan = _normalize_training_plan(payload.get("training_plan"))
+            profile.training_plan_json = json.dumps(training_plan) if training_plan else None
         if profile.goal_start_date and profile.goal_end_date and profile.goal_end_date < profile.goal_start_date:
             raise ValueError("goal_end_date must be on or after goal_start_date.")
 

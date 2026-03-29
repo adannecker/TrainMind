@@ -132,6 +132,8 @@ class UserProfile(Base):
     goal_start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     goal_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     nav_group_order_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    training_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    training_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -216,6 +218,8 @@ class UserAchievement(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     hint: Mapped[str | None] = mapped_column(Text, nullable=True)
     achieved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    activity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    activity_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     current_value: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_value_label: Mapped[str | None] = mapped_column(String(120), nullable=True)
     sort_index: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
@@ -302,6 +306,7 @@ class Activity(Base):
     __table_args__ = (
         UniqueConstraint("provider", "external_id", name="uq_activities_provider_external_id"),
         Index("ix_activities_user_started_at", "user_id", "started_at"),
+        Index("ix_activities_user_achievement_check", "user_id", "achievements_check_version", "started_at"),
         {"schema": GARMIN_SCHEMA},
     )
 
@@ -321,6 +326,9 @@ class Activity(Base):
     avg_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_hr_bpm: Mapped[float | None] = mapped_column(Float, nullable=True)
     raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    achievements_checked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    achievements_check_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    achievements_summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="activities")

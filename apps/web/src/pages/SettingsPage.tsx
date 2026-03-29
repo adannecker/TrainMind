@@ -27,6 +27,22 @@ type UserProfile = {
   goal_start_date: string | null;
   goal_end_date: string | null;
   goal_period_days: number | null;
+  training_config?: {
+    sections?: Partial<
+      Record<
+        "profile" | "goals" | "week" | "sources",
+        {
+          focus_ids?: string[];
+          notes?: string;
+        }
+      >
+    >;
+    updated_at?: string | null;
+  } | null;
+  training_plan?: {
+    plan_title?: string;
+    summary?: string;
+  } | null;
   updated_at: string | null;
 };
 
@@ -68,6 +84,13 @@ const baseTabs: Array<{ id: Exclude<SettingsTab, "admin">; label: string; descri
   { id: "weight", label: "Gewicht", description: "Verlauf und Messpunkte verwalten" },
   { id: "llm", label: "LLM Zugang", description: "OpenAI-Konfiguration prüfen" },
 ];
+
+const trainingConfigSectionLabels: Record<"profile" | "goals" | "week" | "sources", string> = {
+  profile: "Athletenprofil",
+  goals: "Ziele und Eventkontext",
+  week: "Wochenorganisation",
+  sources: "Quellenbasiertes Setup",
+};
 
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
@@ -141,6 +164,14 @@ export function SettingsPage() {
     normalizeTextValue(displayName) !== normalizeTextValue(profile?.display_name) ||
     dateOfBirth !== (profile?.date_of_birth || "") ||
     normalizeGender(gender) !== normalizeGender(profile?.gender);
+
+  const trainingConfigSections = (Object.keys(trainingConfigSectionLabels) as Array<keyof typeof trainingConfigSectionLabels>).map((key) => ({
+    key,
+    title: trainingConfigSectionLabels[key],
+    focusIds: profile?.training_config?.sections?.[key]?.focus_ids ?? [],
+    notes: profile?.training_config?.sections?.[key]?.notes?.trim() ?? "",
+  }));
+  const hasTrainingConfig = trainingConfigSections.some((section) => section.focusIds.length || section.notes);
 
   async function loadStatus() {
     setLoading(true);
@@ -505,6 +536,42 @@ export function SettingsPage() {
                   </button>
                 </div>
               </form>
+
+              <div className="settings-training-config-box">
+                <div className="section-title-row">
+                  <h3>Gespeicherte Trainingskonfiguration</h3>
+                </div>
+                {hasTrainingConfig ? (
+                  <div className="settings-training-config-grid">
+                    {trainingConfigSections.map((section) => (
+                      <div key={section.key} className="settings-training-config-card">
+                        <strong>{section.title}</strong>
+                        {section.focusIds.length ? (
+                          <div className="settings-training-config-pills">
+                            {section.focusIds.map((focusId) => (
+                              <span key={focusId} className="settings-training-config-pill">
+                                {focusId}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="settings-training-config-empty">Keine Fokus-Bausteine gespeichert.</span>
+                        )}
+                        {section.notes ? <p>{section.notes}</p> : null}
+                      </div>
+                    ))}
+                    {profile?.training_plan?.plan_title ? (
+                      <div className="settings-training-config-card settings-training-config-card-highlight">
+                        <strong>Übernommener Trainingsplan</strong>
+                        <span>{profile.training_plan.plan_title}</span>
+                        {profile.training_plan.summary ? <p>{profile.training_plan.summary}</p> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="info-text">Noch keine Trainingskonfiguration im Profil gespeichert.</p>
+                )}
+              </div>
             </div>
           ) : null}
 
