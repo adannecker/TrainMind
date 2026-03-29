@@ -15,7 +15,7 @@ from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnec
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from apps.api.achievement_service import reset_achievement_data
+from apps.api.achievement_service import rebuild_activity_achievement_checks, reset_achievement_data
 from apps.api.credential_service import get_service_credentials
 from apps.api.training_service import create_imported_max_hr_metric_if_new_peak
 from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, UserTrainingMetric
@@ -638,13 +638,19 @@ def _import_selected_garmin_rides_with_client(
         if safe_sleep_seconds > 0:
             time.sleep(safe_sleep_seconds)
 
-    return {
+    result = {
         "loaded": len(loaded_ids),
         "skipped": len(skipped_ids),
         "errors": errors,
         "imported_ids": loaded_ids,
         "interesting_updates": interesting_updates,
     }
+    if loaded_ids:
+        try:
+            result["achievements"] = rebuild_activity_achievement_checks(user_id=user_id)
+        except Exception as exc:
+            result["achievement_rebuild_error"] = str(exc)
+    return result
 
 
 def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[str, Any]:
