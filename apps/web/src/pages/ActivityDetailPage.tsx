@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
@@ -23,9 +23,35 @@ type ActivitySummary = {
   min_altitude_m: number | null;
   max_altitude_m: number | null;
   stress_score: number | null;
+  achievements_checked_at: string | null;
+  achievements_check_version: number | null;
   records_count: number;
   laps_count: number;
   sessions_count: number;
+};
+
+type ActivityAchievementMatch = {
+  key: string;
+  title: string;
+  category: string;
+  detail: string;
+  proof: string | null;
+  meta?: {
+    bucket_start_w?: number;
+    bucket_end_w?: number;
+    bucket_label?: string;
+    window_key?: string;
+    window_label?: string;
+    avg_hr_bpm?: number;
+    avg_power_w?: number;
+    activity_id?: number;
+  } | null;
+};
+
+type ActivityAchievementAnalysis = {
+  checked_scopes?: string[];
+  matched?: ActivityAchievementMatch[];
+  matched_count?: number;
 };
 
 type ActivitySessionRow = {
@@ -71,12 +97,13 @@ type ActivityRecordRow = {
 
 type ActivityDetailResponse = {
   activity: ActivitySummary;
+  achievement_analysis?: ActivityAchievementAnalysis | null;
   sessions: ActivitySessionRow[];
   laps: ActivityLapRow[];
   records: ActivityRecordRow[];
 };
 
-type TabKey = "general" | "charts" | "laps" | "analysis";
+type TabKey = "general" | "charts" | "laps" | "analysis" | "achievements";
 type ZoomSelection = {
   chartKey: string;
   anchor: number;
@@ -88,13 +115,53 @@ type ChartPoint = {
   value: number;
 };
 
+const ACHIEVEMENT_CATEGORY_ORDER = ["hf", "records", "distance", "weekly", "zones", "moments"] as const;
+const HF_WINDOW_ORDER: Record<string, number> = {
+  "5m": 0,
+  "10m": 1,
+  "15m": 2,
+  "20m": 3,
+  "30m": 4,
+  "45m": 5,
+  "60m": 6,
+};
+
+function achievementCategoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    hf: "HF",
+    records: "Rekorde",
+    distance: "Ausdauer",
+    weekly: "Wochen",
+    zones: "Zonen",
+    moments: "Momente",
+  };
+  return labels[category] ?? category;
+}
+
+function compactHfWindowLabel(item: ActivityAchievementMatch): string {
+  if (item.meta?.window_label) return item.meta.window_label;
+  const match = item.title.match(/(\d+\s*(?:min|m|s))/i);
+  return match?.[1] ?? item.title;
+}
+
+function compactHfValueLabel(item: ActivityAchievementMatch): string {
+  if (typeof item.meta?.avg_hr_bpm === "number") {
+    return `Ø ${Math.round(item.meta.avg_hr_bpm)} bpm`;
+  }
+  const match = (item.proof ?? "").match(/(\d+(?:[.,]\d+)?)\s*bpm/i);
+  if (match) {
+    return `Ø ${Math.round(Number(match[1].replace(",", ".")))} bpm`;
+  }
+  return "HF";
+}
+
 const TABS: Array<{ key: TabKey; title: string; note: string }> = [
   { key: "general", title: "Allgemeine Infos", note: "Kernwerte und Metadaten" },
   { key: "charts", title: "Diagramme", note: "HF, Watt und Verlauf" },
   { key: "laps", title: "Runden", note: "Laps und Sessions" },
   { key: "analysis", title: "Trainingsanalyse", note: "Platzhalter für den nächsten Schritt" },
+  { key: "achievements", title: "Achievements", note: "Ride-Checks und Treffer" },
 ];
-
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) return null;
@@ -453,7 +520,7 @@ function MiniChart({
           ) : null}
         </div>
       ) : (
-        <p className="training-note">Noch keine Zeitreihendaten für dieses Diagramm vorhanden.</p>
+        <p className="training-note">Noch keine Zeitreihendaten fÃ¼r dieses Diagramm vorhanden.</p>
       )}
     </div>
   );
@@ -469,6 +536,7 @@ export function ActivityDetailPage() {
   const [dragSelection, setDragSelection] = useState<ZoomSelection | null>(null);
   const [smoothingMode, setSmoothingMode] = useState<SmoothingMode>("raw");
   const [hoverSecond, setHoverSecond] = useState<number | null>(null);
+  const [activeAchievementCategory, setActiveAchievementCategory] = useState<string>("all");
 
   useEffect(() => {
     async function loadDetail() {
@@ -502,6 +570,42 @@ export function ActivityDetailPage() {
     setDragSelection(null);
     setHoverSecond(null);
   }, [activityId, totalDuration]);
+
+  const matchedAchievements = data?.achievement_analysis?.matched ?? [];
+  const availableAchievementCategories = useMemo(() => {
+    const present = new Set(matchedAchievements.map((item) => item.category));
+    return ACHIEVEMENT_CATEGORY_ORDER.filter((category) => present.has(category));
+  }, [matchedAchievements]);
+
+  useEffect(() => {
+    setActiveAchievementCategory((current) => {
+      if (current !== "all" && availableAchievementCategories.includes(current as (typeof ACHIEVEMENT_CATEGORY_ORDER)[number])) {
+        return current;
+      }
+      return availableAchievementCategories[0] ?? "all";
+    });
+  }, [availableAchievementCategories]);
+
+  const filteredAchievements = useMemo(() => {
+    if (activeAchievementCategory === "all") return matchedAchievements;
+    return matchedAchievements.filter((item) => item.category === activeAchievementCategory);
+  }, [activeAchievementCategory, matchedAchievements]);
+
+  const hfAchievementBuckets = useMemo(() => {
+    const buckets = new Map<string, { bucketLabel: string; items: ActivityAchievementMatch[] }>();
+    matchedAchievements
+      .filter((item) => item.category === "hf")
+      .forEach((item) => {
+        const bucketLabel = item.meta?.bucket_label ?? item.title.split("|")[1]?.trim() ?? "HF";
+        const current = buckets.get(bucketLabel) ?? { bucketLabel, items: [] };
+        current.items.push(item);
+        buckets.set(bucketLabel, current);
+      });
+    return Array.from(buckets.values()).map((bucket) => ({
+      ...bucket,
+      items: bucket.items.sort((left, right) => (HF_WINDOW_ORDER[left.meta?.window_key ?? ""] ?? 999) - (HF_WINDOW_ORDER[right.meta?.window_key ?? ""] ?? 999)),
+    }));
+  }, [matchedAchievements]);
 
   function handleSelectionStart(chartKey: string, nextSecond: number) {
     setDragSelection({ chartKey, anchor: nextSecond, current: nextSecond });
@@ -595,14 +699,14 @@ export function ActivityDetailPage() {
                     <div className="settings-actions">
                       <select className="settings-input" value={smoothingMode} onChange={(event) => setSmoothingMode(event.target.value as SmoothingMode)}>
                         <option value="raw">Original</option>
-                        <option value="avg3">3s geglättet</option>
-                        <option value="avg5">5s geglättet</option>
-                        <option value="avg10">10s geglättet</option>
-                        <option value="avg30">30s geglättet</option>
-                        <option value="avg60">1min geglättet</option>
+                        <option value="avg3">3s geglÃ¤ttet</option>
+                        <option value="avg5">5s geglÃ¤ttet</option>
+                        <option value="avg10">10s geglÃ¤ttet</option>
+                        <option value="avg30">30s geglÃ¤ttet</option>
+                        <option value="avg60">1min geglÃ¤ttet</option>
                       </select>
                       <button className="secondary-button" type="button" onClick={resetChartZoom} disabled={viewRange === null}>
-                        Zoom zurücksetzen
+                        Zoom zurÃ¼cksetzen
                       </button>
                     </div>
                   </div>
@@ -614,7 +718,7 @@ export function ActivityDetailPage() {
                 <MiniChart chartKey="power" title="Watt" color="#6cc63f" records={normalizedRecords} pick={(row) => row.power_w} suffix=" W" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
                 <MiniChart chartKey="cadence" title="Trittfrequenz" color="#f39a1f" records={normalizedRecords} pick={(row) => row.cadence_rpm} suffix=" rpm" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
                 <MiniChart chartKey="speed" title="Geschwindigkeit" color="#5ab1f3" records={normalizedRecords} pick={(row) => row.speed_kmh} suffix=" km/h" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="altitude" title="Höhe" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="altitude" title="HÃ¶he" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
               </div>
             ) : null}
 
@@ -632,10 +736,10 @@ export function ActivityDetailPage() {
                           <th>Start</th>
                           <th>Dauer</th>
                           <th>Distanz</th>
-                          <th>Ø km/h</th>
-                          <th>Ø Watt</th>
+                          <th>Ã˜ km/h</th>
+                          <th>Ã˜ Watt</th>
                           <th>Max Watt</th>
-                          <th>Ø HF</th>
+                          <th>Ã˜ HF</th>
                           <th>Max HF</th>
                         </tr>
                       </thead>
@@ -676,9 +780,9 @@ export function ActivityDetailPage() {
                           <th>Start</th>
                           <th>Dauer</th>
                           <th>Distanz</th>
-                          <th>Ø km/h</th>
-                          <th>Ø Watt</th>
-                          <th>Ø HF</th>
+                          <th>Ã˜ km/h</th>
+                          <th>Ã˜ Watt</th>
+                          <th>Ã˜ HF</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -716,9 +820,111 @@ export function ActivityDetailPage() {
                 </p>
               </div>
             ) : null}
+
+            {activeTab === "achievements" ? (
+              <div className="card">
+                <div className="section-title-row">
+                  <h2>Achievements</h2>
+                </div>
+                <div className="training-history-block">
+                  <div className="training-history-head">
+                    <div>
+                      <h3>Ride-Checks und Treffer</h3>
+                      <p className="training-note">
+                        Hier siehst du, welche Achievement-Prüfungen für diese Aktivität bereits gelaufen sind und welche Treffer daraus entstanden sind.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="training-mini-grid">
+                    <div className="training-mini-card">
+                      <span>Geprüft am</span>
+                      <strong>{formatDateTime(data.activity.achievements_checked_at)}</strong>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>Check-Version</span>
+                      <strong>{data.activity.achievements_check_version ?? "-"}</strong>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>Treffer</span>
+                      <strong>{data.achievement_analysis?.matched_count ?? 0}</strong>
+                    </div>
+                  </div>
+                  {data.achievement_analysis?.checked_scopes?.length ? (
+                    <p className="training-note">
+                      <strong>Geprüfte Bereiche:</strong> {data.achievement_analysis.checked_scopes.join(", ")}
+                    </p>
+                  ) : null}
+                  {matchedAchievements.length ? (
+                    <>
+                      {availableAchievementCategories.length ? (
+                        <div className="training-profile-order-preview">
+                          {availableAchievementCategories.map((category) => (
+                            <button
+                              key={category}
+                              className={`settings-tab-button ${activeAchievementCategory === category ? "active" : ""}`}
+                              type="button"
+                              onClick={() => setActiveAchievementCategory(category)}
+                            >
+                              {achievementCategoryLabel(category)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      {activeAchievementCategory === "hf" ? (
+                        <div className="achievement-ride-hf-groups">
+                          {hfAchievementBuckets.map((bucket) => (
+                            <section key={bucket.bucketLabel} className="achievement-ride-hf-group">
+                              <div className="achievement-ride-hf-group-head">
+                                <strong>{bucket.bucketLabel}</strong>
+                                <span>{bucket.items.length} Treffer</span>
+                              </div>
+                              <div className="achievement-ride-hf-list">
+                                {bucket.items.map((item) => (
+                                  <div key={item.key} className="achievement-ride-hf-row">
+                                    <strong>{compactHfWindowLabel(item)}</strong>
+                                    <small>{compactHfValueLabel(item)}</small>
+                                  </div>
+                                ))}
+                              </div>
+                            </section>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="training-history-list">
+                          {filteredAchievements.map((item) => (
+                            <div key={item.key} className="training-history-item">
+                              <div className="training-history-top">
+                                <div className="training-history-main">
+                                  <strong>{item.title}</strong>
+                                  <span>{achievementCategoryLabel(item.category)}</span>
+                                </div>
+                                <span className="training-history-badge">{achievementCategoryLabel(item.category)}</span>
+                              </div>
+                              <p className="training-note">{item.detail}</p>
+                              {item.proof ? (
+                                <p className="training-note">
+                                  <strong>Nachweis:</strong> {item.proof}
+                                </p>
+                              ) : null}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="training-note">
+                      Für diese Aktivität wurden bisher noch keine konkreten Achievement-Treffer gefunden. Die Checks selbst können trotzdem schon gespeichert sein.
+                    </p>
+                  )}
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
     </section>
   );
 }
+
+

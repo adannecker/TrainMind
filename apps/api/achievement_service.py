@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from apps.api.training_service import get_user_zone_model_settings, get_zone_model
-from packages.db.models import Activity, ActivityRecord, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
+from packages.db.models import Activity, ActivityLap, ActivityRecord, ActivitySession, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
 from packages.db.session import SessionLocal
 
 SECTION_META: dict[str, dict[str, Any]] = {
@@ -41,12 +41,30 @@ SECTION_META: dict[str, dict[str, Any]] = {
 }
 
 CYCLING_CATEGORIES = [
+    ("hf", "HF", "Niedrigste Durchschnitts-HF je Leistungsbereich ab 130 Watt über mehrere Zeitfenster."),
     ("records", "Rekorde", "Leistungs- und Pulsbestwerte über kurze und lange Zeitfenster."),
     ("distance", "Ausdauer", "Von den ersten 10 km bis zu epischen Heldentouren."),
     ("weekly", "Wochenkontingent", "Wie regelmäßig und umfangreich die Woche getragen wird."),
     ("zones", "Zonen", "Besondere Zeiten in Recovery, Grundlage, Schwelle und darüber."),
     ("moments", "Besondere Momente", "Seltene Tage mit Charakter, Mut und richtig guter Story."),
 ]
+
+
+HF_BUCKET_START_W = 130
+HF_BUCKET_SIZE_W = 5
+HF_WINDOW_DEFINITIONS = [
+    ("5m", 5 * 60, "5 min"),
+    ("10m", 10 * 60, "10 min"),
+    ("15m", 15 * 60, "15 min"),
+    ("20m", 20 * 60, "20 min"),
+    ("30m", 30 * 60, "30 min"),
+    ("45m", 45 * 60, "45 min"),
+    ("60m", 60 * 60, "60 min"),
+]
+HF_WINDOW_LABELS = {key: label for key, _seconds, label in HF_WINDOW_DEFINITIONS}
+CATEGORY_LABELS = {key: label for key, label, _description in CYCLING_CATEGORIES}
+ACHIEVEMENT_CHECK_VERSION = 2
+ACHIEVEMENT_CHECK_SCOPES = ["distance", "weekly", "records", "zones", "moments", "hf"]
 
 
 @dataclass(frozen=True)
@@ -134,6 +152,29 @@ def _serialize_datetime(value: datetime | None) -> str | None:
 
 def _format_date(value: datetime | None) -> str | None:
     return value.strftime("%d.%m.%Y") if value else None
+
+
+def _slugify_hashtag(value: str) -> str:
+    replacements = (
+        ("ä", "ae"),
+        ("ö", "oe"),
+        ("ü", "ue"),
+        ("Ä", "ae"),
+        ("Ö", "oe"),
+        ("Ü", "ue"),
+        ("ß", "ss"),
+    )
+    normalized = value.strip()
+    for source, target in replacements:
+        normalized = normalized.replace(source, target)
+    chars: list[str] = []
+    for char in normalized.lower():
+        if char.isalnum():
+            chars.append(char)
+        elif chars and chars[-1] != "_":
+            chars.append("_")
+    slug = "".join(chars).strip("_")
+    return f"#{slug}" if slug else "#achievement"
 
 
 def _km(value_m: float | None) -> float:
@@ -226,6 +267,121 @@ def _best_average(series: list[float], window_seconds: int) -> float | None:
     return best
 
 
+def _round_half_up(value: float) -> int:
+    return int(value + 0.5) if value >= 0 else int(value - 0.5)
+
+
+def _power_bucket_start(avg_power_w: float) -> int | None:
+    rounded_power = _round_half_up(avg_power_w)
+    if rounded_power < HF_BUCKET_START_W:
+        return None
+    return HF_BUCKET_START_W + ((rounded_power - HF_BUCKET_START_W) // HF_BUCKET_SIZE_W) * HF_BUCKET_SIZE_W
+
+
+def _hf_achievement_key(window_key: str, bucket_start: int) -> str:
+    return f"hf_{window_key}_{bucket_start}"
+
+
+def _hf_title(window_label: str, bucket_label: str) -> str:
+    return f"HF {window_label} | {bucket_label}"
+
+
+def _parse_hf_achievement_key(key: str) -> tuple[str, int] | None:
+    parts = str(key or "").split("_")
+    if len(parts) != 3 or parts[0] != "hf":
+        return None
+    try:
+        return parts[1], int(parts[2])
+    except ValueError:
+        return None
+
+
+def _compute_hf_bucket_matrix(
+    activities: list[Activity],
+    records_by_activity: dict[int, list[ActivityRecord]],
+) -> dict[str, Any]:
+    best_by_cell: dict[tuple[str, int], dict[str, Any]] = {}
+    highest_bucket: int | None = None
+
+    for activity in activities:
+        activity_records = records_by_activity.get(activity.id, [])
+        power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
+        hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
+        series_length = min(len(power_series), len(hr_series))
+        if series_length <= 0:
+            continue
+        power_series = power_series[:series_length]
+        hr_series = hr_series[:series_length]
+
+        for window_key, window_seconds, _window_label in HF_WINDOW_DEFINITIONS:
+            if series_length < window_seconds:
+                continue
+            power_sum = sum(power_series[:window_seconds])
+            hr_sum = sum(hr_series[:window_seconds])
+            for end_index in range(window_seconds - 1, series_length):
+                if end_index >= window_seconds:
+                    power_sum += power_series[end_index] - power_series[end_index - window_seconds]
+                    hr_sum += hr_series[end_index] - hr_series[end_index - window_seconds]
+                avg_power = power_sum / window_seconds
+                bucket_start = _power_bucket_start(avg_power)
+                if bucket_start is None:
+                    continue
+                avg_hr = hr_sum / window_seconds
+                cell_key = (window_key, bucket_start)
+                current_best = best_by_cell.get(cell_key)
+                if current_best is not None and avg_hr >= float(current_best["avg_hr_bpm"]):
+                    continue
+                highest_bucket = bucket_start if highest_bucket is None else max(highest_bucket, bucket_start)
+                best_by_cell[cell_key] = {
+                    "avg_hr_bpm": round(avg_hr, 1),
+                    "avg_power_w": round(avg_power, 1),
+                    "activity_name": activity.name or "Aktivität",
+                    "activity_id": activity.id,
+                    "achieved_at": _serialize_datetime(activity.started_at),
+                    "achieved_at_label": _format_date(activity.started_at),
+                }
+
+    windows = [{"key": key, "seconds": seconds, "label": label} for key, seconds, label in HF_WINDOW_DEFINITIONS]
+    if highest_bucket is None:
+        return {"windows": windows, "rows": [], "filled_cells": 0, "max_bucket_label": None}
+
+    rows: list[dict[str, Any]] = []
+    filled_cells = 0
+    for bucket_start in range(HF_BUCKET_START_W, highest_bucket + 1, HF_BUCKET_SIZE_W):
+        values: list[dict[str, Any] | None] = []
+        for window_key, _window_seconds, _window_label in HF_WINDOW_DEFINITIONS:
+            entry = best_by_cell.get((window_key, bucket_start))
+            if entry is None:
+                values.append(None)
+                continue
+            filled_cells += 1
+            values.append(
+                {
+                    "avg_hr_bpm": entry["avg_hr_bpm"],
+                    "avg_power_w": entry["avg_power_w"],
+                    "activity_name": entry["activity_name"],
+                    "activity_id": entry["activity_id"],
+                    "achieved_at": entry["achieved_at"],
+                    "achieved_at_label": entry["achieved_at_label"],
+                }
+            )
+        rows.append(
+            {
+                "bucket_start_w": bucket_start,
+                "bucket_end_w": bucket_start + HF_BUCKET_SIZE_W - 1,
+                "bucket_label": f"{bucket_start}-{bucket_start + HF_BUCKET_SIZE_W - 1} W",
+                "values": values,
+            }
+        )
+
+    return {
+        "windows": windows,
+        "rows": rows,
+        "filled_cells": filled_cells,
+        "max_bucket_label": f"{highest_bucket}-{highest_bucket + HF_BUCKET_SIZE_W - 1} W",
+    }
+
+
 def _longest_zone1_seconds(records: list[ActivityRecord], max_hr_value: float | None, zone_model_key: str | None) -> int:
     if max_hr_value is None or max_hr_value <= 0:
         return 0
@@ -262,6 +418,10 @@ def _record_info(key: str) -> dict[str, str] | None:
     return {"metric": metric, "window": window, "meaning": meaning}
 
 
+def _definition_hashtag(definition: AchievementDefinition) -> str:
+    return _slugify_hashtag(definition.title)
+
+
 def _locked(definition: AchievementDefinition) -> dict[str, Any]:
     return {"definition": definition, "status": "locked", "achieved_at": None, "current_value": None, "current_value_label": None, "events": []}
 
@@ -277,6 +437,8 @@ def _serialize_achievement(row: UserAchievement, record_events: list[UserAchieve
         "accent": row.accent,
         "achieved_at": _serialize_datetime(row.achieved_at),
         "achieved_at_label": _format_date(row.achieved_at),
+        "activity_id": row.activity_id,
+        "activity_name": row.activity_name,
         "current_value": row.current_value,
         "current_value_label": row.current_value_label,
         "record_info": _record_info(row.achievement_key),
@@ -287,10 +449,342 @@ def _serialize_achievement(row: UserAchievement, record_events: list[UserAchieve
                 "value_numeric": event.value_numeric,
                 "value_label": event.value_label,
                 "summary": event.summary,
+                "activity_id": event.activity_id,
                 "activity_name": event.activity_name,
             }
             for event in sorted(record_events, key=lambda item: (item.achieved_at, item.id))
         ],
+    }
+
+
+def _empty_activity_check_summary(activity: Activity) -> dict[str, Any]:
+    return {
+        "activity_id": activity.id,
+        "activity_name": activity.name or "Aktivität",
+        "started_at": _serialize_datetime(activity.started_at),
+        "started_at_label": _format_date(activity.started_at),
+        "checked_scopes": list(ACHIEVEMENT_CHECK_SCOPES),
+        "matched": [],
+        "_seen_keys": set(),
+    }
+
+
+def _append_activity_match(
+    summary: dict[str, Any],
+    *,
+    key: str,
+    title: str,
+    category: str,
+    detail: str,
+    hashtag: str,
+    proof: str | None = None,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    seen_keys: set[str] = summary["_seen_keys"]
+    if key in seen_keys:
+        return
+    seen_keys.add(key)
+    summary["matched"].append(
+        {
+            "key": key,
+            "title": title,
+            "category": category,
+            "detail": detail,
+            "hashtag": hashtag,
+            "proof": proof,
+            "meta": meta or {},
+        }
+    )
+
+
+def _public_activity_check_summary(summary: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "activity_id": summary["activity_id"],
+        "activity_name": summary["activity_name"],
+        "started_at": summary["started_at"],
+        "started_at_label": summary["started_at_label"],
+        "checked_scopes": summary["checked_scopes"],
+        "matched": summary["matched"],
+        "matched_count": len(summary["matched"]),
+    }
+
+
+def get_activity_achievement_check_status(user_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        activities = session.scalars(
+            select(Activity)
+            .where(Activity.user_id == user_id)
+            .where(Activity.started_at.is_not(None))
+            .order_by(Activity.started_at.desc(), Activity.id.desc())
+        ).all()
+
+    checked = [
+        activity
+        for activity in activities
+        if (activity.achievements_check_version or 0) >= ACHIEVEMENT_CHECK_VERSION and activity.achievements_checked_at is not None
+    ]
+    open_items = [activity for activity in activities if activity not in checked]
+
+    return {
+        "current_check_version": ACHIEVEMENT_CHECK_VERSION,
+        "total_activities": len(activities),
+        "checked_activities": len(checked),
+        "open_activities": len(open_items),
+        "recent_checked": [
+            {
+                "activity_id": activity.id,
+                "activity_name": activity.name or "Aktivität",
+                "started_at": _serialize_datetime(activity.started_at),
+                "started_at_label": _format_date(activity.started_at),
+                "checked_at": _serialize_datetime(activity.achievements_checked_at),
+            }
+            for activity in checked[:12]
+        ],
+    }
+
+
+def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
+    zone_settings = get_user_zone_model_settings(user_id)
+    max_hr_zone_model_key = zone_settings.get("max_hr", {}).get("model_key")
+    with SessionLocal() as session:
+        activities = session.scalars(
+            select(Activity)
+            .where(Activity.user_id == user_id)
+            .where(Activity.started_at.is_not(None))
+            .order_by(Activity.started_at.asc(), Activity.id.asc())
+        ).all()
+        metrics = session.scalars(
+            select(UserTrainingMetric).where(UserTrainingMetric.user_id == user_id).order_by(UserTrainingMetric.recorded_at.asc(), UserTrainingMetric.id.asc())
+        ).all()
+        records = session.scalars(
+            select(ActivityRecord).join(Activity, Activity.id == ActivityRecord.activity_id).where(Activity.user_id == user_id).order_by(ActivityRecord.activity_id.asc(), ActivityRecord.record_index.asc())
+        ).all()
+        sessions = session.scalars(
+            select(ActivitySession).join(Activity, Activity.id == ActivitySession.activity_id).where(Activity.user_id == user_id).order_by(ActivitySession.activity_id.asc(), ActivitySession.session_index.asc())
+        ).all()
+        laps = session.scalars(
+            select(ActivityLap).join(Activity, Activity.id == ActivityLap.activity_id).where(Activity.user_id == user_id).order_by(ActivityLap.activity_id.asc(), ActivityLap.lap_index.asc())
+        ).all()
+
+        checked_before = sum(
+            1
+            for activity in activities
+            if (activity.achievements_check_version or 0) >= ACHIEVEMENT_CHECK_VERSION and activity.achievements_checked_at is not None
+        )
+        open_before = len(activities) - checked_before
+
+        records_by_activity: dict[int, list[ActivityRecord]] = defaultdict(list)
+        for record in records:
+            records_by_activity[record.activity_id].append(record)
+        sessions_by_activity: dict[int, list[ActivitySession]] = defaultdict(list)
+        for row in sessions:
+            sessions_by_activity[row.activity_id].append(row)
+        laps_by_activity: dict[int, list[ActivityLap]] = defaultdict(list)
+        for row in laps:
+            laps_by_activity[row.activity_id].append(row)
+
+        summaries = {activity.id: _empty_activity_check_summary(activity) for activity in activities}
+
+        week_totals: dict[date, float] = defaultdict(float)
+        for activity in activities:
+            ride_km = _km(activity.distance_m)
+            for definition in DISTANCE_DEFINITIONS:
+                if ride_km >= float(definition.threshold or 0):
+                    _append_activity_match(
+                        summaries[activity.id],
+                        key=definition.key,
+                        title=definition.title,
+                        category=definition.category_key,
+                        detail=definition.detail,
+                        hashtag=_definition_hashtag(definition),
+                        proof=f"{round(ride_km, 1)} km",
+                    )
+            if activity.started_at is None:
+                continue
+            week_key = _week_start(activity.started_at.date())
+            previous_week_km = week_totals[week_key]
+            week_totals[week_key] += ride_km
+            current_week_km = week_totals[week_key]
+            for definition in WEEKLY_DEFINITIONS:
+                threshold = float(definition.threshold or 0)
+                if previous_week_km < threshold <= current_week_km:
+                    _append_activity_match(
+                        summaries[activity.id],
+                        key=definition.key,
+                        title=definition.title,
+                        category=definition.category_key,
+                        detail=definition.detail,
+                        hashtag=_definition_hashtag(definition),
+                        proof=f"Woche bei {round(current_week_km, 1)} km",
+                    )
+
+        day_counts: dict[date, int] = defaultdict(int)
+        for activity in activities:
+            if activity.started_at is not None:
+                day_counts[activity.started_at.date()] += 1
+        active_days = sorted(day_counts)
+        streak_length_by_day: dict[date, int] = {}
+        previous_day: date | None = None
+        streak = 0
+        for day in active_days:
+            streak = streak + 1 if previous_day is not None and day == previous_day + timedelta(days=1) else 1
+            streak_length_by_day[day] = streak
+            previous_day = day
+        weekend_days = set(active_days)
+
+        for activity in activities:
+            if activity.started_at is None:
+                continue
+            ride_day = activity.started_at.date()
+            start_minutes = activity.started_at.hour * 60 + activity.started_at.minute
+            if start_minutes < 390:
+                definition = next(item for item in MOMENT_DEFINITIONS if item.key == "moment_early_bird")
+                _append_activity_match(summaries[activity.id], key=definition.key, title=definition.title, category=definition.category_key, detail=definition.detail, hashtag=_definition_hashtag(definition))
+            if start_minutes >= 20 * 60:
+                definition = next(item for item in MOMENT_DEFINITIONS if item.key == "moment_night_ride")
+                _append_activity_match(summaries[activity.id], key=definition.key, title=definition.title, category=definition.category_key, detail=definition.detail, hashtag=_definition_hashtag(definition))
+            if day_counts[ride_day] >= 2:
+                definition = next(item for item in MOMENT_DEFINITIONS if item.key == "moment_double_day")
+                _append_activity_match(summaries[activity.id], key=definition.key, title=definition.title, category=definition.category_key, detail=definition.detail, hashtag=_definition_hashtag(definition))
+            if ride_day.weekday() in (5, 6):
+                saturday = ride_day if ride_day.weekday() == 5 else ride_day - timedelta(days=1)
+                sunday = saturday + timedelta(days=1)
+                if saturday in weekend_days and sunday in weekend_days:
+                    definition = next(item for item in MOMENT_DEFINITIONS if item.key == "moment_weekend_double")
+                    _append_activity_match(summaries[activity.id], key=definition.key, title=definition.title, category=definition.category_key, detail=definition.detail, hashtag=_definition_hashtag(definition))
+            if start_minutes < 420 and _km(activity.distance_m) >= 100:
+                definition = next(item for item in MOMENT_DEFINITIONS if item.key == "moment_sunrise_century")
+                _append_activity_match(summaries[activity.id], key=definition.key, title=definition.title, category=definition.category_key, detail=definition.detail, hashtag=_definition_hashtag(definition))
+
+            current_streak = streak_length_by_day.get(ride_day, 0)
+            previous_streak = streak_length_by_day.get(ride_day - timedelta(days=1), 0)
+            for definition in MOMENT_DEFINITIONS:
+                if definition.kind != "moment_streak_days":
+                    continue
+                threshold = int(definition.threshold or 0)
+                if previous_streak < threshold <= current_streak:
+                    _append_activity_match(
+                        summaries[activity.id],
+                        key=definition.key,
+                        title=definition.title,
+                        category=definition.category_key,
+                        detail=definition.detail,
+                        hashtag=_definition_hashtag(definition),
+                        proof=f"Serie {current_streak} Tage",
+                    )
+
+        for activity in activities:
+            zone1_seconds = _longest_zone1_seconds(
+                records_by_activity.get(activity.id, []),
+                _effective_max_hr(metrics, activity.started_at),
+                max_hr_zone_model_key,
+            )
+            zone1_minutes = zone1_seconds / 60.0
+            for definition in ZONE_DEFINITIONS:
+                if zone1_minutes >= float(definition.threshold or 0):
+                    _append_activity_match(
+                        summaries[activity.id],
+                        key=definition.key,
+                        title=definition.title,
+                        category=definition.category_key,
+                        detail=definition.detail,
+                        hashtag=_definition_hashtag(definition),
+                        proof=f"{int(round(zone1_minutes))} min",
+                    )
+
+        record_values: dict[str, float] = {}
+        for activity in activities:
+            activity_records = records_by_activity.get(activity.id, [])
+            power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
+            hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
+            max_power = max(power_series) if power_series else None
+            max_hr = _extract_summary_max_hr(activity)
+            if max_hr is None and hr_series:
+                max_hr = max(hr_series)
+            for definition in RECORD_DEFINITIONS:
+                candidate_value: float | None = None
+                if definition.kind == "record_max_power" and max_power is not None:
+                    candidate_value = float(max_power)
+                elif definition.kind == "record_max_hr" and max_hr is not None:
+                    candidate_value = float(max_hr)
+                elif definition.kind == "record_power_window" and definition.window_seconds is not None:
+                    avg_value = _best_average(power_series, definition.window_seconds)
+                    if avg_value is not None:
+                        candidate_value = float(avg_value)
+                if candidate_value is None:
+                    continue
+                if record_values.get(definition.key) is not None and candidate_value <= float(record_values[definition.key]):
+                    continue
+                record_values[definition.key] = candidate_value
+                unit = "bpm" if definition.kind == "record_max_hr" else "W"
+                _append_activity_match(
+                    summaries[activity.id],
+                    key=definition.key,
+                    title=definition.title,
+                    category=definition.category_key,
+                    detail=definition.detail,
+                    hashtag=_definition_hashtag(definition),
+                    proof=f"{round(candidate_value)} {unit}",
+                )
+
+        hf_bucket_matrix = _compute_hf_bucket_matrix(activities, records_by_activity)
+        for row in hf_bucket_matrix["rows"]:
+            bucket_label = str(row["bucket_label"])
+            for index, value in enumerate(row["values"]):
+                if not value:
+                    continue
+                window = hf_bucket_matrix["windows"][index]
+                activity_id = int(value["activity_id"])
+                _append_activity_match(
+                    summaries[activity_id],
+                    key=_hf_achievement_key(window["key"], row["bucket_start_w"]),
+                    title=_hf_title(window["label"], bucket_label),
+                    category="hf",
+                    detail="Beste gefundene Durchschnitts-HF in diesem Watt- und Zeitfenster.",
+                    hashtag=_slugify_hashtag(f"hf {window['label']} {bucket_label}"),
+                    proof=f"Avg HF {round(float(value['avg_hr_bpm']))} bpm bei Avg Power {round(float(value['avg_power_w']))} W",
+                    meta={
+                        "bucket_start_w": row["bucket_start_w"],
+                        "bucket_end_w": row["bucket_end_w"],
+                        "bucket_label": bucket_label,
+                        "window_key": window["key"],
+                        "window_label": window["label"],
+                        "avg_hr_bpm": round(float(value["avg_hr_bpm"])),
+                        "avg_power_w": round(float(value["avg_power_w"])),
+                        "activity_id": activity_id,
+                    },
+                )
+
+        checked_at = datetime.utcnow()
+        for activity in activities:
+            public_summary = _public_activity_check_summary(summaries[activity.id])
+            activity.achievements_checked_at = checked_at
+            activity.achievements_check_version = ACHIEVEMENT_CHECK_VERSION
+            activity.achievements_summary_json = json.dumps(public_summary, ensure_ascii=False)
+        _persist_cycling_achievements(
+            session,
+            user_id=user_id,
+            activities=activities,
+            metrics=metrics,
+            records_by_activity=records_by_activity,
+            hf_bucket_matrix=hf_bucket_matrix,
+        )
+        session.commit()
+
+    checked_list = sorted(
+        (_public_activity_check_summary(summary) for summary in summaries.values()),
+        key=lambda item: ((item["started_at"] or ""), item["activity_id"]),
+        reverse=True,
+    )
+    return {
+        "status": "ok",
+        "current_check_version": ACHIEVEMENT_CHECK_VERSION,
+        "total_activities": len(activities),
+        "checked_activities_before": checked_before,
+        "open_activities_before": open_before,
+        "checked_now_activities": len(activities),
+        "activities_with_matches": sum(1 for item in checked_list if item["matched_count"] > 0),
+        "activities": checked_list[:80],
     }
 
 
@@ -508,15 +1002,21 @@ def _compute_cycling_payload(user_id: int) -> dict[str, Any]:
         for row in event_rows:
             events_by_key[row.achievement_key].append(row)
 
+        hf_bucket_matrix = _compute_hf_bucket_matrix(activities, records_by_activity)
+
         categories: list[dict[str, Any]] = []
         for category_id, label, description in CYCLING_CATEGORIES:
             items = [row for row in rows if row.category_key == category_id]
-            categories.append({
+            category_payload = {
                 "id": category_id,
                 "label": label,
                 "description": description,
                 "items": [_serialize_achievement(item, events_by_key.get(item.achievement_key, [])) for item in items],
-            })
+            }
+            if category_id == "hf":
+                category_payload["kind"] = "hf_buckets"
+                category_payload["hf_bucket_matrix"] = hf_bucket_matrix
+            categories.append(category_payload)
 
         return {
             "section_key": "cycling",
@@ -527,6 +1027,361 @@ def _compute_cycling_payload(user_id: int) -> dict[str, Any]:
         }
 
 
+def _persist_cycling_achievements(
+    session: Any,
+    *,
+    user_id: int,
+    activities: list[Activity],
+    metrics: list[UserTrainingMetric],
+    records_by_activity: dict[int, list[ActivityRecord]],
+    hf_bucket_matrix: dict[str, Any],
+) -> None:
+    zone_settings = get_user_zone_model_settings(user_id)
+    max_hr_zone_model_key = zone_settings.get("max_hr", {}).get("model_key")
+    results = {definition.key: _locked(definition) for definition in CYCLING_DEFINITIONS}
+
+    max_ride_km = 0.0
+    for activity in activities:
+        ride_km = _km(activity.distance_m)
+        max_ride_km = max(max_ride_km, ride_km)
+        for definition in DISTANCE_DEFINITIONS:
+            result = results[definition.key]
+            result["current_value"] = max_ride_km
+            result["current_value_label"] = f"Bestwert {round(max_ride_km, 1)} km"
+            if ride_km >= float(definition.threshold or 0) and result["achieved_at"] is None:
+                result["status"] = "earned"
+                result["achieved_at"] = activity.started_at
+                result["activity_id"] = activity.id
+                result["activity_name"] = activity.name or "Aktivitaet"
+
+    week_totals: dict[date, float] = defaultdict(float)
+    for activity in activities:
+        if activity.started_at is None:
+            continue
+        week_key = _week_start(activity.started_at.date())
+        week_totals[week_key] += _km(activity.distance_m)
+        current_week_km = week_totals[week_key]
+        for definition in WEEKLY_DEFINITIONS:
+            result = results[definition.key]
+            result["current_value"] = max(float(result["current_value"] or 0), current_week_km)
+            result["current_value_label"] = f"Beste Woche {round(float(result['current_value']), 1)} km"
+            if current_week_km >= float(definition.threshold or 0) and result["achieved_at"] is None:
+                result["status"] = "earned"
+                result["achieved_at"] = activity.started_at
+                result["activity_id"] = activity.id
+                result["activity_name"] = activity.name or "Aktivitaet"
+
+    longest_zone1_minutes = 0.0
+    for activity in activities:
+        zone1_seconds = _longest_zone1_seconds(
+            records_by_activity.get(activity.id, []),
+            _effective_max_hr(metrics, activity.started_at),
+            max_hr_zone_model_key,
+        )
+        longest_zone1_minutes = max(longest_zone1_minutes, zone1_seconds / 60.0)
+        for definition in ZONE_DEFINITIONS:
+            result = results[definition.key]
+            result["current_value"] = longest_zone1_minutes
+            result["current_value_label"] = f"Laengster Block {int(round(longest_zone1_minutes))} min"
+            if longest_zone1_minutes >= float(definition.threshold or 0) and result["achieved_at"] is None:
+                result["status"] = "earned"
+                result["achieved_at"] = activity.started_at
+                result["activity_id"] = activity.id
+                result["activity_name"] = activity.name or "Aktivitaet"
+
+    day_counts: dict[date, int] = defaultdict(int)
+    for activity in activities:
+        if activity.started_at is not None:
+            day_counts[activity.started_at.date()] += 1
+
+    active_days = sorted(day_counts)
+    longest_streak = 0
+    streak = 0
+    previous_day: date | None = None
+    weekend_saturdays: set[date] = set()
+    for day in active_days:
+        streak = streak + 1 if previous_day is not None and day == previous_day + timedelta(days=1) else 1
+        longest_streak = max(longest_streak, streak)
+        previous_day = day
+
+    for activity in activities:
+        if activity.started_at is None:
+            continue
+        ride_day = activity.started_at.date()
+        start_minutes = activity.started_at.hour * 60 + activity.started_at.minute
+        if start_minutes < 390 and results["moment_early_bird"]["achieved_at"] is None:
+            results["moment_early_bird"]["status"] = "earned"
+            results["moment_early_bird"]["achieved_at"] = activity.started_at
+            results["moment_early_bird"]["activity_id"] = activity.id
+            results["moment_early_bird"]["activity_name"] = activity.name or "Aktivitaet"
+        if start_minutes >= 20 * 60 and results["moment_night_ride"]["achieved_at"] is None:
+            results["moment_night_ride"]["status"] = "earned"
+            results["moment_night_ride"]["achieved_at"] = activity.started_at
+            results["moment_night_ride"]["activity_id"] = activity.id
+            results["moment_night_ride"]["activity_name"] = activity.name or "Aktivitaet"
+        if day_counts[ride_day] >= 2 and results["moment_double_day"]["achieved_at"] is None:
+            results["moment_double_day"]["status"] = "earned"
+            results["moment_double_day"]["achieved_at"] = activity.started_at
+            results["moment_double_day"]["activity_id"] = activity.id
+            results["moment_double_day"]["activity_name"] = activity.name or "Aktivitaet"
+        if ride_day.weekday() == 5:
+            weekend_saturdays.add(ride_day)
+        if ride_day.weekday() == 6 and ride_day - timedelta(days=1) in weekend_saturdays and results["moment_weekend_double"]["achieved_at"] is None:
+            results["moment_weekend_double"]["status"] = "earned"
+            results["moment_weekend_double"]["achieved_at"] = activity.started_at
+            results["moment_weekend_double"]["activity_id"] = activity.id
+            results["moment_weekend_double"]["activity_name"] = activity.name or "Aktivitaet"
+        if start_minutes < 420 and _km(activity.distance_m) >= 100 and results["moment_sunrise_century"]["achieved_at"] is None:
+            results["moment_sunrise_century"]["status"] = "earned"
+            results["moment_sunrise_century"]["achieved_at"] = activity.started_at
+            results["moment_sunrise_century"]["activity_id"] = activity.id
+            results["moment_sunrise_century"]["activity_name"] = activity.name or "Aktivitaet"
+
+    for definition in MOMENT_DEFINITIONS:
+        result = results[definition.key]
+        if definition.kind != "moment_streak_days":
+            continue
+        result["current_value"] = float(longest_streak)
+        result["current_value_label"] = f"Laengste Serie {longest_streak} Tage"
+        if longest_streak < int(definition.threshold or 0):
+            continue
+        result["status"] = "earned"
+        if result["achieved_at"] is not None:
+            continue
+        streak = 0
+        previous_day = None
+        for day in active_days:
+            streak = streak + 1 if previous_day is not None and day == previous_day + timedelta(days=1) else 1
+            if streak >= int(definition.threshold or 0):
+                first_activity = next((activity for activity in activities if activity.started_at and activity.started_at.date() == day), None)
+                result["achieved_at"] = first_activity.started_at if first_activity else datetime.combine(day, datetime.min.time())
+                result["activity_id"] = first_activity.id if first_activity else None
+                result["activity_name"] = first_activity.name if first_activity else None
+                break
+            previous_day = day
+
+    record_values: dict[str, float] = {}
+    for activity in activities:
+        activity_records = records_by_activity.get(activity.id, [])
+        power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
+        hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
+        max_power = max(power_series) if power_series else None
+        max_hr = _extract_summary_max_hr(activity)
+        if max_hr is None and hr_series:
+            max_hr = max(hr_series)
+        for definition in RECORD_DEFINITIONS:
+            candidate_value: float | None = None
+            value_label: str | None = None
+            summary: str | None = None
+            if definition.kind == "record_max_power" and max_power is not None:
+                candidate_value = float(max_power)
+                value_label = f"{round(candidate_value)} W"
+                summary = f"Neue Spitzenleistung in {activity.name or 'Aktivitaet'}"
+            elif definition.kind == "record_max_hr" and max_hr is not None:
+                candidate_value = float(max_hr)
+                value_label = f"{round(candidate_value)} bpm"
+                summary = f"Neuer MaxHF-Wert in {activity.name or 'Aktivitaet'}"
+            elif definition.kind == "record_power_window" and definition.window_seconds is not None:
+                avg_value = _best_average(power_series, definition.window_seconds)
+                if avg_value is not None:
+                    candidate_value = float(avg_value)
+                    value_label = f"{round(candidate_value)} W"
+                    summary = f"Neuer Bestwert ueber {int(definition.window_seconds)} s in {activity.name or 'Aktivitaet'}"
+            if candidate_value is None:
+                continue
+            if record_values.get(definition.key) is not None and candidate_value <= float(record_values[definition.key]):
+                continue
+            record_values[definition.key] = candidate_value
+            result = results[definition.key]
+            result["status"] = "earned"
+            result["achieved_at"] = activity.started_at
+            result["activity_id"] = activity.id
+            result["activity_name"] = activity.name or "Aktivitaet"
+            result["current_value"] = candidate_value
+            result["current_value_label"] = value_label
+            result["events"].append(
+                {
+                    "achieved_at": activity.started_at,
+                    "value_numeric": candidate_value,
+                    "value_label": value_label,
+                    "summary": summary,
+                    "activity_id": activity.id,
+                    "activity_name": activity.name or "Aktivitaet",
+                }
+            )
+
+    session.execute(delete(UserAchievementRecordEvent).where(UserAchievementRecordEvent.user_id == user_id))
+    session.execute(delete(UserAchievement).where(UserAchievement.user_id == user_id))
+    now = datetime.utcnow()
+
+    for definition in CYCLING_DEFINITIONS:
+        result = results[definition.key]
+        session.add(
+            UserAchievement(
+                user_id=user_id,
+                section_key=definition.section_key,
+                category_key=definition.category_key,
+                achievement_key=definition.key,
+                title=definition.title,
+                detail=definition.detail,
+                icon=definition.icon,
+                accent=definition.accent,
+                status=result["status"],
+                hint=definition.hint,
+                achieved_at=result["achieved_at"],
+                activity_id=result.get("activity_id"),
+                activity_name=result.get("activity_name"),
+                current_value=float(result["current_value"]) if result["current_value"] is not None else None,
+                current_value_label=result["current_value_label"],
+                sort_index=definition.sort_index,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+    hf_sort_base = 1000
+    for row in hf_bucket_matrix["rows"]:
+        bucket_label = str(row["bucket_label"])
+        for index, value in enumerate(row["values"]):
+            if not value:
+                continue
+            window = hf_bucket_matrix["windows"][index]
+            session.add(
+                UserAchievement(
+                    user_id=user_id,
+                    section_key="cycling",
+                    category_key="hf",
+                    achievement_key=_hf_achievement_key(window["key"], row["bucket_start_w"]),
+                    title=_hf_title(window["label"], bucket_label),
+                    detail="Niedrigste gefundene Durchschnitts-HF in diesem Watt- und Zeitfenster.",
+                    icon=window["key"].upper(),
+                    accent="record",
+                    status="earned",
+                    hint=f"Ride mit der effizientesten HF im Bereich {bucket_label}.",
+                    achieved_at=datetime.fromisoformat(value["achieved_at"]) if value["achieved_at"] else None,
+                    activity_id=int(value["activity_id"]),
+                    activity_name=value["activity_name"],
+                    current_value=float(value["avg_hr_bpm"]),
+                    current_value_label=f"Avg HF {round(float(value['avg_hr_bpm']))} bpm bei Avg Power {round(float(value['avg_power_w']))} W",
+                    sort_index=hf_sort_base + (row["bucket_start_w"] * 10) + index,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    for definition in RECORD_DEFINITIONS:
+        for event in results[definition.key]["events"]:
+            session.add(
+                UserAchievementRecordEvent(
+                    user_id=user_id,
+                    section_key="cycling",
+                    category_key="records",
+                    achievement_key=definition.key,
+                    achieved_at=event["achieved_at"],
+                    value_numeric=event["value_numeric"],
+                    value_label=event["value_label"],
+                    summary=event["summary"],
+                    activity_id=event["activity_id"],
+                    activity_name=event["activity_name"],
+                    created_at=now,
+                )
+            )
+
+
+def _build_hf_bucket_matrix_from_rows(rows: list[UserAchievement]) -> dict[str, Any]:
+    windows = [{"key": key, "seconds": seconds, "label": label} for key, seconds, label in HF_WINDOW_DEFINITIONS]
+    hf_rows = [row for row in rows if row.category_key == "hf"]
+    bucket_starts = sorted(
+        {
+            parsed[1]
+            for row in hf_rows
+            for parsed in [_parse_hf_achievement_key(row.achievement_key)]
+            if parsed is not None
+        }
+    )
+    if not bucket_starts:
+        return {"windows": windows, "rows": [], "filled_cells": 0, "max_bucket_label": None}
+
+    by_key = {row.achievement_key: row for row in hf_rows}
+    matrix_rows: list[dict[str, Any]] = []
+    filled_cells = 0
+    for bucket_start in bucket_starts:
+        values: list[dict[str, Any] | None] = []
+        for window in windows:
+            row = by_key.get(_hf_achievement_key(window["key"], bucket_start))
+            if row is None:
+                values.append(None)
+                continue
+            filled_cells += 1
+            values.append(
+                {
+                    "avg_hr_bpm": row.current_value,
+                    "avg_power_w": None,
+                    "activity_name": row.activity_name or "Aktivitaet",
+                    "activity_id": row.activity_id,
+                    "achieved_at": _serialize_datetime(row.achieved_at),
+                    "achieved_at_label": _format_date(row.achieved_at),
+                    "proof": row.current_value_label,
+                }
+            )
+        matrix_rows.append(
+            {
+                "bucket_start_w": bucket_start,
+                "bucket_end_w": bucket_start + HF_BUCKET_SIZE_W - 1,
+                "bucket_label": f"{bucket_start}-{bucket_start + HF_BUCKET_SIZE_W - 1} W",
+                "values": values,
+            }
+        )
+    max_bucket_start = bucket_starts[-1]
+    return {
+        "windows": windows,
+        "rows": matrix_rows,
+        "filled_cells": filled_cells,
+        "max_bucket_label": f"{max_bucket_start}-{max_bucket_start + HF_BUCKET_SIZE_W - 1} W",
+    }
+
+
+def _load_persisted_cycling_payload(user_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(UserAchievement)
+            .where(UserAchievement.user_id == user_id, UserAchievement.section_key == "cycling")
+            .order_by(UserAchievement.sort_index.asc(), UserAchievement.id.asc())
+        ).all()
+        event_rows = session.scalars(
+            select(UserAchievementRecordEvent)
+            .where(UserAchievementRecordEvent.user_id == user_id, UserAchievementRecordEvent.section_key == "cycling")
+            .order_by(UserAchievementRecordEvent.achievement_key.asc(), UserAchievementRecordEvent.achieved_at.asc())
+        ).all()
+
+    events_by_key: dict[str, list[UserAchievementRecordEvent]] = defaultdict(list)
+    for row in event_rows:
+        events_by_key[row.achievement_key].append(row)
+
+    hf_bucket_matrix = _build_hf_bucket_matrix_from_rows(rows)
+    categories: list[dict[str, Any]] = []
+    for category_id, label, description in CYCLING_CATEGORIES:
+        items = [row for row in rows if row.category_key == category_id]
+        category_payload = {
+            "id": category_id,
+            "label": label,
+            "description": description,
+            "items": [_serialize_achievement(item, events_by_key.get(item.achievement_key, [])) for item in items],
+        }
+        if category_id == "hf":
+            category_payload["kind"] = "hf_buckets"
+            category_payload["hf_bucket_matrix"] = hf_bucket_matrix
+        categories.append(category_payload)
+
+    return {
+        "section_key": "cycling",
+        "title": SECTION_META["cycling"]["title"],
+        "eyebrow": SECTION_META["cycling"]["eyebrow"],
+        "intro": SECTION_META["cycling"]["intro"],
+        "categories": categories,
+    }
+
+
 def get_achievement_section(user_id: int, section_key: str) -> dict[str, Any]:
     normalized = str(section_key or "").strip().lower()
     if normalized not in SECTION_META:
@@ -534,7 +1389,7 @@ def get_achievement_section(user_id: int, section_key: str) -> dict[str, Any]:
     if normalized != "cycling":
         payload = SECTION_META[normalized]
         return {"section_key": normalized, "title": payload["title"], "eyebrow": payload["eyebrow"], "intro": payload["intro"], "cards": payload.get("cards", [])}
-    return _compute_cycling_payload(user_id=user_id)
+    return _load_persisted_cycling_payload(user_id=user_id)
 
 
 def reset_achievement_data(user_id: int) -> None:

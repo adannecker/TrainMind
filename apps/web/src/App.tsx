@@ -8,9 +8,9 @@ import { AchievementsPage } from "./pages/AchievementsPage";
 import { ActivityDetailPage } from "./pages/ActivityDetailPage";
 import { ActivitiesAllPage } from "./pages/ActivitiesAllPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
-import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { HomePage } from "./pages/HomePage";
+import { ImportFilesPage } from "./pages/ImportFilesPage";
 import { IngredientsPage } from "./pages/IngredientsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NutritionPage } from "./pages/NutritionPage";
@@ -24,6 +24,8 @@ import { TrainingBasicsPage, TrainingConfigPage, TrainingPlansPage } from "./pag
 type NavItem = {
   label: string;
   to: string;
+  disabled?: boolean;
+  note?: string;
 };
 
 type NavGroup = {
@@ -42,7 +44,8 @@ const navGroups: NavGroup[] = [
     label: "Setup",
     items: [
       { label: "Einstellungen", to: "/setup/settings" },
-      { label: "Neue Rides prüfen", to: "/setup/check-rides" },
+      { label: "Neue Rides prüfen", to: "/setup/check-rides", disabled: true, note: "Verfügbar am 28.03" },
+      { label: "Import Files", to: "/setup/import-files" },
       { label: "Recheck all Rides", to: "/setup/recheck-rides" },
       { label: "Fix FIT file", to: "/setup/fix-fit-file" },
     ],
@@ -149,18 +152,38 @@ function SidebarGroup({
       </button>
       {open ? (
         <div className="nav-sub-list">
-          {items.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) => `nav-sub-link ${isActive ? "active" : ""}`}
-            >
-              {item.label}
-            </NavLink>
-          ))}
+          {items.map((item) =>
+            item.disabled ? (
+              <div key={item.to} className="nav-sub-link disabled" aria-disabled="true">
+                <span>{item.label}</span>
+                {item.note ? <small>{item.note}</small> : null}
+              </div>
+            ) : (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => `nav-sub-link ${isActive ? "active" : ""}`}
+              >
+                <span>{item.label}</span>
+                {item.note ? <small>{item.note}</small> : null}
+              </NavLink>
+            ),
+          )}
         </div>
       ) : null}
     </div>
+  );
+}
+
+function FeatureUnavailablePage({ title, note }: { title: string; note: string }) {
+  return (
+    <section className="page">
+      <div className="hero">
+        <p className="eyebrow">Setup</p>
+        <h1>{title}</h1>
+        <p className="lead">{note}</p>
+      </div>
+    </section>
   );
 }
 
@@ -480,7 +503,11 @@ function Layout() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/setup/settings" element={<SettingsPage />} />
-              <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+              <Route
+                path="/setup/check-rides"
+                element={<FeatureUnavailablePage title="Neue Rides prüfen" note="Verfügbar am 28.03." />}
+              />
+              <Route path="/setup/import-files" element={<ImportFilesPage />} />
               <Route path="/setup/recheck-rides" element={<RecheckRidesPage />} />
               <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />

@@ -10,6 +10,7 @@ from typing import Any
 from fitparse import FitFile as ParsedFitFile
 from sqlalchemy import asc, delete, desc, func, or_, select
 
+from apps.api.achievement_service import ACHIEVEMENT_CHECK_VERSION, get_activity_achievement_check_status, rebuild_activity_achievement_checks
 from packages.db.models import Activity, ActivityLap, ActivityRecord, ActivitySession, FitFilePayload, UserTrainingMetric
 from packages.db.session import SessionLocal
 
@@ -107,6 +108,16 @@ def _unwrap_fit_payload(raw_bytes: bytes) -> bytes | None:
             return None
 
     return None
+
+
+def _parse_json_payload(raw_json: str | None) -> dict[str, Any]:
+    if not raw_json:
+        return {}
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
 
 
 def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[list[ActivitySession], list[ActivityLap], list[ActivityRecord]]:
@@ -564,10 +575,13 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
             "min_altitude_m": min(altitude_values) if altitude_values else None,
             "max_altitude_m": max(altitude_values) if altitude_values else None,
             "stress_score": _stress_from_raw_json(activity.raw_json),
+            "achievements_checked_at": activity.achievements_checked_at.isoformat() if activity.achievements_checked_at else None,
+            "achievements_check_version": activity.achievements_check_version,
             "records_count": len(records),
             "laps_count": len(laps),
             "sessions_count": len(sessions),
         },
+        "achievement_analysis": _parse_json_payload(activity.achievements_summary_json),
         "sessions": [
             {
                 "session_index": row.session_index,

@@ -45,6 +45,7 @@ type ColumnKey =
   | "name"
   | "sport"
   | "provider"
+  | "garmin_id"
   | "duration"
   | "distance"
   | "avg_speed"
@@ -74,7 +75,7 @@ type AdvancedFilters = {
 };
 
 const COLUMN_STORAGE_KEY = "trainmind.activities.columns";
-const DEFAULT_COLUMNS: ColumnKey[] = ["started_at", "name", "sport", "distance", "duration", "avg_power", "avg_hr"];
+const DEFAULT_COLUMNS: ColumnKey[] = ["started_at", "name", "sport", "garmin_id", "distance", "duration", "avg_power", "avg_hr"];
 
 const COLUMN_DEFS: ColumnDef[] = [
   {
@@ -100,6 +101,11 @@ const COLUMN_DEFS: ColumnDef[] = [
     label: "Provider",
     sortable: "provider",
     render: (row) => row.provider || "-",
+  },
+  {
+    key: "garmin_id",
+    label: "Garmin-ID",
+    render: (row) => ((row.provider || "").toLowerCase() === "garmin" ? row.external_id || "-" : "-"),
   },
   {
     key: "duration",

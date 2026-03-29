@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from dotenv import load_dotenv
 
 from apps.api.achievement_service import get_achievement_section
 from apps.api.activity_service import (
     delete_activity,
     get_available_activity_weeks,
     get_activity_detail,
+    get_activity_achievement_check_status,
     list_activities,
     get_weekly_activities,
+    rebuild_activity_achievement_checks,
     rebuild_historical_max_hr_from_activities,
 )
 from apps.api.admin_service import delete_user_as_admin, invite_user_as_admin, list_users
@@ -28,6 +32,7 @@ from apps.api.garmin_service import (
     import_selected_garmin_rides,
     reset_imported_garmin_data,
 )
+from apps.api.garmin_file_import_service import analyze_fit_dump_zip, analyze_saved_fit_dump_zip, import_fit_dump_zip, list_saved_fit_dump_archives
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
     create_entry,
@@ -49,13 +54,22 @@ from apps.api.nutrition_service import (
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
 from apps.api.training_service import (
+    build_athlete_profile_prompt,
+    build_training_config_prompt,
+    build_training_plan_prompt,
     create_training_metric,
     delete_training_metric,
+    derive_athlete_profile_with_llm,
+    derive_training_config_with_llm,
+    derive_training_plan_with_llm,
     list_training_metrics,
     update_training_metric,
     upsert_training_zone_setting,
 )
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+load_dotenv(dotenv_path=REPO_ROOT / ".env")
 
 def _parse_cors_origins() -> list[str]:
     configured = os.getenv("APP_CORS_ORIGINS", "").strip()
@@ -123,6 +137,8 @@ class UserProfileUpdateRequest(BaseModel):
     goal_start_date: str | None = None
     goal_end_date: str | None = None
     nav_group_order: list[str] | None = None
+    training_config: dict | None = None
+    training_plan: dict | None = None
 
 
 class WeightLogCreateRequest(BaseModel):
@@ -330,8 +346,13 @@ class GarminResetRequest(BaseModel):
     delete_derived_metrics: bool = False
 
 
+class GarminImportSavedFileRequest(BaseModel):
+    file_name: str
+
+
 class ActivityHistoricalRecheckRequest(BaseModel):
     rebuild_max_hr: bool = True
+    rebuild_achievements: bool = True
 
 
 class NutritionEntryItemRequest(BaseModel):
@@ -505,11 +526,35 @@ class TrainingZoneSettingUpdateRequest(BaseModel):
     config: dict | None = None
 
 
+class AthleteProfileDeriveRequest(BaseModel):
+    focus_labels: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class TrainingConfigSectionDeriveRequest(BaseModel):
+    section_key: str
+    section_title: str | None = None
+    focus_labels: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class TrainingPlanSectionRequest(BaseModel):
+    section_key: str
+    section_title: str | None = None
+    focus_labels: list[str] = Field(default_factory=list)
+    notes: str | None = None
+
+
+class TrainingPlanDeriveRequest(BaseModel):
+    sections: list[TrainingPlanSectionRequest] = Field(default_factory=list)
+
+
 for request_model in (
     AuthLoginRequest,
     GarminImportRequest,
     GarminCredentialsRequest,
     GarminResetRequest,
+    GarminImportSavedFileRequest,
     ActivityHistoricalRecheckRequest,
     NutritionEntryItemRequest,
     NutritionEntryCreateRequest,
@@ -529,6 +574,10 @@ for request_model in (
     TrainingMetricCreateRequest,
     TrainingMetricUpdateRequest,
     TrainingZoneSettingUpdateRequest,
+    AthleteProfileDeriveRequest,
+    TrainingConfigSectionDeriveRequest,
+    TrainingPlanSectionRequest,
+    TrainingPlanDeriveRequest,
 ):
     request_model.model_rebuild()
 
@@ -597,6 +646,94 @@ def training_zone_setting_put(payload: TrainingZoneSettingUpdateRequest, current
         raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
 
 
+@app.post("/training/config-section/llm-prompt")
+def training_config_section_llm_prompt(payload: TrainingConfigSectionDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return build_training_config_prompt(
+            section_key=payload.section_key,
+            section_title=payload.section_title,
+            selected_focus_labels=payload.focus_labels,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/config-section/derive")
+def training_config_section_derive(payload: TrainingConfigSectionDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return derive_training_config_with_llm(
+            section_key=payload.section_key,
+            section_title=payload.section_title,
+            selected_focus_labels=payload.focus_labels,
+            notes=payload.notes,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OPENAI_API_KEY" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/plan-draft/llm-prompt")
+def training_plan_draft_llm_prompt(payload: TrainingPlanDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return build_training_plan_prompt(sections=[section.model_dump() for section in payload.sections])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/plan-draft/derive")
+def training_plan_draft_derive(payload: TrainingPlanDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return derive_training_plan_with_llm(sections=[section.model_dump() for section in payload.sections])
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OPENAI_API_KEY" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/athlete-profile/llm-prompt")
+def training_athlete_profile_llm_prompt(payload: AthleteProfileDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return build_athlete_profile_prompt(selected_focus_labels=payload.focus_labels, notes=payload.notes)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.post("/training/athlete-profile/derive")
+def training_athlete_profile_derive(payload: AthleteProfileDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return derive_athlete_profile_with_llm(selected_focus_labels=payload.focus_labels, notes=payload.notes)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OPENAI_API_KEY" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
 @app.post("/garmin/credentials")
 def garmin_credentials_save(payload: GarminCredentialsRequest, current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -658,11 +795,23 @@ def activities_recheck_history(
         result: dict[str, object] = {"status": "ok"}
         if payload.rebuild_max_hr:
             result["max_hr"] = rebuild_historical_max_hr_from_activities(user_id=int(current_user["id"]))
+        if payload.rebuild_achievements:
+            result["achievements"] = rebuild_activity_achievement_checks(user_id=int(current_user["id"]))
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity recheck error: {exc}") from exc
+
+
+@app.get("/activities/recheck-history/status")
+def activities_recheck_history_status(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return {"status": "ok", "achievements": get_activity_achievement_check_status(user_id=int(current_user["id"]))}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity recheck status error: {exc}") from exc
 
 
 @app.get("/achievements/{section_key}")
@@ -687,6 +836,69 @@ async def fit_fix_inspect(file: UploadFile = File(...), current_user: dict = Dep
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
+
+
+@app.post("/garmin/import-files/analyze")
+async def garmin_import_files_analyze(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise ValueError("Bitte eine ZIP-Datei auswählen.")
+        return analyze_fit_dump_zip(file_bytes=file_bytes, filename=file.filename or "garmin_fit_dump.zip")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin import-file error: {exc}") from exc
+
+
+@app.get("/garmin/import-files/available")
+def garmin_import_files_available(current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return list_saved_fit_dump_archives()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin import-file error: {exc}") from exc
+
+
+@app.post("/garmin/import-files/analyze-saved")
+def garmin_import_files_analyze_saved(payload: GarminImportSavedFileRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return analyze_saved_fit_dump_zip(file_name=payload.file_name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin import-file error: {exc}") from exc
+
+
+@app.post("/garmin/import-files/import")
+async def garmin_import_files_import(
+    file: UploadFile = File(...),
+    selections_json: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise ValueError("Bitte eine ZIP-Datei auswählen.")
+        selections = json.loads(selections_json)
+        if not isinstance(selections, list):
+            raise ValueError("Die ausgewählten Fahrten müssen als Liste übergeben werden.")
+        return import_fit_dump_zip(
+            file_bytes=file_bytes,
+            filename=file.filename or "garmin_fit_dump.zip",
+            user_id=int(current_user["id"]),
+            selections=selections,
+        )
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Ungültiges JSON für die Auswahl: {exc}") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin import-file error: {exc}") from exc
 
 
 @app.post("/fit-fix/apply")
