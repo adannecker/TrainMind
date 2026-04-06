@@ -124,7 +124,7 @@ export function CheckRidesPage() {
 
   const selectableYears = useMemo(() => {
     const years: number[] = [];
-    for (let year = now.getFullYear(); year >= 2024; year -= 1) years.push(year);
+    for (let year = now.getFullYear(); year >= 2018; year -= 1) years.push(year);
     return years;
   }, [now]);
 

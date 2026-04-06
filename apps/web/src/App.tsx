@@ -9,6 +9,7 @@ import { ActivityDetailPage } from "./pages/ActivityDetailPage";
 import { ActivitiesAllPage } from "./pages/ActivitiesAllPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
+import { ClimbComparePage } from "./pages/ClimbComparePage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { HomePage } from "./pages/HomePage";
 import { ImportFilesPage } from "./pages/ImportFilesPage";
@@ -77,6 +78,7 @@ const navGroups: NavGroup[] = [
     label: "Aktivitäten",
     items: [
       { label: "Wochenansicht", to: "/activities/week" },
+      { label: "Climb Compare", to: "/activities/climb-compare" },
       { label: "Alle Aktivitäten", to: "/activities/all" },
     ],
   },
@@ -615,6 +617,7 @@ function Layout() {
               <Route path="/tools/import-files" element={<ImportFilesPage />} />
               <Route path="/tools/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
+              <Route path="/activities/climb-compare" element={<ClimbComparePage />} />
               <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
               <Route path="/nutrition/entries" element={<NutritionPage />} />
               <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />

@@ -52,6 +52,15 @@ def _validate_weight(value: float | None, field_name: str) -> float | None:
     return parsed
 
 
+def _validate_weekly_target(value: float | None, field_name: str, *, upper_bound: float) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if parsed <= 0 or parsed > upper_bound:
+        raise ValueError(f"{field_name} must be > 0 and <= {upper_bound}.")
+    return parsed
+
+
 def _normalize_gender(value: str | None) -> str | None:
     clean_gender = str(value or "").strip().lower()
     if not clean_gender:
@@ -170,6 +179,8 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
             "goal_start_date": None,
             "goal_end_date": None,
             "goal_period_days": None,
+            "weekly_target_hours": None,
+            "weekly_target_stress": None,
             "nav_group_order": None,
             "training_config": None,
             "training_plan": None,
@@ -188,6 +199,8 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
         "goal_start_date": _serialize_datetime(profile.goal_start_date),
         "goal_end_date": _serialize_datetime(profile.goal_end_date),
         "goal_period_days": goal_period_days,
+        "weekly_target_hours": profile.weekly_target_hours,
+        "weekly_target_stress": profile.weekly_target_stress,
         "nav_group_order": _normalize_nav_group_order(profile.nav_group_order_json),
         "training_config": _parse_json_object(profile.training_config_json, "training_config"),
         "training_plan": _parse_json_object(profile.training_plan_json, "training_plan"),
@@ -234,6 +247,10 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
             profile.goal_start_date = _parse_datetime(str(payload.get("goal_start_date") or "")) if payload.get("goal_start_date") else None
         if "goal_end_date" in payload:
             profile.goal_end_date = _parse_datetime(str(payload.get("goal_end_date") or "")) if payload.get("goal_end_date") else None
+        if "weekly_target_hours" in payload:
+            profile.weekly_target_hours = _validate_weekly_target(payload.get("weekly_target_hours"), "weekly_target_hours", upper_bound=60.0)
+        if "weekly_target_stress" in payload:
+            profile.weekly_target_stress = _validate_weekly_target(payload.get("weekly_target_stress"), "weekly_target_stress", upper_bound=5000.0)
         if "nav_group_order" in payload:
             nav_group_order = _normalize_nav_group_order(payload.get("nav_group_order"))
             profile.nav_group_order_json = json.dumps(nav_group_order) if nav_group_order else None

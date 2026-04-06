@@ -31,6 +31,12 @@ type DayBundle = {
   };
 };
 
+type WeekGoal = {
+  target_hours: number;
+  target_stress: number;
+  is_custom: boolean;
+};
+
 type WeekResponse = {
   week_start: string;
   week_end: string;
@@ -42,6 +48,7 @@ type WeekResponse = {
     distance_m: number;
     stress_total: number | null;
     stress_avg: number | null;
+    goal: WeekGoal;
   };
 };
 
@@ -58,9 +65,6 @@ async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   }
   return JSON.parse(text) as T;
 }
-
-const TARGET_KM = 250;
-const TARGET_HOURS = 10;
 
 function todayIsoDate(): string {
   return new Date().toISOString().slice(0, 10);
@@ -163,15 +167,15 @@ export function ActivitiesWeekPage() {
         throw new Error(
           typeof payload === "object" && payload && "detail" in payload && payload.detail
             ? payload.detail
-            : "Failed to load weekly activities",
+            : "Wochenansicht konnte nicht geladen werden.",
         );
       }
       if (!payload) {
-        throw new Error("Failed to load weekly activities: empty response from API");
+        throw new Error("Wochenansicht konnte nicht geladen werden: leere Antwort von der API.");
       }
       setData(payload as WeekResponse);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
       setLoading(false);
     }
@@ -194,9 +198,12 @@ export function ActivitiesWeekPage() {
 
   const weekDistanceKm = useMemo(() => ((data?.summary.distance_m ?? 0) / 1000), [data]);
   const weekHours = useMemo(() => ((data?.summary.moving_time_s ?? 0) / 3600), [data]);
-  const kmProgress = Math.max(0, Math.min(100, (weekDistanceKm / TARGET_KM) * 100));
-  const timeProgress = Math.max(0, Math.min(100, (weekHours / TARGET_HOURS) * 100));
-  const loadScore = Math.round((kmProgress + timeProgress) / 2);
+  const weekStress = useMemo(() => (data?.summary.stress_total ?? 0), [data]);
+  const targetHours = data?.summary.goal?.target_hours ?? 10;
+  const targetStress = data?.summary.goal?.target_stress ?? 300;
+  const timeProgress = Math.max(0, Math.min(100, (weekHours / Math.max(0.1, targetHours)) * 100));
+  const stressProgress = Math.max(0, Math.min(100, (weekStress / Math.max(1, targetStress)) * 100));
+  const loadScore = Math.round((timeProgress + stressProgress) / 2);
 
   function goToPreviousWeek() {
     const base = data?.week_start ?? selectedDate;
@@ -244,7 +251,7 @@ export function ActivitiesWeekPage() {
             <select
               className="week-data-select"
               value={data?.week_start ?? ""}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(event) => setSelectedDate(event.target.value)}
               aria-label="Woche auswählen"
             >
               <option value="" disabled>
@@ -272,7 +279,7 @@ export function ActivitiesWeekPage() {
 
         <div className="week-hero-right">
           <div className="week-hero-summary card">
-            <h2>Wochen-Summary</h2>
+            <h2>Wochenüberblick</h2>
             {loading ? <p>Lade Wochenansicht...</p> : null}
             {error ? <p className="error-text">{error}</p> : null}
             {!loading && !error && data ? (
@@ -280,14 +287,18 @@ export function ActivitiesWeekPage() {
                 <span>Aktivitäten: {data.summary.activities_count}</span>
                 <span>Zeit in Bewegung: {data.summary.moving_time_label ?? "-"}</span>
                 <span>Distanz: {formatDistanceMeters(data.summary.distance_m)}</span>
-                <span>Performance/Stress: {formatNumber(data.summary.stress_total, 1)}</span>
+                <span>TSS gesamt: {formatNumber(data.summary.stress_total, 1)}</span>
               </div>
             ) : null}
           </div>
 
           <div className="week-visualizer card">
-            <h2>Ambitious Amateur Target</h2>
-            <p className="week-visualizer-target">Ziel: {TARGET_KM} km / {TARGET_HOURS} h pro Woche</p>
+            <h2>Wochenziel</h2>
+            <p className="week-visualizer-target">
+              Ziel: {formatNumber(targetHours, 1)} h auf dem Rad / {formatNumber(targetStress, 0)} Trainingsreiz pro Woche
+              {data?.summary.goal?.is_custom ? "" : " (Standardziel)"}
+            </p>
+            <p className="week-visualizer-note">Der Trainingsreiz orientiert sich an TSS und ergänzt die reine Radzeit.</p>
             <div
               className="week-load-gauge"
               style={{ ["--progress" as any]: `${loadScore}%` }}
@@ -297,19 +308,23 @@ export function ActivitiesWeekPage() {
             </div>
             <div className="week-progress-bars">
               <div className="week-progress-row">
-                <span>Kilometer</span>
-                <span>{formatNumber(weekDistanceKm, 1)} / {TARGET_KM}</span>
-                <div className="week-progress-track">
-                  <div className="week-progress-fill km" style={{ width: `${kmProgress}%` }} />
-                </div>
-              </div>
-              <div className="week-progress-row">
-                <span>Zeit</span>
-                <span>{formatNumber(weekHours, 1)} / {TARGET_HOURS} h</span>
+                <span>Zeit auf dem Rad</span>
+                <span>{formatNumber(weekHours, 1)} / {formatNumber(targetHours, 1)} h</span>
                 <div className="week-progress-track">
                   <div className="week-progress-fill time" style={{ width: `${timeProgress}%` }} />
                 </div>
               </div>
+              <div className="week-progress-row">
+                <span>Trainingsreiz (TSS)</span>
+                <span>{formatNumber(weekStress, 1)} / {formatNumber(targetStress, 0)}</span>
+                <div className="week-progress-track">
+                  <div className="week-progress-fill stress" style={{ width: `${stressProgress}%` }} />
+                </div>
+              </div>
+            </div>
+            <div className="stats-line">
+              <span>Kilometer: {formatNumber(weekDistanceKm, 1)} km</span>
+              <span>Ø TSS pro Einheit: {formatNumber(data?.summary.stress_avg ?? null, 1)}</span>
             </div>
           </div>
         </div>
@@ -333,13 +348,10 @@ export function ActivitiesWeekPage() {
                     <div className="week-activity-item" key={activity.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/activities/${activity.id}`)}>
                       <p className="week-activity-name">{activity.name}</p>
                       <p className="week-activity-meta">
-                        {formatTime(activity.start_time)} - {formatTime(activity.end_time)} |{" "}
-                        {activity.duration_label ?? "-"}
+                        {formatTime(activity.start_time)} - {formatTime(activity.end_time)} | {activity.duration_label ?? "-"}
                       </p>
                       <p className="week-activity-metrics">
-                        Ø Watt: {formatNumber(activity.avg_power_w)} W | Ø Speed:{" "}
-                        {formatNumber(activity.avg_speed_kmh, 1)} km/h | Stress:{" "}
-                        {formatNumber(activity.stress_score, 1)}
+                        Ø Watt: {formatNumber(activity.avg_power_w)} W | Ø Speed: {formatNumber(activity.avg_speed_kmh, 1)} km/h | TSS: {formatNumber(activity.stress_score, 1)}
                       </p>
                     </div>
                   ))}
@@ -349,7 +361,7 @@ export function ActivitiesWeekPage() {
               <footer className="week-day-summary">
                 <span>Zeit: {day.summary.moving_time_label ?? "-"}</span>
                 <span>Distanz: {formatDistanceMeters(day.summary.distance_m)}</span>
-                <span>Stress: {formatNumber(day.summary.stress_total, 1)}</span>
+                <span>TSS: {formatNumber(day.summary.stress_total, 1)}</span>
               </footer>
             </article>
           ))}

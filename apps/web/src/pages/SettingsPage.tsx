@@ -81,6 +81,8 @@ type UserProfile = {
   goal_start_date: string | null;
   goal_end_date: string | null;
   goal_period_days: number | null;
+  weekly_target_hours: number | null;
+  weekly_target_stress: number | null;
   training_config?: {
     sections?: Partial<
       Record<
@@ -226,6 +228,8 @@ export function SettingsPage() {
   const [startWeight, setStartWeight] = useState("");
   const [goalStartDate, setGoalStartDate] = useState("");
   const [goalEndDate, setGoalEndDate] = useState("");
+  const [weeklyTargetHours, setWeeklyTargetHours] = useState("");
+  const [weeklyTargetStress, setWeeklyTargetStress] = useState("");
   const [logWeight, setLogWeight] = useState("");
   const [logDate, setLogDate] = useState("");
   const [logNotes, setLogNotes] = useState("");
@@ -324,6 +328,8 @@ export function SettingsPage() {
       setStartWeight(p.start_weight_kg == null ? "" : String(p.start_weight_kg));
       setGoalStartDate(toLocalInputValue(p.goal_start_date));
       setGoalEndDate(toLocalInputValue(p.goal_end_date));
+      setWeeklyTargetHours(p.weekly_target_hours == null ? "" : String(p.weekly_target_hours));
+      setWeeklyTargetStress(p.weekly_target_stress == null ? "" : String(p.weekly_target_stress));
       setWeightLogs(((logsBody as { weight_logs: WeightLog[] }).weight_logs ?? []).slice());
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : "Unknown error");
@@ -460,6 +466,8 @@ export function SettingsPage() {
           start_weight_kg: toNumberOrNull(startWeight),
           goal_start_date: goalStartDate || null,
           goal_end_date: goalEndDate || null,
+          weekly_target_hours: toNumberOrNull(weeklyTargetHours),
+          weekly_target_stress: toNumberOrNull(weeklyTargetStress),
         }),
       });
       const payload = await parseJsonSafely<UserProfile | { detail?: string }>(response);
@@ -476,6 +484,8 @@ export function SettingsPage() {
       setStartWeight(next.start_weight_kg == null ? "" : String(next.start_weight_kg));
       setGoalStartDate(toLocalInputValue(next.goal_start_date));
       setGoalEndDate(toLocalInputValue(next.goal_end_date));
+      setWeeklyTargetHours(next.weekly_target_hours == null ? "" : String(next.weekly_target_hours));
+      setWeeklyTargetStress(next.weekly_target_stress == null ? "" : String(next.weekly_target_stress));
       window.dispatchEvent(new CustomEvent("trainmind:user-label-updated", { detail: { displayName: next.display_name || "" } }));
       setProfileMessage("Persönliche Daten gespeichert.");
     } catch (err) {
@@ -716,6 +726,14 @@ export function SettingsPage() {
                   <label className="settings-label">
                     Ziel-Ende
                     <input className="settings-input" type="datetime-local" value={goalEndDate} onChange={(e) => setGoalEndDate(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Wochenziel Zeit (h)
+                    <input className="settings-input" type="number" step="0.1" value={weeklyTargetHours} onChange={(e) => setWeeklyTargetHours(e.target.value)} />
+                  </label>
+                  <label className="settings-label">
+                    Wochenziel Trainingsreiz
+                    <input className="settings-input" type="number" step="1" value={weeklyTargetStress} onChange={(e) => setWeeklyTargetStress(e.target.value)} />
                   </label>
                   <div className="settings-label">
                     Zeitraum

@@ -1,7 +1,9 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiFetch } from "../api";
-import { API_BASE_URL } from "../config";
+import { API_BASE_URL, MAP_MAX_ZOOM, MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from "../config";
+import type { LatLng, LatLngBoundsExpression, LatLngTuple, Map as LeafletMap } from "leaflet";
+import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 
 type ActivitySummary = {
   id: number;
@@ -31,10 +33,17 @@ type ActivitySummary = {
   calories_kcal: number | null;
   ftp_reference_w: number | null;
   max_hr_reference_bpm: number | null;
+  avg_cadence_rpm: number | null;
   max_cadence_rpm: number | null;
   max_speed_kmh: number | null;
   min_altitude_m: number | null;
   max_altitude_m: number | null;
+  total_ascent_m: number | null;
+  longest_climb_m: number | null;
+  moving_time_s: number | null;
+  moving_time_label: string | null;
+  paused_time_s: number | null;
+  paused_time_label: string | null;
   stress_score: number | null;
   achievements_checked_at: string | null;
   achievements_check_version: number | null;
@@ -100,6 +109,8 @@ type ActivityRecordRow = {
   timestamp: string | null;
   elapsed_s: number | null;
   distance_m: number | null;
+  latitude_deg: number | null;
+  longitude_deg: number | null;
   heart_rate_bpm: number | null;
   power_w: number | null;
   speed_mps: number | null;
@@ -172,22 +183,48 @@ type ActivityMetricItem = {
   help?: string;
 };
 
+type ActivityMetricCardData = {
+  primary: ActivityMetricItem;
+  secondary?: ActivityMetricItem;
+};
+
 type ActivityMetricSection = {
   title: string;
   note: string;
-  items: ActivityMetricItem[];
+  cards: ActivityMetricCardData[];
 };
 
-type TabKey = "general" | "charts" | "laps" | "analysis" | "llm" | "achievements";
+type TabKey = "general" | "map" | "charts" | "laps" | "analysis" | "llm" | "achievements";
 type ZoomSelection = {
   chartKey: string;
   anchor: number;
   current: number;
 };
+type DistanceSelection = {
+  anchor: number;
+  current: number;
+};
+type DistanceRange = {
+  start: number;
+  end: number;
+};
 type SmoothingMode = "raw" | "avg3" | "avg5" | "avg10" | "avg30" | "avg60";
 type ChartPoint = {
   elapsed: number;
   value: number;
+};
+type MapMetricKey = "power" | "hr" | "cadence" | "speed";
+type RoutePoint = {
+  elapsed: number;
+  distanceM: number;
+  latitudeDeg: number | null;
+  longitudeDeg: number | null;
+  altitudeM: number | null;
+  powerW: number | null;
+  heartRateBpm: number | null;
+  speedKmh: number | null;
+  cadenceRpm: number | null;
+  gradePct: number | null;
 };
 
 const ACHIEVEMENT_CATEGORY_ORDER = ["hf", "records", "distance", "weekly", "zones", "moments"] as const;
@@ -200,6 +237,12 @@ const HF_WINDOW_ORDER: Record<string, number> = {
   "45m": 5,
   "60m": 6,
 };
+const MAP_METRIC_OPTIONS: Array<{ key: MapMetricKey; label: string; color: string; suffix: string; digits: number; pick: (point: RoutePoint) => number | null }> = [
+  { key: "power", label: "Watt", color: "#6cc63f", suffix: " W", digits: 0, pick: (point) => point.powerW },
+  { key: "hr", label: "Herzfrequenz", color: "#ff2950", suffix: " bpm", digits: 0, pick: (point) => point.heartRateBpm },
+  { key: "cadence", label: "Kadenz", color: "#f39a1f", suffix: " rpm", digits: 0, pick: (point) => point.cadenceRpm },
+  { key: "speed", label: "Geschwindigkeit", color: "#5ab1f3", suffix: " km/h", digits: 1, pick: (point) => point.speedKmh },
+];
 
 function achievementCategoryLabel(category: string): string {
   const labels: Record<string, string> = {
@@ -232,6 +275,7 @@ function compactHfValueLabel(item: ActivityAchievementMatch): string {
 
 const TABS: Array<{ key: TabKey; title: string; note: string }> = [
   { key: "general", title: "Allgemeine Infos", note: "Kernwerte und Metadaten" },
+  { key: "map", title: "Karte", note: "Track und GPS Verlauf" },
   { key: "charts", title: "Diagramme", note: "HF, Watt und Verlauf" },
   { key: "laps", title: "Runden", note: "Laps und Sessions" },
   { key: "analysis", title: "Trainingsanalyse", note: "Deterministisch und regelbasiert" },
@@ -274,9 +318,9 @@ function ActivityMetricHelp({ title, description }: { title: string; description
   );
 }
 
-function ActivityMetricCard({ label, value, help }: ActivityMetricItem) {
+function ActivityMetricEntry({ label, value, help }: ActivityMetricItem) {
   return (
-    <div className="activity-metric-card">
+    <div className="activity-metric-entry">
       <div className="activity-metric-label-row">
         <span className="activity-metric-label">{label}</span>
         {help ? <ActivityMetricHelp title={label} description={help} /> : null}
@@ -286,7 +330,21 @@ function ActivityMetricCard({ label, value, help }: ActivityMetricItem) {
   );
 }
 
-function ActivityMetricSectionCard({ title, note, items }: ActivityMetricSection) {
+function ActivityMetricCard({ primary, secondary }: ActivityMetricCardData) {
+  return (
+    <div className="activity-metric-card">
+      <ActivityMetricEntry {...primary} />
+      {secondary ? (
+        <>
+          <div className="activity-metric-divider" />
+          <ActivityMetricEntry {...secondary} />
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function ActivityMetricSectionCard({ title, note, cards }: ActivityMetricSection) {
   return (
     <article className="activity-summary-section">
       <div className="activity-summary-head">
@@ -294,8 +352,8 @@ function ActivityMetricSectionCard({ title, note, items }: ActivityMetricSection
         <span>{note}</span>
       </div>
       <div className="activity-metric-grid">
-        {items.map((item) => (
-          <ActivityMetricCard key={item.label} {...item} />
+        {cards.map((card) => (
+          <ActivityMetricCard key={`${card.primary.label}-${card.secondary?.label ?? "single"}`} {...card} />
         ))}
       </div>
     </article>
@@ -338,9 +396,143 @@ function formatAxisTime(totalSeconds: number): string {
   return `${minutes}m`;
 }
 
+function formatAxisDistance(distanceM: number): string {
+  if (!Number.isFinite(distanceM)) return "-";
+  return `${(distanceM / 1000).toFixed(distanceM >= 10000 ? 0 : 1)} km`;
+}
+
 type ChartRecord = ActivityRecordRow & {
   chart_elapsed_s: number;
 };
+
+type AxisBounds = {
+  min: number;
+  max: number;
+  axisMin: number;
+  axisMax: number;
+  span: number;
+};
+
+function computeAxisBounds(values: number[]): AxisBounds | null {
+  if (!values.length) return null;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const rawSpan = max - min;
+  const axisMin = rawSpan === 0 ? min - Math.max(1, Math.abs(min) * 0.1) : min - rawSpan * 0.08;
+  const axisMax = rawSpan === 0 ? max + Math.max(1, Math.abs(max) * 0.1) : max + rawSpan * 0.08;
+  return {
+    min,
+    max,
+    axisMin,
+    axisMax,
+    span: Math.max(1, axisMax - axisMin),
+  };
+}
+
+function pointerRatioInPlot(clientX: number, element: HTMLDivElement, plotLeft: number, plotWidth: number, svgWidth = 1000): number {
+  const rect = element.getBoundingClientRect();
+  const plotLeftPx = rect.width * (plotLeft / svgWidth);
+  const plotWidthPx = rect.width * (plotWidth / svgWidth);
+  return Math.max(0, Math.min(1, (clientX - rect.left - plotLeftPx) / Math.max(1, plotWidthPx)));
+}
+
+function filterPointsByDistanceRange<T extends { distanceM: number }>(points: T[], range: DistanceRange | null): T[] {
+  if (!range) return points;
+  return points.filter((point) => point.distanceM >= range.start && point.distanceM <= range.end);
+}
+
+function buildRoutePoints(records: ChartRecord[]): RoutePoint[] {
+  if (!records.length) return [];
+
+  let fallbackDistanceM = 0;
+  const base = records.map((row, index) => {
+    const rawDistanceM = typeof row.distance_m === "number" && Number.isFinite(row.distance_m) ? row.distance_m : null;
+    if (rawDistanceM != null) {
+      fallbackDistanceM = rawDistanceM;
+    } else if (index > 0) {
+      const previous = records[index - 1];
+      const elapsedDelta = Math.max(0, row.chart_elapsed_s - previous.chart_elapsed_s);
+      const speedMps = row.speed_mps ?? previous.speed_mps ?? 0;
+      fallbackDistanceM += Math.max(0, speedMps * elapsedDelta);
+    }
+
+    return {
+      elapsed: row.chart_elapsed_s,
+      distanceM: fallbackDistanceM,
+      latitudeDeg: row.latitude_deg,
+      longitudeDeg: row.longitude_deg,
+      altitudeM: row.altitude_m,
+      powerW: row.power_w,
+      heartRateBpm: row.heart_rate_bpm,
+      speedKmh: row.speed_kmh,
+      cadenceRpm: row.cadence_rpm,
+      gradePct: null,
+    };
+  });
+
+  return base.map((point, index) => {
+    const left = base[Math.max(0, index - 2)];
+    const right = base[Math.min(base.length - 1, index + 2)];
+    const altitudeLeft = left?.altitudeM;
+    const altitudeRight = right?.altitudeM;
+    const distanceDelta = Math.max(0, (right?.distanceM ?? point.distanceM) - (left?.distanceM ?? point.distanceM));
+    let gradePct: number | null = null;
+
+    if (altitudeLeft != null && altitudeRight != null && distanceDelta >= 20) {
+      gradePct = Math.max(-20, Math.min(20, ((altitudeRight - altitudeLeft) / distanceDelta) * 100));
+    }
+
+    return {
+      ...point,
+      gradePct,
+    };
+  });
+}
+
+function findNearestPointByElapsed<T extends { elapsed: number }>(points: T[], elapsed: number | null): T | null {
+  if (elapsed == null || !points.length) return null;
+  return points.reduce<T | null>((best, point) => {
+    if (best == null) return point;
+    return Math.abs(point.elapsed - elapsed) < Math.abs(best.elapsed - elapsed) ? point : best;
+  }, null);
+}
+
+function findNearestPointByDistance<T extends { distanceM: number }>(points: T[], distanceM: number): T | null {
+  if (!points.length) return null;
+  return points.reduce<T | null>((best, point) => {
+    if (best == null) return point;
+    return Math.abs(point.distanceM - distanceM) < Math.abs(best.distanceM - distanceM) ? point : best;
+  }, null);
+}
+
+function gradeColor(gradePct: number | null): string {
+  if (gradePct == null) return "#5c7e76";
+  if (gradePct >= 8) return "#c03a2b";
+  if (gradePct >= 4) return "#ef8d33";
+  if (gradePct <= -8) return "#2d5b93";
+  if (gradePct <= -4) return "#5a8ec7";
+  return "#1f8b6f";
+}
+
+function findNearestMapHoverPoint(map: LeafletMap, points: RoutePoint[], cursorLatLng: LatLng): RoutePoint | null {
+  const cursor = map.latLngToContainerPoint(cursorLatLng);
+  let bestPoint: RoutePoint | null = null;
+  let bestDistanceSquared = Number.POSITIVE_INFINITY;
+
+  for (const point of points) {
+    if (point.latitudeDeg == null || point.longitudeDeg == null) continue;
+    const projected = map.latLngToContainerPoint([point.latitudeDeg, point.longitudeDeg]);
+    const dx = projected.x - cursor.x;
+    const dy = projected.y - cursor.y;
+    const distanceSquared = dx * dx + dy * dy;
+    if (distanceSquared < bestDistanceSquared) {
+      bestPoint = point;
+      bestDistanceSquared = distanceSquared;
+    }
+  }
+
+  return bestDistanceSquared <= 24 * 24 ? bestPoint : null;
+}
 
 function normalizeRecordTimeline(records: ActivityRecordRow[]): ChartRecord[] {
   const rawElapsed = records.map((row, index) => row.elapsed_s ?? index);
@@ -438,6 +630,505 @@ function buildAreaPath(points: ChartPoint[], width = 900, height = 220): string 
   return `${path} L ${end.x.toFixed(1)} ${height.toFixed(1)} L ${start.x.toFixed(1)} ${height.toFixed(1)} Z`;
 }
 
+function extractTrackPoints(points: RoutePoint[]): LatLngTuple[] {
+  return points
+    .filter((point) => point.latitudeDeg != null && point.longitudeDeg != null)
+    .map((point) => [Number(point.latitudeDeg), Number(point.longitudeDeg)] as LatLngTuple)
+    .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180);
+}
+
+function ActivityMapViewport({ bounds }: { bounds: LatLngBoundsExpression }) {
+  const map = useMap();
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => {
+      map.invalidateSize();
+      map.fitBounds(bounds, { padding: [28, 28] });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [bounds, map]);
+
+  return null;
+}
+
+function ActivityMapHoverSync({ points, onHoverChange }: { points: RoutePoint[]; onHoverChange: (nextSecond: number | null) => void }) {
+  const map = useMap();
+
+  useMapEvents({
+    mousemove(event) {
+      const nearest = findNearestMapHoverPoint(map, points, event.latlng);
+      onHoverChange(nearest?.elapsed ?? null);
+    },
+    mouseout() {
+      onHoverChange(null);
+    },
+  });
+
+  return null;
+}
+
+type DistanceSeriesPoint = {
+  elapsed: number;
+  distanceM: number;
+  value: number;
+  gradePct: number | null;
+};
+
+type ProjectedDistanceSeriesPoint = DistanceSeriesPoint & {
+  x: number;
+  y: number;
+};
+
+function buildDistanceSeries(points: RoutePoint[], pick: (point: RoutePoint) => number | null): DistanceSeriesPoint[] {
+  return points
+    .map((point) => ({
+      elapsed: point.elapsed,
+      distanceM: point.distanceM,
+      value: pick(point),
+      gradePct: point.gradePct,
+    }))
+    .filter((point): point is DistanceSeriesPoint => point.value != null && Number.isFinite(point.value));
+}
+
+function projectDistanceSeries(points: DistanceSeriesPoint[], bounds: AxisBounds, width = 900, height = 220): ProjectedDistanceSeriesPoint[] {
+  const minDistanceM = Math.min(...points.map((point) => point.distanceM));
+  const maxDistanceM = Math.max(...points.map((point) => point.distanceM), 1);
+  const distanceSpan = Math.max(1, maxDistanceM - minDistanceM);
+  return points.map((point) => ({
+    ...point,
+    x: ((point.distanceM - minDistanceM) / distanceSpan) * width,
+    y: height - ((point.value - bounds.axisMin) / bounds.span) * height,
+  }));
+}
+
+function buildProjectedAreaPath(points: ProjectedDistanceSeriesPoint[], height = 220): string | null {
+  if (points.length < 2) return null;
+  const start = points[0];
+  const end = points[points.length - 1];
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(1)} ${point.y.toFixed(1)}`).join(" ");
+  return `${path} L ${end.x.toFixed(1)} ${height.toFixed(1)} L ${start.x.toFixed(1)} ${height.toFixed(1)} Z`;
+}
+
+function DistanceChart({
+  title,
+  subtitle,
+  color,
+  suffix,
+  digits,
+  points,
+  hoverSecond,
+  onHoverChange,
+  colorByGrade = false,
+  selectedRange = null,
+  dragSelection = null,
+  selectable = false,
+  onSelectionStart,
+  onSelectionMove,
+  onSelectionEnd,
+}: {
+  title: string;
+  subtitle?: string;
+  color: string;
+  suffix: string;
+  digits: number;
+  points: DistanceSeriesPoint[];
+  hoverSecond: number | null;
+  onHoverChange: (nextSecond: number | null) => void;
+  colorByGrade?: boolean;
+  selectedRange?: DistanceRange | null;
+  dragSelection?: DistanceSelection | null;
+  selectable?: boolean;
+  onSelectionStart?: (distanceM: number) => void;
+  onSelectionMove?: (distanceM: number) => void;
+  onSelectionEnd?: () => void;
+}) {
+  const values = points.map((point) => point.value);
+  const bounds = useMemo(() => computeAxisBounds(values), [values]);
+  const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const chartLeft = 64;
+  const chartTop = 18;
+  const chartWidth = 900;
+  const chartHeight = 220;
+  const plotLeftPercent = (chartLeft / 1000) * 100;
+  const plotWidthPercent = (chartWidth / 1000) * 100;
+  const minDistanceM = points.length ? Math.min(...points.map((point) => point.distanceM)) : 0;
+  const maxDistanceM = points.length ? Math.max(...points.map((point) => point.distanceM), 1) : 1;
+  const distanceSpan = Math.max(1, maxDistanceM - minDistanceM);
+  const projectedPoints = useMemo(() => (bounds ? projectDistanceSeries(points, bounds, chartWidth, chartHeight) : []), [bounds, points]);
+  const areaPath = useMemo(() => buildProjectedAreaPath(projectedPoints, chartHeight), [projectedPoints]);
+  const hoveredPoint = useMemo(() => {
+    if (hoverSecond == null || !points.length) return null;
+    const minElapsed = Math.min(...points.map((point) => point.elapsed));
+    const maxElapsed = Math.max(...points.map((point) => point.elapsed));
+    if (hoverSecond < minElapsed || hoverSecond > maxElapsed) return null;
+    return findNearestPointByElapsed(points, hoverSecond);
+  }, [hoverSecond, points]);
+  const hoverX = hoveredPoint ? chartLeft + ((hoveredPoint.distanceM - minDistanceM) / distanceSpan) * chartWidth : null;
+  const hoverY = hoveredPoint && bounds ? chartTop + chartHeight - ((hoveredPoint.value - bounds.axisMin) / bounds.span) * chartHeight : null;
+  const averageY = average != null && bounds ? chartTop + chartHeight - ((average - bounds.axisMin) / bounds.span) * chartHeight : null;
+  const yTicks =
+    bounds != null
+      ? Array.from({ length: 5 }, (_, index) => bounds.min + ((bounds.max - bounds.min) / 4) * index)
+      : [];
+  const xTicks = Array.from({ length: 5 }, (_, index) => minDistanceM + (distanceSpan / 4) * index);
+  const activeSelection =
+    dragSelection != null
+      ? {
+          left: Math.max(minDistanceM, Math.min(dragSelection.anchor, dragSelection.current)),
+          right: Math.min(maxDistanceM, Math.max(dragSelection.anchor, dragSelection.current)),
+        }
+      : null;
+  const committedSelection =
+    selectedRange != null
+      ? {
+          left: Math.max(minDistanceM, selectedRange.start),
+          right: Math.min(maxDistanceM, selectedRange.end),
+        }
+      : null;
+  const visibleSelection = activeSelection ?? committedSelection;
+
+  function pointerToDistance(clientX: number, element: HTMLDivElement): number {
+    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth);
+    return minDistanceM + ratio * distanceSpan;
+  }
+
+  if (!points.length || !bounds) {
+    return (
+      <div className="card">
+        <div className="section-title-row">
+          <h2>{title}</h2>
+        </div>
+        <p className="training-note">Für dieses Diagramm sind noch keine ausreichenden Streckendaten vorhanden.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="card">
+      <div className="section-title-row">
+        <h2>{title}</h2>
+        <span className="training-note">
+          Min {formatNumber(bounds.min, digits, suffix)} | Ø {formatNumber(average, digits, suffix)} | Max {formatNumber(bounds.max, digits, suffix)}
+        </span>
+      </div>
+      {subtitle ? <p className="training-note">{subtitle}</p> : null}
+      <div
+        style={{ position: "relative", touchAction: "none", cursor: "crosshair", userSelect: "none", WebkitUserSelect: "none" }}
+        onPointerDown={(event) => {
+          if (!selectable || !onSelectionStart) return;
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          onSelectionStart(pointerToDistance(event.clientX, event.currentTarget));
+        }}
+        onPointerMove={(event) => {
+          const nextDistance = pointerToDistance(event.clientX, event.currentTarget);
+          if (selectable && dragSelection && onSelectionMove) {
+            onSelectionMove(nextDistance);
+            return;
+          }
+          const nearest = findNearestPointByDistance(points, nextDistance);
+          onHoverChange(nearest?.elapsed ?? null);
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+          if (selectable && onSelectionEnd) {
+            onSelectionEnd();
+          }
+        }}
+        onPointerLeave={() => {
+          if (!(selectable && dragSelection)) {
+            onHoverChange(null);
+          }
+        }}
+      >
+        <svg viewBox="0 0 1000 300" style={{ width: "100%", height: "300px", overflow: "visible" }} aria-label={`${title} Verlauf auf Distanzbasis`}>
+          <rect x="0" y="0" width="1000" height="300" rx="18" fill="#f7fcfa" />
+          {yTicks.map((tick, index) => {
+            const y = chartTop + chartHeight - ((tick - bounds.axisMin) / bounds.span) * chartHeight;
+            return (
+              <g key={`${title}-y-distance-${index}`}>
+                <line x1={chartLeft} y1={y} x2={chartLeft + chartWidth} y2={y} stroke="#d9e8e2" strokeWidth="1" />
+                <text x={chartLeft - 10} y={y + 4} textAnchor="end" fontSize="12" fill="#5d756f">
+                  {tick.toFixed(digits)}
+                </text>
+              </g>
+            );
+          })}
+          {xTicks.map((tick, index) => {
+            const x = chartLeft + (tick / Math.max(1, maxDistanceM)) * chartWidth;
+            return (
+              <g key={`${title}-x-distance-${index}`}>
+                <line x1={x} y1={chartTop} x2={x} y2={chartTop + chartHeight} stroke="#edf4f1" strokeWidth="1" />
+                <text x={x} y={chartTop + chartHeight + 28} textAnchor="middle" fontSize="12" fill="#5d756f">
+                  {formatAxisDistance(tick)}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={chartLeft} y1={chartTop + chartHeight} x2={chartLeft + chartWidth} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+          <line x1={chartLeft} y1={chartTop} x2={chartLeft} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+          {averageY != null ? (
+            <>
+              <line x1={chartLeft} y1={averageY} x2={chartLeft + chartWidth} y2={averageY} stroke={color} strokeWidth="1.5" strokeDasharray="8 6" opacity="0.9" />
+              <text x={chartLeft + chartWidth - 6} y={averageY - 8} textAnchor="end" fontSize="12" fill="#16322e">
+                Ø {formatNumber(average, digits, suffix)}
+              </text>
+            </>
+          ) : null}
+          <g transform={`translate(${chartLeft}, ${chartTop})`}>
+            {areaPath ? <path d={areaPath} fill={color} opacity={colorByGrade ? 0.1 : 0.16} /> : null}
+            {colorByGrade
+              ? projectedPoints.slice(0, -1).map((point, index) => {
+                  const next = projectedPoints[index + 1];
+                  const segmentGrade = ((point.gradePct ?? 0) + (next.gradePct ?? 0)) / 2;
+                  return (
+                    <line
+                      key={`${title}-segment-${index}`}
+                      x1={point.x}
+                      y1={point.y}
+                      x2={next.x}
+                      y2={next.y}
+                      stroke={gradeColor(segmentGrade)}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                    />
+                  );
+                })
+              : (
+                <polyline
+                  fill="none"
+                  stroke={color}
+                  strokeOpacity="0.82"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  points={projectedPoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ")}
+                />
+              )}
+          </g>
+          {hoverX != null ? <line x1={hoverX} y1={chartTop} x2={hoverX} y2={chartTop + chartHeight} stroke="#2c3e39" strokeWidth="1.2" /> : null}
+          {hoverX != null && hoverY != null ? <circle cx={hoverX} cy={hoverY} r="4.5" fill="#ffffff" stroke={color} strokeWidth="2" /> : null}
+          <text x={chartLeft + chartWidth / 2} y={chartTop + chartHeight + 56} textAnchor="middle" fontSize="13" fill="#3f5d57">
+            Distanzachse
+          </text>
+        </svg>
+        {hoveredPoint ? (
+          <div
+            style={{
+              position: "absolute",
+              left: `${(hoverX! / 1000) * 100}%`,
+              top: "14px",
+              transform: "translateX(-50%)",
+              background: "#ffffff",
+              border: "1px solid rgba(22, 50, 46, 0.14)",
+              borderRadius: "0.55rem",
+              boxShadow: "0 10px 24px rgba(12, 38, 33, 0.14)",
+              padding: "0.35rem 0.5rem",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+              fontSize: "0.82rem",
+              color: "#16322e",
+            }}
+          >
+            {formatAxisDistance(hoveredPoint.distanceM)} | {formatNumber(hoveredPoint.value, digits, suffix)}
+          </div>
+        ) : null}
+        {visibleSelection && visibleSelection.right - visibleSelection.left >= 10 ? (
+          <div
+            style={{
+              position: "absolute",
+              top: "18px",
+              bottom: "62px",
+              left: `${plotLeftPercent + ((visibleSelection.left - minDistanceM) / distanceSpan) * plotWidthPercent}%`,
+              width: `${((visibleSelection.right - visibleSelection.left) / distanceSpan) * plotWidthPercent}%`,
+              background: "rgba(31, 139, 111, 0.12)",
+              border: "1px solid rgba(31, 139, 111, 0.45)",
+              borderRadius: "0.6rem",
+              pointerEvents: "none",
+            }}
+          />
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function ActivityTrackMap({
+  routePoints,
+  hoverSecond,
+  onHoverChange,
+  mapMetricKey,
+  onMetricChange,
+  distanceRange,
+  dragSelection,
+  onDistanceSelectionStart,
+  onDistanceSelectionMove,
+  onDistanceSelectionEnd,
+  onDistanceSelectionReset,
+}: {
+  routePoints: RoutePoint[];
+  hoverSecond: number | null;
+  onHoverChange: (nextSecond: number | null) => void;
+  mapMetricKey: MapMetricKey;
+  onMetricChange: (nextKey: MapMetricKey) => void;
+  distanceRange: DistanceRange | null;
+  dragSelection: DistanceSelection | null;
+  onDistanceSelectionStart: (distanceM: number) => void;
+  onDistanceSelectionMove: (distanceM: number) => void;
+  onDistanceSelectionEnd: () => void;
+  onDistanceSelectionReset: () => void;
+}) {
+  const trackPoints = useMemo(() => extractTrackPoints(routePoints), [routePoints]);
+  const bounds = useMemo<LatLngBoundsExpression>(() => trackPoints, [trackPoints]);
+  const startPoint = trackPoints[0] ?? null;
+  const endPoint = trackPoints[trackPoints.length - 1] ?? null;
+  const activeRoutePoint = useMemo(() => findNearestPointByElapsed(routePoints, hoverSecond), [hoverSecond, routePoints]);
+  const activeMapPoint =
+    activeRoutePoint && activeRoutePoint.latitudeDeg != null && activeRoutePoint.longitudeDeg != null
+      ? ([activeRoutePoint.latitudeDeg, activeRoutePoint.longitudeDeg] as LatLngTuple)
+      : null;
+  const selectedMetric = MAP_METRIC_OPTIONS.find((option) => option.key === mapMetricKey) ?? MAP_METRIC_OPTIONS[0];
+  const elevationPoints = useMemo(() => buildDistanceSeries(routePoints, (point) => point.altitudeM), [routePoints]);
+  const selectedMetricRoutePoints = useMemo(() => filterPointsByDistanceRange(routePoints, distanceRange), [distanceRange, routePoints]);
+  const metricPoints = useMemo(() => buildDistanceSeries(selectedMetricRoutePoints, selectedMetric.pick), [selectedMetricRoutePoints, selectedMetric]);
+  const previewRange =
+    dragSelection != null
+      ? {
+          start: Math.min(dragSelection.anchor, dragSelection.current),
+          end: Math.max(dragSelection.anchor, dragSelection.current),
+        }
+      : distanceRange;
+  const selectedTrackPoints = useMemo(() => {
+    if (!previewRange) return [];
+    return extractTrackPoints(
+      routePoints.filter(
+        (point) =>
+          point.distanceM >= previewRange.start &&
+          point.distanceM <= previewRange.end &&
+          point.latitudeDeg != null &&
+          point.longitudeDeg != null,
+      ),
+    );
+  }, [previewRange, routePoints]);
+  const distanceRangeLabel =
+    distanceRange != null ? `${formatAxisDistance(distanceRange.start)} bis ${formatAxisDistance(distanceRange.end)}` : "kein Ausschnitt gesetzt";
+
+  if (trackPoints.length < 2) {
+    return (
+      <div className="card">
+        <div className="section-title-row">
+          <h2>Karte</h2>
+          <span className="training-note">Noch keine GPS-Punkte für diese Aktivität vorhanden</span>
+        </div>
+        <p className="training-note">
+          Für die OpenStreetMap-Einbettung brauchen wir Positionsdaten in den Records. Sobald Latitude und Longitude aus dem FIT oder vom Provider vorliegen, wird hier automatisch die Strecke angezeigt.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <div className="card">
+        <div className="section-title-row">
+          <h2>Karte</h2>
+          <span className="training-note">OpenStreetMap | {trackPoints.length} GPS-Punkte</span>
+        </div>
+        <div className="activity-map-shell">
+          <MapContainer className="activity-leaflet-map" center={trackPoints[0]} zoom={13} scrollWheelZoom>
+            <TileLayer attribution={MAP_TILE_ATTRIBUTION} url={MAP_TILE_URL} maxZoom={MAP_MAX_ZOOM} />
+            <Polyline positions={trackPoints} pathOptions={{ color: "#1f8b6f", weight: 5, opacity: 0.92 }} />
+            {selectedTrackPoints.length >= 2 ? <Polyline positions={selectedTrackPoints} pathOptions={{ color: "#ef8d33", weight: 7, opacity: 0.88 }} /> : null}
+            {startPoint ? <CircleMarker center={startPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1f8b6f", fillOpacity: 1 }} /> : null}
+            {endPoint ? <CircleMarker center={endPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#ef8d33", fillOpacity: 1 }} /> : null}
+            {activeMapPoint ? <CircleMarker center={activeMapPoint} radius={8} pathOptions={{ color: "#16322e", weight: 2, fillColor: "#ffffff", fillOpacity: 0.98 }} /> : null}
+            <ActivityMapViewport bounds={bounds} />
+            <ActivityMapHoverSync points={routePoints} onHoverChange={onHoverChange} />
+          </MapContainer>
+        </div>
+        <div className="activity-map-meta-row">
+          <span className="activity-map-badge">Start</span>
+          <span className="activity-map-badge activity-map-badge-finish">Ziel</span>
+          <span className="activity-map-note">Aktuell werden die Tiles direkt von OpenStreetMap geladen. Bei größerer Nutzung kannst du die Quelle per `.env` umstellen.</span>
+        </div>
+        <div className="training-mini-grid activity-map-point-grid">
+          <div className="training-mini-card">
+            <span>Trackpunkt</span>
+            <strong>{activeRoutePoint ? formatAxisDistance(activeRoutePoint.distanceM) : "-"}</strong>
+          </div>
+          <div className="training-mini-card">
+            <span>Höhe</span>
+            <strong>{activeRoutePoint ? formatNumber(activeRoutePoint.altitudeM, 0, " m") : "-"}</strong>
+          </div>
+          <div className="training-mini-card">
+            <span>Steigung</span>
+            <strong>{activeRoutePoint ? formatNumber(activeRoutePoint.gradePct, 1, " %") : "-"}</strong>
+          </div>
+          <div className="training-mini-card">
+            <span>{selectedMetric.label}</span>
+            <strong>{activeRoutePoint ? formatNumber(selectedMetric.pick(activeRoutePoint), selectedMetric.digits, selectedMetric.suffix) : "-"}</strong>
+          </div>
+        </div>
+      </div>
+
+      <DistanceChart
+        title="Höhenprofil"
+        subtitle="Strecke in der Höhe, farblich nach lokaler Steigung eingefärbt. Ziehe hier einen Ausschnitt auf, dann wird die Strecke auf der Karte markiert."
+        color="#8db4e8"
+        suffix=" m"
+        digits={0}
+        points={elevationPoints}
+        hoverSecond={hoverSecond}
+        onHoverChange={onHoverChange}
+        colorByGrade
+        selectedRange={distanceRange}
+        dragSelection={dragSelection}
+        selectable
+        onSelectionStart={onDistanceSelectionStart}
+        onSelectionMove={onDistanceSelectionMove}
+        onSelectionEnd={onDistanceSelectionEnd}
+      />
+
+      <div className="card">
+        <div className="section-title-row">
+          <h2>Streckendiagramm</h2>
+          <div className="settings-actions">
+            <select className="settings-input" value={mapMetricKey} onChange={(event) => onMetricChange(event.target.value as MapMetricKey)}>
+              {MAP_METRIC_OPTIONS.map((option) => (
+                <option key={option.key} value={option.key}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button className="secondary-button" type="button" onClick={onDistanceSelectionReset} disabled={distanceRange == null}>
+              Ausschnitt zurücksetzen
+            </button>
+          </div>
+        </div>
+        <p className="training-note">Wähle aus, welche Größe direkt unter der Karte entlang der Strecke dargestellt werden soll. Hover auf Karte oder Diagramm synchronisiert den Trackpunkt. Aktueller Ausschnitt: {distanceRangeLabel}.</p>
+      </div>
+
+      <DistanceChart
+        title={`${selectedMetric.label} entlang der Strecke`}
+        color={selectedMetric.color}
+        suffix={selectedMetric.suffix}
+        digits={selectedMetric.digits}
+        points={metricPoints}
+        hoverSecond={hoverSecond}
+        onHoverChange={onHoverChange}
+      />
+
+      <div className="training-info-stack">
+        <div className="training-info-point">Die Karte läuft jetzt mit `Leaflet` und OpenStreetMap ganz ohne zusätzlichen API-Key.</div>
+        <div className="training-info-point">Wenn du später einen anderen Tile-Provider einsetzen willst, kannst du in der `.env` `VITE_MAP_TILE_URL`, `VITE_MAP_TILE_ATTRIBUTION` und optional `VITE_MAP_MAX_ZOOM` setzen.</div>
+        <div className="training-info-point">Für öffentliche oder stark genutzte Installationen würde ich langfristig eher einen eigenen Tile-Provider wie MapTiler oder Stadia eintragen, statt dauerhaft den freien Standard-Tile-Server zu belasten.</div>
+      </div>
+    </div>
+  );
+}
+
 function MiniChart({
   chartKey,
   title,
@@ -445,6 +1136,7 @@ function MiniChart({
   records,
   pick,
   suffix,
+  digits,
   smoothingMode,
   viewStart,
   viewEnd,
@@ -461,6 +1153,7 @@ function MiniChart({
   records: ChartRecord[];
   pick: (row: ActivityRecordRow) => number | null;
   suffix: string;
+  digits: number;
   smoothingMode: SmoothingMode;
   viewStart: number;
   viewEnd: number;
@@ -487,28 +1180,28 @@ function MiniChart({
   const points = useMemo(() => buildPolyline(chartPoints), [chartPoints]);
   const areaPath = useMemo(() => buildAreaPath(chartPoints), [chartPoints]);
   const values = chartPoints.map((point) => point.value);
-  const min = values.length ? Math.min(...values) : null;
-  const max = values.length ? Math.max(...values) : null;
+  const bounds = useMemo(() => computeAxisBounds(values), [values]);
+  const min = bounds?.min ?? null;
+  const max = bounds?.max ?? null;
+  const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   const innerWidth = 900;
   const innerHeight = 220;
   const chartLeft = 64;
   const chartTop = 18;
   const chartWidth = innerWidth;
   const chartHeight = innerHeight;
+  const plotLeftPercent = (chartLeft / 1000) * 100;
+  const plotWidthPercent = (chartWidth / 1000) * 100;
   const visibleStart = sourceStart;
   const visibleEnd = sourceEnd;
   const totalDuration = Math.max(visibleEnd - visibleStart, 0);
   const gridSteps = 4;
   const yTicks =
-    min != null && max != null
-      ? Array.from({ length: gridSteps + 1 }, (_, index) => min + ((max - min) / gridSteps) * index)
+    bounds != null
+      ? Array.from({ length: gridSteps + 1 }, (_, index) => bounds.min + ((bounds.max - bounds.min) / gridSteps) * index)
       : [];
-  const minValue = min ?? 0;
-  const maxValue = max ?? 1;
-  const rawSpan = maxValue - minValue;
-  const axisMin = rawSpan === 0 ? minValue - Math.max(1, Math.abs(minValue) * 0.1) : minValue - rawSpan * 0.08;
-  const axisMax = rawSpan === 0 ? maxValue + Math.max(1, Math.abs(maxValue) * 0.1) : maxValue + rawSpan * 0.08;
-  const valueSpan = Math.max(1, axisMax - axisMin);
+  const axisMin = bounds?.axisMin ?? 0;
+  const valueSpan = bounds?.span ?? 1;
   const timestampTicks = Array.from({ length: 5 }, (_, index) => {
     const target = (totalDuration / 4) * index;
     return { seconds: target, absoluteSeconds: visibleStart + target };
@@ -537,19 +1230,22 @@ function MiniChart({
     hoveredPoint == null
       ? null
       : chartTop + chartHeight - ((hoveredPoint.value - axisMin) / valueSpan) * chartHeight;
+  const averageY =
+    average == null
+      ? null
+      : chartTop + chartHeight - ((average - axisMin) / valueSpan) * chartHeight;
 
   function pointerToSecond(clientX: number, element: HTMLDivElement): number {
-    const rect = element.getBoundingClientRect();
-    const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth);
     return sourceStart + ratio * Math.max(1, sourceEnd - sourceStart);
   }
 
   return (
     <div className="card">
-          <div className="section-title-row">
+      <div className="section-title-row">
         <h2>{title}</h2>
         <span className="training-note">
-          Min {formatNumber(min, 0, suffix)} | Max {formatNumber(max, 0, suffix)}
+          Min {formatNumber(min, digits, suffix)} | Ø {formatNumber(average, digits, suffix)} | Max {formatNumber(max, digits, suffix)}
         </span>
       </div>
       {points ? (
@@ -588,7 +1284,7 @@ function MiniChart({
                 <g key={`${title}-y-${index}`}>
                   <line x1={chartLeft} y1={y} x2={chartLeft + chartWidth} y2={y} stroke="#d9e8e2" strokeWidth="1" />
                   <text x={chartLeft - 10} y={y + 4} textAnchor="end" fontSize="12" fill="#5d756f">
-                    {tick.toFixed(maxValue - minValue < 10 ? 1 : 0)}
+                    {tick.toFixed(digits)}
                   </text>
                 </g>
               );
@@ -606,6 +1302,14 @@ function MiniChart({
             })}
             <line x1={chartLeft} y1={chartTop + chartHeight} x2={chartLeft + chartWidth} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
             <line x1={chartLeft} y1={chartTop} x2={chartLeft} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+            {averageY != null ? (
+              <>
+                <line x1={chartLeft} y1={averageY} x2={chartLeft + chartWidth} y2={averageY} stroke={color} strokeWidth="1.5" strokeDasharray="8 6" opacity="0.9" />
+                <text x={chartLeft + chartWidth - 6} y={averageY - 8} textAnchor="end" fontSize="12" fill="#16322e">
+                  Ø {formatNumber(average, digits, suffix)}
+                </text>
+              </>
+            ) : null}
             <g transform={`translate(${chartLeft}, ${chartTop})`}>
               {areaPath ? <path d={areaPath} fill={color} opacity="0.72" /> : null}
               <polyline fill="none" stroke={color} strokeOpacity="0.72" strokeWidth="1.8" strokeLinejoin="round" strokeLinecap="round" points={points} />
@@ -634,7 +1338,7 @@ function MiniChart({
                 color: "#16322e",
               }}
             >
-              {formatAxisTime(visibleStart + hoveredPoint.elapsed)} | {formatNumber(hoveredPoint.value, 0, suffix)}
+              {formatAxisTime(visibleStart + hoveredPoint.elapsed)} | {formatNumber(hoveredPoint.value, digits, suffix)}
             </div>
           ) : null}
           {activeSelection ? (
@@ -643,8 +1347,8 @@ function MiniChart({
                 position: "absolute",
                 top: "18px",
                 bottom: "62px",
-                left: `${((activeSelection.left - sourceStart) / Math.max(1, sourceEnd - sourceStart)) * 100}%`,
-                width: `${((activeSelection.right - activeSelection.left) / Math.max(1, visibleEnd - visibleStart)) * 100}%`,
+                left: `${plotLeftPercent + ((activeSelection.left - sourceStart) / Math.max(1, sourceEnd - sourceStart)) * plotWidthPercent}%`,
+                width: `${((activeSelection.right - activeSelection.left) / Math.max(1, visibleEnd - visibleStart)) * plotWidthPercent}%`,
                 background: "rgba(31, 139, 111, 0.14)",
                 border: "1px solid rgba(31, 139, 111, 0.45)",
                 borderRadius: "0.6rem",
@@ -669,6 +1373,9 @@ export function ActivityDetailPage() {
   const [viewRange, setViewRange] = useState<{ start: number; end: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<ZoomSelection | null>(null);
   const [smoothingMode, setSmoothingMode] = useState<SmoothingMode>("raw");
+  const [mapMetricKey, setMapMetricKey] = useState<MapMetricKey>("power");
+  const [mapDistanceRange, setMapDistanceRange] = useState<DistanceRange | null>(null);
+  const [mapDragSelection, setMapDragSelection] = useState<DistanceSelection | null>(null);
   const [hoverSecond, setHoverSecond] = useState<number | null>(null);
   const [activeAchievementCategory, setActiveAchievementCategory] = useState<string>("all");
   const [llmAnalysis, setLlmAnalysis] = useState<ActivityLlmResponse | null>(null);
@@ -699,6 +1406,7 @@ export function ActivityDetailPage() {
   }, [activityId]);
 
   const normalizedRecords = useMemo(() => normalizeRecordTimeline(data?.records ?? []), [data?.records]);
+  const routePoints = useMemo(() => buildRoutePoints(normalizedRecords), [normalizedRecords]);
   const totalDuration = normalizedRecords.length ? normalizedRecords[normalizedRecords.length - 1].chart_elapsed_s : 0;
   const viewStart = viewRange?.start ?? 0;
   const viewEnd = viewRange?.end ?? totalDuration;
@@ -717,77 +1425,116 @@ export function ActivityDetailPage() {
         {
           title: "Stammdaten",
           note: "Kontext und Rahmendaten",
-          items: [
-            { label: "Quelle", value: data.activity.provider || "-" },
-            { label: "Sport", value: data.activity.sport || "-" },
-            { label: "Umgebung", value: data.activity.environment_label || "-" },
-            { label: "Start", value: formatDateTime(data.activity.started_at) },
-            { label: "Dauer", value: data.activity.duration_label || "-" },
-            { label: "Distanz", value: formatDistanceMeters(data.activity.distance_m) },
+          cards: [
+            {
+              primary: { label: "Quelle", value: data.activity.provider || "-" },
+              secondary: { label: "Sport", value: data.activity.sport || "-" },
+            },
+            {
+              primary: { label: "Umgebung", value: data.activity.environment_label || "-" },
+              secondary: { label: "Start", value: formatDateTime(data.activity.started_at) },
+            },
+            {
+              primary: { label: "Dauer", value: data.activity.duration_label || "-" },
+              secondary: { label: "Distanz", value: formatDistanceMeters(data.activity.distance_m) },
+            },
+            {
+              primary: { label: "Runden", value: String(data.activity.laps_count) },
+              secondary: { label: "Records", value: String(data.activity.records_count) },
+            },
           ],
         },
         {
           title: "Leistung & Tempo",
           note: "Watt, Geschwindigkeit und Referenzen",
-          items: [
-            { label: "Ø Watt", value: formatNumber(data.activity.avg_power_w, 0, " W") },
+          cards: [
             {
-              label: "NP",
-              value: formatNumber(data.activity.normalized_power_w, 0, " W"),
-              help: "Normalized Power schätzt die physiologische Belastung der Fahrt und gewichtet Leistungsspitzen stärker als den einfachen Durchschnitt.",
+              primary: { label: "Ø Watt", value: formatNumber(data.activity.avg_power_w, 0, " W") },
+              secondary: { label: "Max Watt", value: formatNumber(data.activity.max_power_w, 0, " W") },
             },
             {
-              label: "FTP Referenz",
-              value: formatNumber(data.activity.ftp_reference_w, 0, " W"),
-              help: "Die FTP Referenz ist der zum Aktivitätszeitpunkt gültige Schwellenwert und dient als Basis für IF, TSS und Leistungszonen.",
+              primary: {
+                label: "FTP Referenz",
+                value: formatNumber(data.activity.ftp_reference_w, 0, " W"),
+                help: "Die FTP Referenz ist der zum Aktivitätszeitpunkt gültige Schwellenwert und dient als Basis für IF, TSS und Leistungszonen.",
+              },
+              secondary: {
+                label: "NP",
+                value: formatNumber(data.activity.normalized_power_w, 0, " W"),
+                help: "Normalized Power schätzt die physiologische Belastung der Fahrt und gewichtet Leistungsspitzen stärker als den einfachen Durchschnitt.",
+              },
             },
-            { label: "Max Watt", value: formatNumber(data.activity.max_power_w, 0, " W") },
-            { label: "Ø km/h", value: formatNumber(data.activity.avg_speed_kmh, 1, " km/h") },
-            { label: "Max km/h", value: formatNumber(data.activity.max_speed_kmh, 1, " km/h") },
-            { label: "Max Kadenz", value: formatNumber(data.activity.max_cadence_rpm, 0, " rpm") },
+            {
+              primary: { label: "Ø km/h", value: formatNumber(data.activity.avg_speed_kmh, 1, " km/h") },
+              secondary: { label: "Max km/h", value: formatNumber(data.activity.max_speed_kmh, 1, " km/h") },
+            },
+            {
+              primary: { label: "Ø Kadenz", value: formatNumber(data.activity.avg_cadence_rpm, 0, " rpm") },
+              secondary: { label: "Max Kadenz", value: formatNumber(data.activity.max_cadence_rpm, 0, " rpm") },
+            },
+            {
+              primary: { label: "Zeit in Bewegung", value: data.activity.moving_time_label ?? formatSeconds(data.activity.moving_time_s) },
+              secondary: { label: "Zeit in Pausen", value: data.activity.paused_time_label ?? formatSeconds(data.activity.paused_time_s) },
+            },
           ],
         },
         {
           title: "Belastung & Energie",
           note: "Trainingsstress und energetische Einordnung",
-          items: [
+          cards: [
             {
-              label: "IF",
-              value: formatNumber(data.activity.intensity_factor, 2),
-              help: "Intensity Factor setzt die Normalized Power ins Verhältnis zur FTP. Ein Wert von 1.00 entspricht ungefähr einer Stunde an FTP-Niveau.",
+              primary: {
+                label: "IF",
+                value: formatNumber(data.activity.intensity_factor, 2),
+                help: "Intensity Factor setzt die Normalized Power ins Verhältnis zur FTP. Ein Wert von 1.00 entspricht ungefähr einer Stunde an FTP-Niveau.",
+              },
             },
             {
-              label: "VI",
-              value: formatNumber(data.activity.variability_index, 2),
-              help: "Variability Index ist NP geteilt durch Ø Watt. Werte nahe 1.00 sprechen für eine sehr gleichmäßige Leistung.",
+              primary: {
+                label: "VI",
+                value: formatNumber(data.activity.variability_index, 2),
+                help: "Variability Index ist NP geteilt durch Ø Watt. Werte nahe 1.00 sprechen für eine sehr gleichmäßige Leistung.",
+              },
             },
             {
-              label: "TSS",
-              value: formatNumber(data.activity.training_stress_score, 1),
-              help: "Training Stress Score kombiniert Dauer und Intensität zu einem Belastungswert. Rund 100 TSS entsprechen grob einer Stunde bei FTP.",
+              primary: {
+                label: "TSS",
+                value: formatNumber(data.activity.training_stress_score, 1),
+                help: "Training Stress Score kombiniert Dauer und Intensität zu einem Belastungswert. Rund 100 TSS entsprechen grob einer Stunde bei FTP.",
+              },
             },
             {
-              label: "Stress",
-              value: formatNumber(data.activity.stress_score, 1),
-              help: "Das ist der verfügbare Belastungswert für diese Aktivität. Wenn kein externer Stresswert vorliegt, verwenden wir den berechneten TSS.",
+              primary: {
+                label: "Stress",
+                value: formatNumber(data.activity.stress_score, 1),
+                help: "Das ist der verfügbare Belastungswert für diese Aktivität. Wenn kein externer Stresswert vorliegt, verwenden wir den berechneten TSS.",
+              },
             },
             {
-              label: "Kalorien",
-              value: formatNumber(data.activity.calories_kcal, 0, " kcal"),
-              help: "Kalorien stammen wenn möglich direkt aus Garmin oder dem Provider. Falls sie fehlen, werden sie aus der mechanischen Arbeit geschätzt.",
+              primary: {
+                label: "Kalorien",
+                value: formatNumber(data.activity.calories_kcal, 0, " kcal"),
+                help: "Kalorien stammen wenn möglich direkt aus Garmin oder dem Provider. Falls sie fehlen, werden sie aus der mechanischen Arbeit geschätzt.",
+              },
             },
           ],
         },
         {
           title: "Herzfrequenz & Daten",
           note: "HF, Höhe und Datenqualität",
-          items: [
-            { label: "Ø HF", value: formatNumber(data.activity.avg_hr_bpm, 0, " bpm") },
-            { label: "Max HF", value: formatNumber(data.activity.max_hr_bpm, 0, " bpm") },
-            { label: "Höhe min", value: formatNumber(data.activity.min_altitude_m, 0, " m") },
-            { label: "Höhe max", value: formatNumber(data.activity.max_altitude_m, 0, " m") },
-            { label: "Runden", value: String(data.activity.laps_count) },
-            { label: "Records", value: String(data.activity.records_count) },
+          cards: [
+            {
+              primary: { label: "Ø HF", value: formatNumber(data.activity.avg_hr_bpm, 0, " bpm") },
+              secondary: { label: "Max HF", value: formatNumber(data.activity.max_hr_bpm, 0, " bpm") },
+            },
+            {
+              primary: { label: "Höhe min", value: formatNumber(data.activity.min_altitude_m, 0, " m") },
+              secondary: { label: "Höhe max", value: formatNumber(data.activity.max_altitude_m, 0, " m") },
+            },
+            {
+              primary: { label: "Anstieg gesamt", value: formatNumber(data.activity.total_ascent_m, 0, " m") },
+              secondary: { label: "Längster Anstieg", value: formatNumber(data.activity.longest_climb_m, 0, " m") },
+            },
           ],
         },
       ]
@@ -796,6 +1543,8 @@ export function ActivityDetailPage() {
   useEffect(() => {
     setViewRange(null);
     setDragSelection(null);
+    setMapDistanceRange(null);
+    setMapDragSelection(null);
     setHoverSecond(null);
   }, [activityId, totalDuration]);
 
@@ -863,12 +1612,35 @@ export function ActivityDetailPage() {
     setDragSelection(null);
   }
 
-  async function runLlmAnalysis() {
+  function handleMapSelectionStart(distanceM: number) {
+    setMapDragSelection({ anchor: distanceM, current: distanceM });
+  }
+
+  function handleMapSelectionMove(distanceM: number) {
+    setMapDragSelection((current) => (current ? { ...current, current: distanceM } : current));
+  }
+
+  function handleMapSelectionEnd() {
+    if (!mapDragSelection) return;
+    const start = Math.min(mapDragSelection.anchor, mapDragSelection.current);
+    const end = Math.max(mapDragSelection.anchor, mapDragSelection.current);
+    setMapDragSelection(null);
+    if (end - start < 50) return;
+    setMapDistanceRange({ start, end });
+  }
+
+  function resetMapSelection() {
+    setMapDistanceRange(null);
+    setMapDragSelection(null);
+  }
+
+  async function runLlmAnalysis(forceRefresh = false) {
     if (!activityId) return;
     setLlmLoading(true);
     setLlmError(null);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/activities/${activityId}/llm-analysis`, {
+      const query = forceRefresh ? "?force_refresh=true" : "";
+      const response = await apiFetch(`${API_BASE_URL}/activities/${activityId}/llm-analysis${query}`, {
         method: "POST",
       });
       const payload = await parseJsonSafely<ActivityLlmResponse | { detail?: string }>(response);
@@ -947,6 +1719,22 @@ export function ActivityDetailPage() {
               </div>
             ) : null}
 
+            {activeTab === "map" ? (
+              <ActivityTrackMap
+                routePoints={routePoints}
+                hoverSecond={hoverSecond}
+                onHoverChange={setHoverSecond}
+                mapMetricKey={mapMetricKey}
+                onMetricChange={setMapMetricKey}
+                distanceRange={mapDistanceRange}
+                dragSelection={mapDragSelection}
+                onDistanceSelectionStart={handleMapSelectionStart}
+                onDistanceSelectionMove={handleMapSelectionMove}
+                onDistanceSelectionEnd={handleMapSelectionEnd}
+                onDistanceSelectionReset={resetMapSelection}
+              />
+            ) : null}
+
             {activeTab === "charts" ? (
               <div style={{ display: "grid", gap: "1rem" }}>
                 <div className="card">
@@ -970,11 +1758,11 @@ export function ActivityDetailPage() {
                     Ansicht: {formatAxisTime(viewStart)} bis {formatAxisTime(viewEnd)}. Ziehe in einem Diagramm einen Bereich auf, dann zoomen alle Grafiken auf diesen Ausschnitt.
                   </p>
                 </div>
-                <MiniChart chartKey="hr" title="Herzfrequenz" color="#ff2950" records={normalizedRecords} pick={(row) => row.heart_rate_bpm} suffix=" bpm" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="power" title="Watt" color="#6cc63f" records={normalizedRecords} pick={(row) => row.power_w} suffix=" W" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="cadence" title="Trittfrequenz" color="#f39a1f" records={normalizedRecords} pick={(row) => row.cadence_rpm} suffix=" rpm" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="speed" title="Geschwindigkeit" color="#5ab1f3" records={normalizedRecords} pick={(row) => row.speed_kmh} suffix=" km/h" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="altitude" title="Höhe" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="hr" title="Herzfrequenz" color="#ff2950" records={normalizedRecords} pick={(row) => row.heart_rate_bpm} suffix=" bpm" digits={0} smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="power" title="Watt" color="#6cc63f" records={normalizedRecords} pick={(row) => row.power_w} suffix=" W" digits={0} smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="cadence" title="Trittfrequenz" color="#f39a1f" records={normalizedRecords} pick={(row) => row.cadence_rpm} suffix=" rpm" digits={0} smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="speed" title="Geschwindigkeit" color="#5ab1f3" records={normalizedRecords} pick={(row) => row.speed_kmh} suffix=" km/h" digits={1} smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="altitude" title="Höhe" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" digits={0} smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
               </div>
             ) : null}
 
@@ -1091,6 +1879,11 @@ export function ActivityDetailPage() {
                       <button className={llmButtonClassName} type="button" onClick={() => void runLlmAnalysis()} disabled={llmLoading}>
                         {llmButtonLabel}
                       </button>
+                      {llmStatus?.available || llmAnalysis ? (
+                        <button className="secondary-button" type="button" onClick={() => void runLlmAnalysis(true)} disabled={llmLoading}>
+                          Analyse neu machen
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   <p className="training-note">

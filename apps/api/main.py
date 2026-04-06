@@ -30,6 +30,14 @@ from apps.api.activity_service import (
 )
 from apps.api.admin_service import delete_user_as_admin, invite_user_as_admin, list_users
 from apps.api.auth_service import get_current_user_from_token, login_user, logout_user, set_password_from_invite
+from apps.api.climb_compare_service import (
+    DEFAULT_CHECK_RIDES_LIMIT,
+    create_climb_compare,
+    delete_climb_compare,
+    get_climb_compare_brief,
+    list_climb_compares,
+    trigger_climb_compare_check,
+)
 from apps.api.garmin_service import (
     ingest_recent_garmin_rides,
     get_imported_garmin_summary,
@@ -101,6 +109,8 @@ _recheck_jobs_lock = threading.Lock()
 _recheck_jobs: dict[int, dict[str, object]] = {}
 _recheck_job_conditions: dict[int, threading.Condition] = {}
 _recheck_job_queues: dict[int, deque[dict[str, object]]] = {}
+_climb_compare_jobs_lock = threading.Lock()
+_climb_compare_jobs: dict[tuple[int, int], dict[str, object]] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -211,6 +221,99 @@ def _store_recheck_job(user_id: int, updates: dict[str, object]) -> dict[str, ob
     return snapshot
 
 
+def _climb_compare_job_key(user_id: int, compare_id: int) -> tuple[int, int]:
+    return (int(user_id), int(compare_id))
+
+
+def _compute_climb_compare_progress(job: dict[str, object]) -> int:
+    if str(job.get("status") or "") == "completed":
+        return 100
+    checked_current = int(job.get("checked_current") or 0)
+    checked_total = int(job.get("checked_total") or 0)
+    if checked_total <= 0:
+        return 0
+    progress = (checked_current / checked_total) * 100.0
+    return max(0, min(100, int(round(progress))))
+
+
+def _snapshot_climb_compare_job(user_id: int, compare_id: int) -> dict[str, object]:
+    with _climb_compare_jobs_lock:
+        job = dict(_climb_compare_jobs.get(_climb_compare_job_key(user_id, compare_id)) or {})
+    if not job:
+        return {
+            "status": "idle",
+            "compare_id": compare_id,
+            "compare_name": None,
+            "checked_current": 0,
+            "checked_total": 0,
+            "current_activity_name": None,
+            "progress_percent": 0,
+            "version": 0,
+            "result": None,
+            "error": None,
+        }
+    job["progress_percent"] = _compute_climb_compare_progress(job)
+    return job
+
+
+def _store_climb_compare_job(user_id: int, compare_id: int, updates: dict[str, object]) -> dict[str, object]:
+    job_key = _climb_compare_job_key(user_id, compare_id)
+    with _climb_compare_jobs_lock:
+        current = dict(_climb_compare_jobs.get(job_key) or {})
+        current.update(updates)
+        current["version"] = int(current.get("version") or 0) + 1
+        current["progress_percent"] = _compute_climb_compare_progress(current)
+        _climb_compare_jobs[job_key] = current
+        return dict(current)
+
+
+def _run_climb_compare_job(user_id: int, compare_id: int) -> None:
+    try:
+        result = trigger_climb_compare_check(
+            user_id=user_id,
+            compare_id=compare_id,
+            limit=DEFAULT_CHECK_RIDES_LIMIT,
+            progress_callback=lambda current, total, activity_name: _store_climb_compare_job(
+                user_id,
+                compare_id,
+                {
+                    "status": "running",
+                    "checked_current": current,
+                    "checked_total": total,
+                    "current_activity_name": activity_name,
+                    "updated_at": _job_timestamp(),
+                },
+            ),
+        )
+        _store_climb_compare_job(
+            user_id,
+            compare_id,
+            {
+                "status": "completed",
+                "checked_current": int(result.get("checked_total") or 0),
+                "checked_total": int(result.get("checked_total") or 0),
+                "current_activity_name": None,
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "result": result,
+                "error": None,
+                "message": result.get("message"),
+            },
+        )
+    except Exception as exc:
+        _store_climb_compare_job(
+            user_id,
+            compare_id,
+            {
+                "status": "error",
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "error": str(exc),
+                "current_activity_name": None,
+            },
+        )
+
+
 def _run_recheck_job(user_id: int, rebuild_max_hr: bool, rebuild_achievements: bool) -> None:
     try:
         result: dict[str, object] = {"status": "ok"}
@@ -311,9 +414,25 @@ class UserProfileUpdateRequest(BaseModel):
     start_weight_kg: float | None = None
     goal_start_date: str | None = None
     goal_end_date: str | None = None
+    weekly_target_hours: float | None = None
+    weekly_target_stress: float | None = None
     nav_group_order: list[str] | None = None
     training_config: dict | None = None
     training_plan: dict | None = None
+
+
+class GeoPointRequest(BaseModel):
+    latitude_deg: float
+    longitude_deg: float
+
+
+class ClimbCompareCreateRequest(BaseModel):
+    name: str | None = None
+    notes: str | None = None
+    search_tolerance_m: float | None = Field(default=50.0, ge=15.0, le=500.0)
+    start_point: GeoPointRequest
+    via_point: GeoPointRequest
+    end_point: GeoPointRequest
 
 
 class WeightLogCreateRequest(BaseModel):
@@ -1293,6 +1412,89 @@ def activities_list(
         raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
 
 
+@app.get("/activities/climb-compare")
+def activities_climb_compare_list(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return list_climb_compares(user_id=int(current_user["id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare")
+def activities_climb_compare_create(payload: ClimbCompareCreateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return create_climb_compare(user_id=int(current_user["id"]), payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare/{compare_id}/check-rides")
+def activities_climb_compare_check(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        user_id = int(current_user["id"])
+        current_job = _snapshot_climb_compare_job(user_id, compare_id)
+        if str(current_job.get("status") or "") == "running":
+            return current_job
+
+        compare = get_climb_compare_brief(user_id=user_id, compare_id=compare_id)
+        _store_climb_compare_job(
+            user_id,
+            compare_id,
+            {
+                "status": "running",
+                "compare_id": compare_id,
+                "compare_name": compare.get("name"),
+                "checked_current": 0,
+                "checked_total": 0,
+                "current_activity_name": None,
+                "started_at": _job_timestamp(),
+                "updated_at": _job_timestamp(),
+                "finished_at": None,
+                "result": None,
+                "error": None,
+                "message": (
+                    f"Die letzten {DEFAULT_CHECK_RIDES_LIMIT} Rides werden jetzt geprueft."
+                    if DEFAULT_CHECK_RIDES_LIMIT > 0
+                    else "Alle Rides werden jetzt geprueft."
+                ),
+            },
+        )
+        worker = threading.Thread(
+            target=_run_climb_compare_job,
+            kwargs={
+                "user_id": user_id,
+                "compare_id": compare_id,
+            },
+            daemon=True,
+        )
+        worker.start()
+        return _snapshot_climb_compare_job(user_id, compare_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.get("/activities/climb-compare/{compare_id}/check-rides/status")
+def activities_climb_compare_check_status(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return _snapshot_climb_compare_job(int(current_user["id"]), compare_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.delete("/activities/climb-compare/{compare_id}")
+def activities_climb_compare_delete(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_climb_compare(user_id=int(current_user["id"]), compare_id=compare_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
 @app.delete("/activities/{activity_id}")
 def activity_delete(activity_id: int, current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -1314,9 +1516,17 @@ def activity_detail(activity_id: int, current_user: dict = Depends(get_current_u
 
 
 @app.post("/activities/{activity_id}/llm-analysis")
-def activity_llm_analysis(activity_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+def activity_llm_analysis(
+    activity_id: int,
+    force_refresh: bool = Query(default=False),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
-        return derive_activity_llm_analysis(user_id=int(current_user["id"]), activity_id=activity_id)
+        return derive_activity_llm_analysis(
+            user_id=int(current_user["id"]),
+            activity_id=activity_id,
+            force_refresh=force_refresh,
+        )
     except ValueError as exc:
         detail = str(exc)
         status_code = 503 if "OPENAI_API_KEY" in detail else 404 if detail == "Activity not found." else 400

@@ -14,7 +14,7 @@ from sqlalchemy import asc, delete, desc, func, or_, select
 
 from apps.api.achievement_service import ACHIEVEMENT_CHECK_VERSION, get_activity_achievement_check_status, rebuild_activity_achievement_checks
 from apps.api.llm_service import DEFAULT_OPENAI_MODEL, openai_chat_completion
-from packages.db.models import Activity, ActivityLap, ActivityLlmAnalysisCache, ActivityRecord, ActivitySession, FitFilePayload, UserTrainingMetric
+from packages.db.models import Activity, ActivityLap, ActivityLlmAnalysisCache, ActivityRecord, ActivitySession, FitFilePayload, UserProfile, UserTrainingMetric
 from packages.db.session import SessionLocal
 
 
@@ -23,6 +23,8 @@ _activity_list_cache: dict[str, tuple[datetime, dict[str, Any]]] = {}
 _ACTIVITY_LLM_ANALYSIS_VERSION = 1
 _ACTIVITY_LLM_TODO_NOTE = "TODO: Diese Analyse muss kuenftig zusaetzlich auf das Trainingsziel aus dem Trainingsplan angepasst werden."
 MAX_HR_RECHECK_PASSES = 2
+DEFAULT_WEEKLY_TARGET_HOURS = 10.0
+DEFAULT_WEEKLY_TARGET_STRESS = 300.0
 
 
 def _duration_label(total_seconds: int | None) -> str | None:
@@ -93,6 +95,18 @@ def _get_metric_value_at(session, user_id: int, metric_type: str, reference_dt: 
             return float(scoped_value)
     fallback_value = session.scalar(stmt.limit(1))
     return float(fallback_value) if fallback_value is not None else None
+
+
+def _fit_coordinate_to_degrees(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if abs(numeric) <= 180:
+        return numeric
+    return numeric * (180.0 / 2147483648.0)
 
 
 def _build_elapsed_power_series(records: list[ActivityRecord]) -> list[tuple[int, int]]:
@@ -203,6 +217,37 @@ def _compute_power_metrics(
         "estimated_calories_kcal": estimated_calories,
         "ftp_reference_w": float(ftp_w) if ftp_w is not None else None,
     }
+
+
+def _resolve_activity_training_stress_score(
+    session,
+    *,
+    activity: Activity,
+    records: list[ActivityRecord] | None = None,
+) -> float | None:
+    training_stress_score = _stress_from_raw_json(activity.raw_json)
+    if training_stress_score is None:
+        training_stress_score = _extract_summary_metric(activity.raw_json, "tss", "trainingStressScore")
+    if training_stress_score is not None:
+        return training_stress_score
+
+    ftp_reference_w = _get_metric_value_at(session, activity.user_id, "ftp_w", activity.started_at)
+    if ftp_reference_w is None:
+        return None
+
+    resolved_records = records
+    if resolved_records is None:
+        resolved_records = session.scalars(
+            select(ActivityRecord).where(ActivityRecord.activity_id == activity.id).order_by(ActivityRecord.record_index.asc())
+        ).all()
+
+    derived_power_metrics = _compute_power_metrics(
+        avg_power_w=activity.avg_power_w,
+        duration_s=activity.duration_s,
+        records=resolved_records,
+        ftp_w=ftp_reference_w,
+    )
+    return derived_power_metrics["training_stress_score"]
 
 
 def _activity_list_cache_key(**parts: Any) -> str:
@@ -531,8 +576,8 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
                 timestamp=record_time,
                 elapsed_s=elapsed_s,
                 distance_m=_fit_float(message.get_value("distance")),
-                latitude_deg=_fit_float(message.get_value("position_lat")),
-                longitude_deg=_fit_float(message.get_value("position_long")),
+                latitude_deg=_fit_coordinate_to_degrees(message.get_value("position_lat")),
+                longitude_deg=_fit_coordinate_to_degrees(message.get_value("position_long")),
                 altitude_m=_fit_float(message.get_value("enhanced_altitude") or message.get_value("altitude")),
                 speed_mps=_fit_float(message.get_value("enhanced_speed") or message.get_value("speed")),
                 heart_rate_bpm=_fit_int(message.get_value("heart_rate")),
@@ -579,6 +624,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
     range_end = datetime.combine(week_end + timedelta(days=1), time.min)
 
     with SessionLocal() as session:
+        profile = session.scalar(select(UserProfile).where(UserProfile.user_id == user_id))
         rows = session.scalars(
             select(Activity)
             .where(Activity.started_at.is_not(None))
@@ -588,91 +634,100 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
             .order_by(Activity.started_at.asc())
         ).all()
 
-    by_day: dict[date, list[dict[str, Any]]] = {week_start + timedelta(days=i): [] for i in range(7)}
+        weekly_target_hours = float(profile.weekly_target_hours) if profile and profile.weekly_target_hours is not None else DEFAULT_WEEKLY_TARGET_HOURS
+        weekly_target_stress = float(profile.weekly_target_stress) if profile and profile.weekly_target_stress is not None else DEFAULT_WEEKLY_TARGET_STRESS
+        goal_is_custom = bool(profile and (profile.weekly_target_hours is not None or profile.weekly_target_stress is not None))
 
-    week_moving_s = 0
-    week_distance_m = 0.0
-    week_stress_total = 0.0
-    week_stress_count = 0
+        by_day: dict[date, list[dict[str, Any]]] = {week_start + timedelta(days=i): [] for i in range(7)}
 
-    for row in rows:
-        start_time = row.started_at
-        if start_time is None:
-            continue
+        week_moving_s = 0
+        week_distance_m = 0.0
+        week_stress_total = 0.0
+        week_stress_count = 0
 
-        end_time = None
-        if row.duration_s is not None:
-            end_time = start_time + timedelta(seconds=row.duration_s)
+        for row in rows:
+            start_time = row.started_at
+            if start_time is None:
+                continue
 
-        avg_speed_kmh = None
-        if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
-            avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
+            end_time = None
+            if row.duration_s is not None:
+                end_time = start_time + timedelta(seconds=row.duration_s)
 
-        stress_score = _stress_from_raw_json(row.raw_json)
+            avg_speed_kmh = None
+            if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
+                avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
 
-        by_day[start_time.date()].append(
-            {
-                "id": row.id,
-                "name": row.name or "Unbenannte Aktivität",
-                "provider": row.provider,
-                "start_time": start_time.isoformat(),
-                "end_time": end_time.isoformat() if end_time else None,
-                "duration_s": row.duration_s,
-                "duration_label": _duration_label(row.duration_s),
-                "distance_m": row.distance_m,
-                "avg_power_w": row.avg_power_w,
-                "avg_speed_kmh": avg_speed_kmh,
-                "stress_score": stress_score,
-            }
-        )
+            stress_score = _resolve_activity_training_stress_score(session, activity=row)
 
-        if row.duration_s:
-            week_moving_s += row.duration_s
-        if row.distance_m:
-            week_distance_m += float(row.distance_m)
-        if stress_score is not None:
-            week_stress_total += stress_score
-            week_stress_count += 1
+            by_day[start_time.date()].append(
+                {
+                    "id": row.id,
+                    "name": row.name or "Unbenannte Aktivität",
+                    "provider": row.provider,
+                    "start_time": start_time.isoformat(),
+                    "end_time": end_time.isoformat() if end_time else None,
+                    "duration_s": row.duration_s,
+                    "duration_label": _duration_label(row.duration_s),
+                    "distance_m": row.distance_m,
+                    "avg_power_w": row.avg_power_w,
+                    "avg_speed_kmh": avg_speed_kmh,
+                    "stress_score": stress_score,
+                }
+            )
 
-    weekday_labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
-    days: list[dict[str, Any]] = []
-    for i in range(7):
-        day = week_start + timedelta(days=i)
-        activities = by_day[day]
+            if row.duration_s:
+                week_moving_s += row.duration_s
+            if row.distance_m:
+                week_distance_m += float(row.distance_m)
+            if stress_score is not None:
+                week_stress_total += stress_score
+                week_stress_count += 1
 
-        day_moving_s = sum(a["duration_s"] or 0 for a in activities)
-        day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
-        stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
+        weekday_labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+        days: list[dict[str, Any]] = []
+        for i in range(7):
+            day = week_start + timedelta(days=i)
+            activities = by_day[day]
 
-        days.append(
-            {
-                "date": day.isoformat(),
-                "weekday_short": weekday_labels[i],
-                "activities": activities,
-                "summary": {
-                    "activities_count": len(activities),
-                    "moving_time_s": day_moving_s,
-                    "moving_time_label": _duration_label(day_moving_s),
-                    "distance_m": day_distance_m,
-                    "stress_total": sum(stress_values) if stress_values else None,
-                    "stress_avg": (sum(stress_values) / len(stress_values)) if stress_values else None,
+            day_moving_s = sum(a["duration_s"] or 0 for a in activities)
+            day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
+            stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
+
+            days.append(
+                {
+                    "date": day.isoformat(),
+                    "weekday_short": weekday_labels[i],
+                    "activities": activities,
+                    "summary": {
+                        "activities_count": len(activities),
+                        "moving_time_s": day_moving_s,
+                        "moving_time_label": _duration_label(day_moving_s),
+                        "distance_m": day_distance_m,
+                        "stress_total": sum(stress_values) if stress_values else None,
+                        "stress_avg": (sum(stress_values) / len(stress_values)) if stress_values else None,
+                    },
+                }
+            )
+
+        return {
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "days": days,
+            "summary": {
+                "activities_count": len(rows),
+                "moving_time_s": week_moving_s,
+                "moving_time_label": _duration_label(week_moving_s),
+                "distance_m": week_distance_m,
+                "stress_total": week_stress_total if week_stress_count > 0 else None,
+                "stress_avg": (week_stress_total / week_stress_count) if week_stress_count > 0 else None,
+                "goal": {
+                    "target_hours": weekly_target_hours,
+                    "target_stress": weekly_target_stress,
+                    "is_custom": goal_is_custom,
                 },
-            }
-        )
-
-    return {
-        "week_start": week_start.isoformat(),
-        "week_end": week_end.isoformat(),
-        "days": days,
-        "summary": {
-            "activities_count": len(rows),
-            "moving_time_s": week_moving_s,
-            "moving_time_label": _duration_label(week_moving_s),
-            "distance_m": week_distance_m,
-            "stress_total": week_stress_total if week_stress_count > 0 else None,
-            "stress_avg": (week_stress_total / week_stress_count) if week_stress_count > 0 else None,
-        },
-    }
+            },
+        }
 
 
 def get_available_activity_weeks(user_id: int) -> dict[str, Any]:
@@ -837,31 +892,31 @@ def list_activities(
             .order_by(asc(Activity.sport))
         ).all()
 
-    items: list[dict[str, Any]] = []
-    for row in rows:
-        avg_speed_kmh = None
-        if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
-            avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
-        stress_score = _stress_from_raw_json(row.raw_json)
-        items.append(
-            {
-                "id": row.id,
-                "external_id": row.external_id,
-                "name": row.name or "Unbenannte Aktivität",
-                "provider": row.provider,
-                "sport": row.sport,
-                "started_at": row.started_at.isoformat() if row.started_at else None,
-                "duration_s": row.duration_s,
-                "duration_label": _duration_label(row.duration_s),
-                "distance_m": row.distance_m,
-                "avg_power_w": row.avg_power_w,
-                "max_power_w": _extract_summary_metric(row.raw_json, "maxPower"),
-                "avg_hr_bpm": row.avg_hr_bpm,
-                "max_hr_bpm": _extract_summary_metric(row.raw_json, "maxHR"),
-                "avg_speed_kmh": avg_speed_kmh,
-                "stress_score": stress_score,
-            }
-        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            avg_speed_kmh = None
+            if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
+                avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
+            stress_score = _resolve_activity_training_stress_score(session, activity=row)
+            items.append(
+                {
+                    "id": row.id,
+                    "external_id": row.external_id,
+                    "name": row.name or "Unbenannte Aktivität",
+                    "provider": row.provider,
+                    "sport": row.sport,
+                    "started_at": row.started_at.isoformat() if row.started_at else None,
+                    "duration_s": row.duration_s,
+                    "duration_label": _duration_label(row.duration_s),
+                    "distance_m": row.distance_m,
+                    "avg_power_w": row.avg_power_w,
+                    "max_power_w": _extract_summary_metric(row.raw_json, "maxPower"),
+                    "avg_hr_bpm": row.avg_hr_bpm,
+                    "max_hr_bpm": _extract_summary_metric(row.raw_json, "maxHR"),
+                    "avg_speed_kmh": avg_speed_kmh,
+                    "stress_score": stress_score,
+                }
+            )
 
     result = {
         "activities": items,
@@ -920,6 +975,23 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
     cadence_values = [int(row.cadence_rpm) for row in records if row.cadence_rpm is not None]
     speed_values = [float(row.speed_mps) * 3.6 for row in records if row.speed_mps is not None]
     altitude_values = [float(row.altitude_m) for row in records if row.altitude_m is not None]
+    avg_cadence_rpm = round(sum(cadence_values) / len(cadence_values), 1) if cadence_values else None
+    summary_altitude_gain_m = _extract_summary_metric(
+        activity.raw_json,
+        "elevationGain",
+        "totalAscent",
+        "totalAscentInMeters",
+        "elevationGainInMeters",
+    )
+    summary_min_altitude_m = _extract_summary_metric(activity.raw_json, "minElevation", "minimumElevation")
+    summary_max_altitude_m = _extract_summary_metric(activity.raw_json, "maxElevation", "maximumElevation")
+    altitude_gain_m = summary_altitude_gain_m if summary_altitude_gain_m is not None else _sum_positive_deltas(altitude_values)
+    longest_climb_m = _derive_longest_climb_gain(altitude_values)
+    time_metrics = _derive_time_metrics(
+        activity_duration_s=activity.duration_s,
+        raw_json=activity.raw_json,
+        sessions=sessions,
+    )
     derived_power_metrics = _compute_power_metrics(
         avg_power_w=activity.avg_power_w,
         duration_s=activity.duration_s,
@@ -988,10 +1060,17 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
             "calories_kcal": calories_kcal,
             "ftp_reference_w": ftp_reference_w,
             "max_hr_reference_bpm": max_hr_reference_bpm,
+            "avg_cadence_rpm": avg_cadence_rpm,
             "max_cadence_rpm": max(cadence_values) if cadence_values else None,
             "max_speed_kmh": max(speed_values) if speed_values else None,
-            "min_altitude_m": min(altitude_values) if altitude_values else None,
-            "max_altitude_m": max(altitude_values) if altitude_values else None,
+            "min_altitude_m": summary_min_altitude_m if summary_min_altitude_m is not None else min(altitude_values) if altitude_values else None,
+            "max_altitude_m": summary_max_altitude_m if summary_max_altitude_m is not None else max(altitude_values) if altitude_values else None,
+            "total_ascent_m": altitude_gain_m,
+            "longest_climb_m": longest_climb_m,
+            "moving_time_s": time_metrics["moving_time_s"],
+            "moving_time_label": _duration_label(time_metrics["moving_time_s"]),
+            "paused_time_s": time_metrics["paused_time_s"],
+            "paused_time_label": _duration_label(time_metrics["paused_time_s"]),
             "stress_score": training_stress_score,
             "achievements_checked_at": activity.achievements_checked_at.isoformat() if activity.achievements_checked_at else None,
             "achievements_check_version": activity.achievements_check_version,
@@ -1025,6 +1104,8 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
                 "timestamp": row.timestamp.isoformat() if row.timestamp else None,
                 "elapsed_s": row.elapsed_s,
                 "distance_m": row.distance_m,
+                "latitude_deg": _fit_coordinate_to_degrees(row.latitude_deg),
+                "longitude_deg": _fit_coordinate_to_degrees(row.longitude_deg),
                 "heart_rate_bpm": row.heart_rate_bpm,
                 "power_w": row.power_w,
                 "speed_mps": row.speed_mps,
@@ -1150,7 +1231,14 @@ def _normalize_fact_rows(value: Any, *, max_items: int = 12) -> list[dict[str, s
 
 
 def _extract_chat_message_content(body: dict[str, Any]) -> str:
-    content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first_choice = choices[0] if isinstance(choices[0], dict) else {}
+    message = first_choice.get("message") if isinstance(first_choice, dict) else {}
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content", "")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
@@ -1401,6 +1489,66 @@ def _sum_positive_deltas(values: list[float], *, min_step: float = 0.5) -> float
     return round(gain, 1)
 
 
+def _derive_longest_climb_gain(values: list[float], *, min_step: float = 0.5) -> float | None:
+    if len(values) < 2:
+        return None
+    best_gain = 0.0
+    current_gain = 0.0
+    climbing = False
+    for previous, current in zip(values, values[1:]):
+        delta = float(current) - float(previous)
+        if delta > min_step:
+            current_gain += delta
+            climbing = True
+            if current_gain > best_gain:
+                best_gain = current_gain
+            continue
+        if delta < -min_step and climbing:
+            current_gain = 0.0
+            climbing = False
+    return round(best_gain, 1) if best_gain > 0 else None
+
+
+def _derive_time_metrics(
+    *,
+    activity_duration_s: int | None,
+    raw_json: str | None,
+    sessions: list[ActivitySession],
+) -> dict[str, int | None]:
+    moving_time_s: int | None = None
+    elapsed_time_s: int | None = None
+
+    timer_values = [float(row.total_timer_time_s) for row in sessions if row.total_timer_time_s is not None and row.total_timer_time_s > 0]
+    elapsed_values = [float(row.total_elapsed_time_s) for row in sessions if row.total_elapsed_time_s is not None and row.total_elapsed_time_s > 0]
+
+    if timer_values:
+        moving_time_s = int(round(sum(timer_values)))
+    elif activity_duration_s is not None and activity_duration_s > 0:
+        moving_time_s = int(activity_duration_s)
+
+    if elapsed_values:
+        elapsed_time_s = int(round(sum(elapsed_values)))
+    else:
+        raw_elapsed_s = _extract_summary_metric(raw_json, "elapsedDuration", "elapsed_time", "totalElapsedDuration", "totalElapsedTime")
+        if raw_elapsed_s is not None and raw_elapsed_s > 0:
+            elapsed_time_s = int(round(raw_elapsed_s))
+
+    if elapsed_time_s is None:
+        elapsed_time_s = moving_time_s
+    if moving_time_s is None:
+        moving_time_s = elapsed_time_s
+
+    paused_time_s = None
+    if moving_time_s is not None and elapsed_time_s is not None:
+        paused_time_s = max(0, int(elapsed_time_s) - int(moving_time_s))
+
+    return {
+        "moving_time_s": moving_time_s,
+        "elapsed_time_s": elapsed_time_s,
+        "paused_time_s": paused_time_s,
+    }
+
+
 def _summarize_zone_distribution(values: list[float], reference_value: float | None, bands: list[tuple[str, float | None, float | None]]) -> list[dict[str, Any]]:
     if not values or reference_value is None or reference_value <= 0:
         return []
@@ -1487,7 +1635,15 @@ def _build_activity_llm_context(detail: dict[str, Any], max_hr_reference_bpm: fl
         altitude_summary["gain"] = _sum_positive_deltas(altitude_values) or 0.0
 
     lap_limit = 40
-    achievement_matches = achievement_analysis.get("matched") if isinstance(achievement_analysis, dict) else []
+    achievement_matches_raw = achievement_analysis.get("matched") if isinstance(achievement_analysis, dict) else []
+    achievement_matches = achievement_matches_raw if isinstance(achievement_matches_raw, list) else []
+    checked_scopes = achievement_analysis.get("checked_scopes") if isinstance(achievement_analysis, dict) else []
+    checked_scopes = checked_scopes if isinstance(checked_scopes, list) else []
+    matched_count = achievement_analysis.get("matched_count") if isinstance(achievement_analysis, dict) else 0
+    try:
+        matched_count = int(matched_count or 0)
+    except (TypeError, ValueError):
+        matched_count = 0
 
     return {
         "activity_summary": activity,
@@ -1555,8 +1711,8 @@ def _build_activity_llm_context(detail: dict[str, Any], max_hr_reference_bpm: fl
         "laps": lap_rows[:lap_limit],
         "laps_truncated_count": max(0, len(lap_rows) - lap_limit),
         "achievement_context": {
-            "matched_count": achievement_analysis.get("matched_count") if isinstance(achievement_analysis, dict) else 0,
-            "checked_scopes": achievement_analysis.get("checked_scopes") if isinstance(achievement_analysis, dict) else [],
+            "matched_count": matched_count,
+            "checked_scopes": checked_scopes,
             "matched_titles": [
                 str(match.get("title") or "").strip()
                 for match in achievement_matches[:12]
@@ -1653,7 +1809,7 @@ def _legacy_derive_activity_llm_analysis(user_id: int, activity_id: int) -> dict
     }
 
 
-def derive_activity_llm_analysis(user_id: int, activity_id: int) -> dict[str, Any]:
+def derive_activity_llm_analysis(user_id: int, activity_id: int, *, force_refresh: bool = False) -> dict[str, Any]:
     with SessionLocal() as session:
         activity_row = session.scalar(select(Activity).where(Activity.user_id == user_id, Activity.id == activity_id))
         if activity_row is None:
@@ -1664,7 +1820,7 @@ def derive_activity_llm_analysis(user_id: int, activity_id: int) -> dict[str, An
                 ActivityLlmAnalysisCache.activity_id == activity_id,
             )
         )
-        if cache_row is not None and int(cache_row.analysis_version) == _ACTIVITY_LLM_ANALYSIS_VERSION:
+        if not force_refresh and cache_row is not None and int(cache_row.analysis_version) == _ACTIVITY_LLM_ANALYSIS_VERSION:
             return _serialize_activity_llm_cache(cache_row)
 
     detail = get_activity_detail(user_id=user_id, activity_id=activity_id)

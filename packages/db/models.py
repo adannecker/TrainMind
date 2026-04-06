@@ -132,6 +132,8 @@ class UserProfile(Base):
     start_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     goal_start_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     goal_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    weekly_target_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weekly_target_stress: Mapped[float | None] = mapped_column(Float, nullable=True)
     nav_group_order_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     training_config_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     training_plan_json: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -481,6 +483,40 @@ class ActivityLlmAnalysisCache(Base):
     generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     context_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     analysis_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ActivityClimbCompare(Base):
+    __tablename__ = "activity_climb_compares"
+    __table_args__ = (
+        Index("ix_activity_climb_compares_user_created", "user_id", "created_at"),
+        {"schema": GARMIN_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    location_label: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    search_tolerance_m: Mapped[float] = mapped_column(Float, default=50.0, nullable=False)
+    start_latitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    start_longitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    via_latitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    via_longitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    end_latitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    end_longitude_deg: Mapped[float] = mapped_column(Float, nullable=False)
+    representative_activity_id: Mapped[int | None] = mapped_column(
+        ForeignKey(f"{GARMIN_SCHEMA}.activities.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    representative_activity_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    representative_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    representative_distance_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    representative_ascent_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    representative_descent_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    route_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 

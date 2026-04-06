@@ -1,0 +1,301 @@
+id,name,category,score,fdc_id,usda_description,status,error_code,note
+c9ade3486efcd1e1569011cd2f9f26c00d4c,Apfel (frisch),Obst,0.75,2709294,"Apple, candied",matched,,
+af4ad24a35f03d490fc7ff890f3d10ea34d7,Apfel (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+94d15707cd18f82d6dcd2baa919dd48a49d6,Apfel (TK),Obst,0.35,168188,"Apple juice, frozen concentrate, unsweetened, undiluted, with added ascorbic acid",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+9fe18000ab13c54bb9174bd6827b71b7fcdd,Aprikose (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+e0fb5c430da991b8a6e1ea03b4c251ee4312,Aprikose (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+bea25319a867fec4a9455b2ff7f57a5f9ecc,Aubergine (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+31b307e2f3128e0301f56bf0e257415b8279,Aubergine (gekocht),Gemüse,0.75,2710049,Eggplant dip,matched,,
+9678d685c5e026b6111c2ff4285c7ec7e2a6,Banane (Bio),Obst,0.75,2709225,"Banana, baked",matched,,
+9e126d865b85df51cc1c77d92ae238a0c7ac,Bauernbrot,Brot,0.3333,2707850,"Bread, fruit",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+5981a3eeccb084474d29e1ac00d70f9fc567,Bergkaese,Käse,0.25,2705770,"Cheese, processed cheese food",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+85a473aa138b63656913c93ecc591f4683fa,Birne (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+da6a4ebce237a841d6954ac58d4ff8f501a4,Blumenkohl (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+3ec88b3d0bad8c0f7aa4c04ff15548b2cf29,Blumenkohl (gekocht),Gemüse,0.5,2710801,"Cauliflower, cooked, as ingredient",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+9aeb450ac491551a8ebde3185f40da4a96d6,Bohne grün (gekocht),Gemüse,0.4167,2710803,"Green beans, cooked, as ingredient",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+14de94103eab9f1560907625e6136e4bef44,Bohne grün (roh),Gemüse,0.5,2709769,"Green beans, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+db81a95640c7634b4c2ec78eb13cac4d0e1c,Bohne grün (TK),Gemüse,0.9167,2710040,Green bean casserole,matched,,
+621d798949797354b06784b467e5f5603706,Brokkoli (Bio),Gemüse,0.75,2709643,"Broccoli, raw",matched,,
+d635f52804c3ed9e5e8e92783ae63cdfd212,Brokkoli (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+3b1d9d7533ee7bb0de2a97bf4f7b7119e38b,Brokkoli (TK),Gemüse,0.5,169968,"Broccoli, frozen, chopped, unprepared",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+d3ebe21fdf3c0d543a010822f4801330b87e,Brombeere (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+d7900778d24ba9a9a45455304fb76c7fcadc,Brombeere (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+0de0708d0428827049e17d7a0de0e502ba4d,Brombeere (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8a25547b3a53453dc095a21a230990c514fd,Champignon (Bio),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+7269c5cb055ba3a7b53445a15a0ddc2ac8ea,Champignon (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+22fe0a32e1f6c56208b6cfd4f0c8db9ea91a,Champignon (roh),Gemüse,0.25,2709793,"Mushrooms, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+7dd243abab548c11806dfbb1ffcb62c05810,Chili gemahlen,Gewürze,0.3333,2705854,"Beef, ground",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+285ab705211d49e10ab96222a18c67ace065,Chinakohl (gedämpft),Gemüse,0.6667,2709774,"Cabbage, Chinese, raw",matched,,
+6a78666c95b83a8387479e1160088f433cca,Chinakohl (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+c9e0a2d7af342a33e2725d83a7cabc73edba,Cranberry (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+f46b11b6586dfc37c1600b7ac85a2f4382ec,Cranberry (reif),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+f746159ffbd63316157330e0f7bbc6d96c65,Dorade,Fisch,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+acabcd7325b205de32b5030109601791004d,dunkle Traube,Obst,0.25,2709325,"Grape juice, 100%",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+b9f9ed815f7ac7e1cd9879848fc0b3220dfe,dunkle Traube (Bio),Obst,0.25,2709325,"Grape juice, 100%",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+baf4f9c6654cdf9a591133d1f832d22863a4,Dunkle Traube (frisch),Obst,0.25,2709325,"Grape juice, 100%",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+207a185a976d48cb8a7c3967513967f9c788,Ei gekocht,Eier,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+af209719bfd8160762ae88028c042d191d4b,Eisbergsalat (roh),Gemüse,0.6667,2346388,"Lettuce, iceberg, raw",matched,,
+a2b65c492b01012ffdb09f0debf425a98d1a,Eisbergsalat (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+d4b91dc9b2513ac2e55dbc80b40ebc1c644f,Entenbrust,Fleisch,0.3333,174469,"Duck, wild, breast, meat only, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+37b26d852e33cae342ac5c03e6cc907e1cc6,Erbse getrocknet,Hülsenfrüchte,0.3333,2710056,Pea salad,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+f5d0f32e91eb4798e852cde595da2af62b03,Erbse gruen,Gemüse,0.5,2709797,"Green peas, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+510d5a0e77bc1257c79c2eb8f054370263dd,Erbse gruen (roh),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+7b91d45a9403e279c3110ec3eba87037b5b0,Erbse grün (gedämpft),Gemüse,0.5,2709797,"Green peas, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+a8999fc7b4b4a582b86f83e1bc6e3db6d61a,Erbse grün (gekocht),Gemüse,0.4167,2709958,"Green peas, cooked, from restaurant",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+789e82c811eb0cf219bed32bccf162eb1aba,Erbse grün (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+18bcedaa2d47cf70da30074d88b585a6a8d0,Erdbeere (frisch),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+0f4fdee8c73e1d2055bb0174aa6bcfed9b1a,Erdbeere (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+f42036b5b4c1a6ed72a5fab479f58f1f9af1,Erdbeere (TK),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+1f89f7d73f0d5fb6b781d332c6491f0b4cb0,Feige (Bio),Obst,0.75,2709236,"Fig, canned",matched,,
+c4beac4222c5e09d0ee2f625c66539bcd499,Feige (reif),Obst,0.75,2709236,"Fig, canned",matched,,
+1a5d0893e340bd312d835984b7e33e4ff01a,Feige (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9a4271d757f05d6e5467b09005bf8d76868e,Feldsalat,Gemüse,0.25,2705906,"Lamb, chop",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+8cff451494175a7cfd91a509e392d9357ee4,Feldsalat (Bio),Gemüse,0.25,2705906,"Lamb, chop",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+00818369dc0b8be49fd3dcb02f373679e2a0,Feldsalat (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+c82d80729e688862c70ae571a9e9275b8f22,Feldsalat (gekocht),Gemüse,0.25,2709949,"Lettuce, cooked",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+39c185805aed0b7b9f7ea9da066ff448c3d6,Feldsalat (roh),Gemüse,0.25,2709789,"Lettuce, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+39283fded840845dcee237b5cda4128d20e8,Feldsalat (TK),Gemüse,0.25,2705906,"Lamb, chop",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+dd34e887343be7bdd5c3faeeee7928982d53,Fenchel (Bio),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+49aecfbcecfd3e33c445b6a96358ad8b9cf7,Fenchel (gekocht),Gemüse,0.5833,2709907,"Fennel bulb, cooked",matched,,
+36366d6463cf7670764aae86301b4ca19e33,Forelle,Fisch,0.4833,2706306,"Fish, trout, fried",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+f60075165b6d5d026f98e4c39fb37c12ed27,Fruehlingszwiebel (gekocht),Gemüse,0.1667,170005,"Onions, spring or scallions (includes tops and bulb), raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+5f52b218ffa46b01d6b885da7f8e4672cbcb,Frühlingszwiebel,Gemüse,0.3333,2707633,"Bread, onion",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+b0de9f0028cf30b1ad19440d188dfaad1644,Frühlingszwiebel (Bio),Gemüse,0.3333,2707633,"Bread, onion",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+9ad6994de40741a0ab2ab0e21a61a0620d8c,Frühlingszwiebel (gedämpft),Gemüse,0.1667,170005,"Onions, spring or scallions (includes tops and bulb), raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+33c1980c1b668c5e977b62df10bf58db0f76,Frühlingszwiebel (roh),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9aa29262a4a5f45b0d9f93dd4bf8105f8051,Frühlingszwiebel (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+96602e2314791991e050d7b10f998b1d8395,Gansfleisch,Fleisch,0.4,172413,"Goose, domesticated, meat only, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+b149640a91b8df41a79a3bb93f0f6fdea180,gebratene Putenoberkeule,Fleisch,0.375,172877,"Turkey, retail parts, thigh, meat only, cooked, roasted",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+f47e05a9a07b9ffe6d50f6365f1433d2e786,Gouda jung,Käse,0.3333,171241,"Cheese, gouda",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+793b7d048cf19209b7dcee7a1fe2ff6383a6,Granatapfel (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8707a7309c9d5eff68ecc90e5f3d997f43ea,Granatapfel (frisch),Obst,0.75,2709267,"Pomegranate, raw",matched,,
+0adeb3afa5044c9c9455c33cb6eb1a97e01e,Granatapfel (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+f06e5c8679bf7eea72979c9941d3969ad8b4,Granatapfel (TK),Obst,0.75,2709267,"Pomegranate, raw",matched,,
+2a07bb747275737d64f180009f309e5e621c,Grapefruit (frisch),Obst,0.75,2709165,"Grapefruit, raw",matched,,
+f580102b5a6da96db7345a439f7af7504f2d,Griechischer Joghurt 10%,Joghurt,0.4,2705441,"Yogurt, Greek, with oats",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+39e7621c5574161a85e976851ba598a3125a,Griechischer Joghurt 2%,Joghurt,0.5,170864,"Yogurt, Greek, 2% fat, apricot, CHOBANI",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+5d0ab9247a94da30a263b55ccd849eb2b9fd,Gruenkohl (TK),Gemüse,0.75,168421,"Kale, raw",matched,,
+ca8ed82f9a5711f73f2eb339759290c8aa4f,Grüne Bohne (gedämpft),Gemüse,0.9167,2710040,Green bean casserole,matched,,
+bc18bf31b6169ad789bdc6fb098791b07d17,Grüne Erbse (Bio),Gemüse,0.5,2709797,"Green peas, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+d096d49a398df2d9e6c146c6fbddf52e3ae2,Grüne Linsen,Hülsenfrüchte,1.0,2112687,GREEN LENTILS,matched,,
+e42822575f6277ab7860c968193532f3b0ed,Grünkohl,Gemüse,1.0,1602525,KALE,matched,,
+6ee0d7c1798c591b303fa44048082c00dc6b,Grünkohl (Bio),Gemüse,0.75,168421,"Kale, raw",matched,,
+889ff69da43e6590bfd129e9a88621121eaa,Grünkohl (gedämpft),Gemüse,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+d77167ac5075bde848226f87f73e69406582,Grünkohl (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9f73df7ab8471bb39f23ca12532f884475e4,Grünkohl (roh),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+d8fcd684a4f8c146c96370c7217a99d9288e,Guave,Obst,1.0,2295367,GUAVA,matched,,
+549615068ea76cc52bdf20dd5bc804e53a07,Guave (Bio),Obst,0.75,2709344,Guava nectar,matched,,
+ff9223d7396909e335baa9a612d1f25d59d2,Guave (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+32f4cf89fa4e97733a884650c13d83e100e7,Guave (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+383b9c75cd3208689f68224f284f26ae6913,Guave (TK),Obst,0.75,2709344,Guava nectar,matched,,
+6219cc070eaa719d206c6ca993b81d2dc2c5,Gurke,Gemüse,0.75,2709784,"Cucumber, raw",matched,,
+ff64eff0c5bb23209225423aadfa0e7dad20,Gurke (Bio),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8ee21ccfd83db297f21eedc1c4ef752934fb,Gurke (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+dac01ceb3c97d7ed4537355bc3b7ba8b64ea,Gurke (gekocht),Gemüse,0.75,2709928,"Cucumber, cooked",matched,,
+655430425efe2715215225a446d47e61a9b4,Gurke (roh),Gemüse,0.75,2709784,"Cucumber, raw",matched,,
+6d06b4e00375aefdeb1bc32518ea96e0d03a,Gurke (TK),Gemüse,0.75,2709784,"Cucumber, raw",matched,,
+f72cc68b8d8353f9e19a10ac8d2599dcb8f2,Haehnchenbrust (roh),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8d83a5907bc7eb979f18b20c859dd67cbb1b,Haferflocken,Getreide,0.3333,2705412,Oat milk,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+6adaa06008788a118e931d324264a20daf53,Hagebutte,Obst,0.9167,907616,"ROSE HIP SPREAD, ROSE HIP",matched,,
+4af4301441833de787bfe6e79fc9caadc57c,Hagebutte (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+ad8976552bbf540a267cefc058d13e8d6e28,Hagebutte (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+48aa14e9772272076edd565a8023714cbf8f,Hagebutte (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+1d929d60bc71e5e6a1aeea69eb23e47186ba,Hagebutte (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+19f8d2522fb94c4665421f6925ecebe5a872,Hähnchenbrust,Fleisch,1.0,2187885,CHICKEN BREAST,matched,,
+3afc2c42bbb4d7093302151f43804df36ee8,Hähnchenbrust (gebraten),Fleisch,0.4722,2705973,"Chicken breast, fried, coated, skin / coating eaten, from raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+2ece770ccb2bec0c0ed260b3809b0ef176ad,Hähnchenbrust (gekocht),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+41541d2c2e1534fd51e0c4f0b3c227b2c22d,Hähnchenbrust (grillfertig),Fleisch,0.7667,2620781,"GRILLED CHICKEN BREAST, GRILLED",matched,,
+fabc1aeff8e6bfdaf28f3f79c1094cfc80e3,Hähnchenkeule,Fleisch,1.0,1899680,CHICKEN THIGH,matched,,
+9e31286467e3ea449851c840bc22d552da9a,Hähnchenkeule (gebraten),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9e1d3879679fafb532f784bf5ec61dac04b5,Hähnchenkeule (gekocht),Fleisch,0.4722,2706000,"Chicken drumstick, NS as to cooking method, skin eaten",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+19fe2ade94f4fcc5aa985d330003f583ebf0,Hähnchenkeule (grillfertig),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+e2a34041e01cfe2d34ee1b4ad30898646ca0,Hähnchenkeule (mager),Fleisch,0.65,2706008,"Chicken drumstick, rotisserie, skin eaten",matched,,
+23ab61abe3029cd6ac62269e9b8416de8681,Hähnchenkeule (roh),Fleisch,0.65,2646171,"Chicken, thigh, boneless, skinless, raw",matched,,
+9bd57f01631dc1a7d54cafbad87ca995ec6d,Hanfsamen,Samen,1.0,2431457,HEMP SEEDS,matched,,
+5efdb18888d614d3ad2f28cdf828c1b50d95,Hartweizengrieß,Getreide,1.0,1859669,"DURUM WHEAT SEMOLINA, DURUM WHEAT SEMOLINA",matched,,
+8babe00bbbf86799bfdf5f068d179aae8983,Harzer Käse,Käse,0.3333,2705720,"Cheese, Monterey",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+2602a9194e95f5f1705e2c0399326160360d,Haselnuss,Nüsse,1.0,1644473,HAZELNUT,matched,,
+65a6ccfc0a5f3beed340a5c6c74254d98b4c,Heidelbeere,Obst,1.0,2116605,BLUEBERRY,matched,,
+79d32d5f901f5951352d64b2e5308ebfb615,Heidelbeere (Bio),Obst,0.75,2709323,Blueberry juice,matched,,
+b4431fc9fdf5b6af291643930fe63d9625de,Heidelbeere (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8b24b61edda7f8def9926899f2580fda47b6,Heidelbeere (reif),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+19a54156703516ccfeffe78b09273a7ec2d2,Heidelbeere (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8eb5cabd71351a0b4def817454a73ced1288,Heilbutt,Fisch,1.0,2100197,HALIBUT,matched,,
+b485144ddad8bf29aef7c46d28962d0c5c06,helle Traube (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+42758fba4736c3e26101c9553aeecdb88101,Hering,Fisch,0.65,2706261,"Fish, herring",matched,,
+e4805f5e1e29b2e2814941193d3f38f20828,Himbeere,Obst,1.0,2163278,RASPBERRY,matched,,
+39b1bb8a5bdeb6d6db5d499a71b76166db28,Himbeere (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+82c2d4be6db225c5261a2f7e958126b6a3c0,Himbeere (frisch),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+9635a9743699d842b2263130d7733651f77c,Himbeere (reif),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+93f68f2b2024278a59708190b4f946b29d49,Himbeere (TK),Obst,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+a215e071a3de6d26dc79da3a91a4fb94fbae,Hirschfleisch,Fleisch,0.75,2705916,Venison sausage,matched,,
+b7bdb4ed3f0af0d387a5e19a2a7b2dc3c575,Hirse,Getreide,1.0,2708377,Millet,matched,,
+932846eef80e1c3450304f65cbd86e727809,Hirtenkäse,Käse,0.5,2706594,Shepherd's pie,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+b696f637afbc7e4f58c681557f2e07cfe2ee,Honigmelone,Obst,0.9167,2709241,"Honeydew melon, raw",matched,,
+631b29ba965c5d2556099ba623abb0b8b6e9,Honigmelone (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+3748d13b472f1791d0cceea377269c210409,Honigmelone (frisch),Obst,0.9167,2709241,"Honeydew melon, raw",matched,,
+32116b5b277a54187a591bc4ff87f8155239,Honigmelone (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+93cd1e31ef4862e82da8030287821a92a487,Honigmelone (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+a5969eb83f8c30f4fb7a53bbeafbdfa5dbac,Hühnchenherz,Fleisch,0.65,171458,"Chicken, heart, all classes, raw",matched,,
+a95c457a17592f80aceb0052292a277b4ca3,Hüttenkäse,Käse,1.0,2287080,COTTAGE CHEESE,matched,,
+1aa609591feb0c138ab9b4662e5fff66c93d,Ingwerpulver,Gewürze,0.3333,167806,Baobab powder,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+7c9fc127a3f6eee368987a09f608bf0104f1,Jakobsmuschel,Fisch,0.4,169289,"Squash, summer, scallop, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+54300b3ddac29756930c7a30887df8088719,Jasminreis,Getreide,1.0,2462921,JASMINE RICE,matched,,
+fa673aede3d14dd82b9d8ad5f0c2b04abba0,Joghurt Erdbeere,Joghurt,0.5,175228,SILK Strawberry soy yogurt,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+55e3a4747877efe884ccc150db614f6be749,Joghurt natur 1.5%,Joghurt,0.2,167722,Tofu yogurt,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+eeebacc8267c10117fd95952574bc6550996,Joghurt natur 3.5%,Joghurt,0.45,2553976,3.5% WHOLE MILK YOGURT,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+0ac1fc3271e028ff86a9c016f4d60d01c144,Joghurt Vanille,Joghurt,0.6667,2705452,"Frozen yogurt, vanilla",matched,,
+03e2f5c8cc8480df364a7b7e63a93aa8c0c7,Johannisbeere,Obst,0.7,2619245,"CURRANT JELLY, CURRANT",matched,,
+d175db02fcb3cab6668280bfcd33b4d2452c,Johannisbeere (Bio),Obst,0.7,2619245,"CURRANT JELLY, CURRANT",matched,,
+2a4eae5946c1779e1690753873c0099ecab9,Johannisbeere (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+e76e54f485011b0bbe451abd798494a47bf4,Johannisbeere (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8ef7c6e9b85c41d13b6f6ee84158d26fa433,Johannisbeere (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+4cb05830725d560cc6f1494d98fdfbe7bf83,Kabeljau,Fisch,1.0,2099857,COD,matched,,
+9c504989237edaa9e72143198898b22323b2,Kakaopulver,Gewürze,1.0,2133702,COCOA POWDER,matched,,
+b73cf67e5193acd14bd3991c78b18a300fa2,Kaki,Obst,0.75,2709209,"Persimmon, dried",matched,,
+c9f8f08bcb567f59c1214fb7b715c607a4b1,Kaki (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+ee390005d057cffef1158afe7cab5105c471,Kaki (frisch),Obst,0.75,2709209,"Persimmon, dried",matched,,
+d8388e63b66c5404e64be63ae37be134ddf5,Kaki (reif),Obst,0.75,2709209,"Persimmon, dried",matched,,
+02991971073ae1f1f07f2744338ace179569,Kaki (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+4a9a9a1cf21e2e40356489390dea6bd91e1d,Kalbsfilet,Fleisch,0.3333,2706416,Veal Marsala,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+42b253d28ce0b75c629e9206dff10bd0429c,Kalbsfilet (gebraten),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+507172e2454882d1554ab43ff284133c4696,Kalbsfilet (gekocht),Fleisch,0.25,174595,"Bratwurst, veal, cooked",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+7100fd7ef88a3d4dfef1211bdb208d02efe5,Kalbsfilet (roh),Fleisch,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+993ab7aa0bef94901ddfbc7851339ad27b91,Kalbsleber,Fleisch,0.3333,2706153,"Liver, beef",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+f2c97c072b23eef8799f31f6ba66de15fc0a,Kaninchenfleisch,Fleisch,0.75,2705912,Rabbit,matched,,
+feb25acd3da62a8cbb61c117ab0fc895d883,Karotte,Gemüse,0.75,170500,"Carrot, dehydrated",matched,,
+264fe9c5b4fce99583f7158450e9566fd226,Karotte (Bio),Gemüse,0.75,170500,"Carrot, dehydrated",matched,,
+048a8141046161c29943027c07debb322cc0,Karotte (gedämpft),Gemüse,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+8de6d7d0d76766ca394813b0d43812877c70,Karotte (gekocht),Gemüse,0.25,2709677,"Carrots, glazed, cooked",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+7da9b3db28baa4b3c52667cf2dffe9e90605,Karotte (roh),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8e8db3ee99c2986f3d5ec6a6d7884595e440,Karotte (TK),Gemüse,0.25,746764,"Carrots, frozen, unprepared",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+48454daa245c6bf85e6d66790ed9f202e281,Kartoffel,Gemüse,0.75,2709510,Potato patty,matched,,
+ff3f0fe0988630dc33518a767425ae132b48,Kartoffel (Bio),Gemüse,0.75,2709510,Potato patty,matched,,
+4d8a1d07ccc8a701eac0a4606c7381db8635,Kartoffelbrot,Brot,1.0,1934901,POTATO BREAD,matched,,
+45b85c950e86881dc2537e5d6f013b5d5e51,Kartoffel (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+ea3813098f3792df54905d62896b1b8643d5,Kartoffel (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+255511bf541cb810400f5d0874364dac8236,Kartoffel (roh),Gemüse,0.4,169303,"Sweet potato leaves, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+dde458cc2879d48034b7819eaa2a7e97dedf,Kartoffel (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+455b02ae4298587653152cb64926f2a2bf3c,Kichererbse,Hülsenfrüchte,1.0,1865046,CHICKPEA,matched,,
+807929657190ec6907934ac895d8c5c78699,Kidneybohne,Hülsenfrüchte,0.5,2707379,"Kidney beans, NFS",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+94f9abcfe7d1b46e84fc3d45be6be421d106,Kirsche,Obst,1.0,2135570,CHERRY,matched,,
+9431ac980241f6a131420f4293454673bdc9,Kirsche (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+6fcbda2d76d0b2dd3ed2357b18245de49fb2,Kirsche (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+1c20b8a45cbcf221285259d91d897056a7b2,Kirsche (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+d6b4d31df17e2fb1bcf9cbaabff28bfe8fea,Kirsche (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+ab4562d85d195d65d390281c8a0d1f540b5d,Kiwi (TK),Obst,0.5833,2709239,"Kiwi fruit, raw",matched,,
+6c5a3a965d445075cba4b7add853488bf605,Knäckebrot,Brot,1.0,2656088,CRISPBREAD,matched,,
+4655222a006274f123baf4d9beb347d8a5f1,Knoblauch,Gemüse,1.0,1662203,GARLIC,matched,,
+95954e46b297fff0a52a429c389e12ee2ccd,Knoblauch (Bio),Gemüse,0.75,2710169,Garlic sauce,matched,,
+79880638ed5827d6282560501daa4216e164,Knoblauch (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+eaf7cbaf3d5827a506c562a812fea036ad9f,Knoblauch (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9beda06e58e4d781fb682c9abba8f16f9845,Knoblauchpulver,Gewürze,1.0,2493482,GARLIC POWDER,matched,,
+5dc7558a74218a65a32d8d7b4f336a06bc9b,Knoblauch (roh),Gemüse,0.75,2709786,"Garlic, raw",matched,,
+12c373e83a56557c6f8d436daddff2aa03f9,Knoblauch (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+6f93bf9bc316903223940d95d938b1bf5243,Kohlrabi (gekocht),Gemüse,0.75,2709934,"Kohlrabi, cooked",matched,,
+1f998384b7a70f0e2240a0e1d5a80c3e1e9f,Kohlrabi (roh),Gemüse,0.75,168424,"Kohlrabi, raw",matched,,
+1f9148bf382a72e1d4753cc56dc0cc782845,Kohlrabi (TK),Gemüse,0.75,2709934,"Kohlrabi, cooked",matched,,
+367c1a1a670b2f91b1af984c1ff207beab76,Kokoschips,Nüsse,1.0,2656984,COCONUT CHIPS,matched,,
+828cfd2195d7326c42062e30c94b6c05ec9c,Kokosnuss Fruchtfleisch,Obst,0.1667,170112,"Potatoes, baked, flesh, with salt",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+d2327138aa14ad98933dcade45b5370db473,Kokosnuss Fruchtfleisch (Bio),Obst,0.1667,170112,"Potatoes, baked, flesh, with salt",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+f855f8a1aa823af63b92323da9b5167aa481,Kokosnuss Fruchtfleisch (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+b633ad4579a81664ab075b4f5282d97c0f97,Kokosnuss Fruchtfleisch (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+539f680e7f6320a9e4ca9d105fd17f221288,Kokosnuss Fruchtfleisch (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+edddf33fd2eb61589eb2a1e4f127c8c19bcb,Kokosoel,Öle,1.0,2710182,Coconut oil,matched,,
+f28c55ad3cfdb79e2441ef7adf3d846b1c06,Kopfsalat,Gemüse,0.75,2709789,"Lettuce, raw",matched,,
+596926b59256f331785f70659750baf96f3c,Kopfsalat (Bio),Gemüse,0.3333,2706180,Head cheese,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+86e72e5918c2d2b5193c0f4fc461a8cda65a,Kopfsalat (gedämpft),Gemüse,0.75,2709789,"Lettuce, raw",matched,,
+0f2a58b918253b29d85cef1df2b3e77feed2,Kopfsalat (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+77e92af80954b032512e30e3edcee5c7ae9f,Kopfsalat (roh),Gemüse,0.75,2709789,"Lettuce, raw",matched,,
+7e17e837d51585c7a8a5d7707835d0a82994,Kopfsalat (TK),Gemüse,0.75,2709789,"Lettuce, raw",matched,,
+883d60377af55a9e0e4ca35884ea7d21a456,Krabbe,Fisch,1.0,2706344,Crab,matched,,
+fb01e1acc4911116a74e1ad8d23edd03741d,Kreuzkümmel,Gewürze,0.7,1915741,CUMIN GROUND,matched,,
+ad69aa1b0bdbe5e60fbd7ba707fe59c1cdbe,Kürbiskerne,Samen,1.0,2027948,PUMPKIN SEEDS,matched,,
+9ec810bb28272e37d3622b3881c6852c5548,Kürbiskernöl,Öle,0.3333,175151,"Fish, sunfish, pumpkin seed, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+39ace6482b4dcfaebe1328bd878820b677b8,Kurkumapulver,Gewürze,1.0,2390410,TURMERIC POWDER,matched,,
+ce7e8798535ed78b48e581292d86e99222e1,Lachs,Fisch,1.0,1028841,SALMON,matched,,
+f005668a578c19d1f93d17eeb286444c5d5e,Lachsforelle,Fisch,0.25,2706306,"Fish, trout, fried",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+67ffcd8e13c6071fc294f9e2325d6a2ed5a9,Lammkeule,Fleisch,0.1429,172515,"Lamb, New Zealand, imported, leg chop/steak, bone-in, separable lean only, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+e36cfb2abcfc85fa4a2f4be721374dd9730d,Lammkotelett,Fleisch,1.0,2705906,"Lamb, chop",matched,,
+88617c80f1e7d225327606ca650db9fa5e0a,Lauch,Gemüse,0.5333,2255563,"LEEK CHEESE SPREAD, LEEK",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+4388e063c9a76e053c1345182fd16d6286f2,Lauch (Bio),Gemüse,0.35,2017364,"POTATO LEEK ORGANIC SOUP, POTATO LEEK",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+9886abcde6428b4e9dbca67067ea7aaccb8d,Lauch (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+9fbe3f427613e28d846f54d10ed182e07ab9,Lauch (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+95c4df8668d569b066070280213236a74757,Lauch (roh),Gemüse,0.25,2709935,Leeks,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+6fdc636b3af0fc98f74041e3a50a1ef5ad89,Lauch (TK),Gemüse,0.25,2709935,Leeks,weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+5bdd83fbc06c722cc3ddba87969c16f86f2a,Leinoel,Öle,1.0,2710185,Flaxseed oil,matched,,
+2e3d05e33223a18a04c4dd07a8ee8f5f0b0e,Leinsamen,Samen,1.0,2632589,FLAXSEED,matched,,
+401b1e5a5d61d4af79d8c50706fdde765940,Limette,Obst,0.75,2709306,Lime souffle,matched,,
+890ac58ef40f20d3ed2abdb3ff0c46ccb71f,Limette (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+4403bfd0083333b6fdd3fc7769390b74be6d,Limette (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+7645f77808dbb8dd6f8508c9655aa28d4086,Limette (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+22eed7543969007e91e7918b2079d2f045f7,Limette (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+34ae3d7406d6aded4ebe9e3dc2f1c5687cc1,Linsen braun,Hülsenfrüchte,1.0,2596121,BROWN LENTILS,matched,,
+f32443fd76b1c3879e2d821b23551425ac36,Linsen rot,Hülsenfrüchte,1.0,2389482,RED LENTILS,matched,,
+67cd80b201847cddc0d9bf9a6c606ca72254,Litschi,Obst,1.0,2709240,Lychee,matched,,
+fa435e21704e41624cdd077c6b0492c80982,Litschi (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+b3ba0260f773211ebf55d2770832e6f0b6e0,Litschi (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+96de873ff9da9635baf55b0103f10e6209df,Litschi (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+2534f42ed491ad498c413c9ebbee6b3155c0,Litschi (TK),Obst,1.0,2709240,Lychee,matched,,
+d1a4f9d030000b931a156f65e2f3d4587312,Lupine,Hülsenfrüchte,0.4,2508493,"LUPIN FLOUR MADE FROM LUPIN BEAN, LUPIN FLOUR",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+aa2cc0deb9a3f4e43a0f5052a994565dab23,mageres Hähnchenbrust,Fleisch,0.3333,171515,"Chicken breast tenders, breaded, uncooked",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+a710b53a92193aa24c2da9d47e780fb1af95,mageres Rinderhack,Fleisch,1.0,1888309,LEAN GROUND BEEF,matched,,
+b68260e0437e364611fe0817d98fd628933a,mageres Rinderhack (mager),Fleisch,1.0,1888309,LEAN GROUND BEEF,matched,,
+d126e89f555f85a16d7d8c519bf09e6229cc,Mais,Gemüse,1.0,2194089,CORN,matched,,
+a0f42cbd5bdd2e97831f8b7c942f16d0bb9f,Mais (Bio),Gemüse,0.75,2710504,Corn beverage,matched,,
+74ad2a8626825923b9ac7f3b0967de416a29,Mais (gedämpft),Gemüse,0.5833,168037,"Corn, white, steamed (Navajo)",matched,,
+07bf13f414423cdad351615536ec7723fd60,Mais (gekocht),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+30adcde551864ceec66f6553fbacd8784592,Maisgrieß,Getreide,0.3333,169715,"Semolina, enriched",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+845eb42f0d98d0ce89b03865ff405aa02e00,Mais (roh),Gemüse,0.75,2709783,"Corn, raw",matched,,
+6a143087da7236d4b0f1adbca129f6608819,Mais (TK),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+1c10230b55ac31252082b540c550466030b3,Makrele,Fisch,1.0,2068438,MACKEREL,matched,,
+9abf3970fe9ff7cd748c01466aaeb2007811,Mandarine,Obst,0.7,2503019,"MANDARIN ORANGES, MANDARIN",matched,,
+648cb6edeb07be93bf949a7aab6f2542b245,Mandarine (Bio),Obst,0.5,2710832,"Mandarin, seedless, peeled, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+49deb06aa8e3341f9124aafdf52783403229,Mandarine (frisch),Obst,0.5,2710832,"Mandarin, seedless, peeled, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+23e4f68c268dc040902e4086929ae403687b,Mandarine (reif),Obst,0.5,2710832,"Mandarin, seedless, peeled, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+4cbbef527781c352f8cf98a4091e743623ef,Mandarine (TK),Obst,0.5,2710832,"Mandarin, seedless, peeled, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+2ce9a2173113c3f7424b897411dc6fcd7218,Mandelmus,Nüsse,1.0,2707535,Almond paste,matched,,
+697f07b1c178caed55341fee3c53454538e9,Mango (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+6245819375e4ec15d8ef080cf824183cbcad,Mango (frisch),Obst,0.75,2709242,"Mango, raw",matched,,
+58a9b751512f913239084a25319d772227a0,Mangold,Gemüse,0.7667,1942794,RAINBOW SWISS CHARD,matched,,
+1bad64d6325a6883cf20efa38af0c63b9487,Mangold (Bio),Gemüse,0.7667,1942794,RAINBOW SWISS CHARD,matched,,
+890822c4928c500bc782d1efcdb5f71bde6f,Mangold (gedämpft),Gemüse,0.7667,1942794,RAINBOW SWISS CHARD,matched,,
+1a1e9d823c7d7f52e7bf760940de6e12351c,Mangold (gekocht),Gemüse,0.7667,1942794,RAINBOW SWISS CHARD,matched,,
+7652d4b613c99f28aaf9c12c03baceb38e6d,Mangold (roh),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+bad7f4c895b50949bd622cbc07b243670e78,Mangold (TK),Gemüse,0.75,2709575,"Chard, cooked",matched,,
+0566b44858711b5a82b62179e43aa8a0b8c8,Mango (TK),Obst,0.75,2709244,"Mango, frozen",matched,,
+cb658d2bc97f38e9a3e0a9a7f078df973679,Meersalz,Gewürze,1.0,359145,SEA SALT,matched,,
+7cd742688d5467282f2ddda3b4d9659c0da5,Mehrkornbrot,Brot,1.0,2101740,MULTIGRAIN BREAD,matched,,
+cba974be011cd35096989c7bca2eb3dc420d,Miesmuschel,Fisch,1.0,2706350,Mussels,matched,,
+341295360d3d7d9151e452e5d0a407bc0e68,Mischbrot,Brot,0.3333,2707850,"Bread, fruit",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+8b1b2cd85d7f4550b993d718df64b0e06f64,Mohn,Samen,1.0,2059254,POPPY SEEDS,matched,,
+2ba3aa42f2221b1808bf5721b218a5900d49,Mungbohne,Hülsenfrüchte,0.5,2707389,"Mung beans, cooked",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+e266c3660a75874c1e898801f3d6dfca8c9e,Nektarine,Obst,0.75,2709245,"Nectarine, raw",matched,,
+58c31b0898eac68e009e881121ef3b43d6d9,Nektarine (Bio),Obst,0.75,2709245,"Nectarine, raw",matched,,
+6d81bae1f815c7c9645647e5f2375fbb74bc,Nektarine (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+418bdf4be6c47f7d441fe47d814af3b83596,Nektarine (reif),Obst,0.75,2709245,"Nectarine, raw",matched,,
+76d3a679571788aae9cf9dc42e856e38729e,Nektarine (TK),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+30c3011184e5818aacb5b85f24f8b8964600,Olivenöl,Öle,1.0,2710186,Olive oil,matched,,
+23eea31478c853afce11c5bd2e0781c09696,Omelett natur,Eier,0.3333,2707861,"Cheesecake, plain",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+d2e138ac2632de813ebec17f572f99dc53a9,Papaya (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+94174b164bec4de5c9358b92bf0aa7132b65,Papaya (frisch),Obst,0.75,2709247,"Papaya, canned",matched,,
+8decd3219ed29c26dd28baa1f4dcf62c2ffd,Papaya (reif),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+568613e0ea73e1c442fb4f088ca52545ba2a,Papaya (TK),Obst,0.75,2709247,"Papaya, canned",matched,,
+8aa7537a51b927bdedb727e368f354c9bda3,Paprika gelb (gekocht),Gemüse,0.4,2258589,"Peppers, bell, yellow, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+8691ef4158736306c69905543193dab61315,Paprika gelb (TK),Gemüse,0.4,2258589,"Peppers, bell, yellow, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+a5a99a055b044416a70135ce4d39e06fc59c,Paprika grün (gedämpft),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+2057029f6a1dc61089b17eeb8be5694b84bb,Paprika grün (gekocht),Gemüse,0.4,2258588,"Peppers, bell, green, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+ae6141edda166966e87a93ed9b590eb5b9b5,Paprikapulver,Gewürze,0.6167,2285603,PAPRIKA PIMENTON POWDER,matched,,
+2581cbc168eeb47d64c74289fca1a3d9ff58,Paprika rot (TK),Gemüse,0.4,2258590,"Peppers, bell, red, raw",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+2da2166c28e2dc25f704b580e676186f9841,Paranuss,Nüsse,0.5833,2707492,Brazil nuts,matched,,
+658162e9af05007769d0f540072d6f334a3f,Parmesan,Käse,0.4833,171247,"Cheese, parmesan, grated",weak_match,WEAK_MATCH,"Treffer zu unsicher, manuelle Prüfung nötig."
+3b3f5778196304f6a5eb1167df2415b72fcf,Passionsfrucht,Obst,1.0,454157,PASSION FRUIT,matched,,
+61249ad7e8ebf98e4bce1d468a842549639f,Passionsfrucht (Bio),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+8382f1e0308b1ac23d4189f18103a1b60c86,Passionsfrucht (frisch),Obst,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
+c5768448f22f2c229f3d3a7dd8d69e93dd0d,Passionsfrucht (reif),Obst,0.9167,2709348,Passion fruit nectar,matched,,
+b8ed2014ba1a3b708406ad1eabfdae4ff359,Passionsfrucht (TK),Obst,0.9167,2709348,Passion fruit nectar,matched,,
+79a217ed0bdabdedf3cbacfe801a8352a846,Pasta weiß,Getreide,0.75,2708357,"Pasta, cooked",matched,,
+e84c44a8a0c9e1f1bc644760d206f1b6239d,Pekannuss,Nüsse,0.0,,,no_match,NO_MATCH,Kein USDA Treffer für den Begriff.
+581a954c79b099252f456a65074ab773f4c7,Pfeffer schwarz,Gewürze,1.0,2157235,BLACK PEPPER,matched,,
+29371c30453099272e3ced9c6709f9f6c9fc,Pfifferling,Gemüse,0.7,2592777,"CHANTERELLE MUSHROOMS, CHANTERELLE",matched,,
+856fef0ee03ec42060f7c80c54bc4e9afc56,Pfifferling (Bio),Gemüse,0.0,,,api_error,HTTP_400,Ungültige Anfrage an USDA.
