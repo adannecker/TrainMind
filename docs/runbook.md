@@ -94,6 +94,10 @@ Fuer produktiven Betrieb:
 - `.env` sicher verwalten.
 - `APP_ENCRYPTION_KEY` getrennt und sicher sichern.
 
+Full-Dump und Wiederherstellung sind separat dokumentiert:
+
+- [Backup und Restore](./backup-and-restore.md)
+
 ## 8.1 Verschluesselung fuer API-/Provider-Keys
 
 - `APP_ENCRYPTION_KEY` ist der zentrale App-Verschluesselungsschluessel.

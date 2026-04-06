@@ -67,6 +67,7 @@ Account manuell anlegen:
 - [Architektur](docs/architecture.md)
 - [Services und API](docs/services-and-api.md)
 - [Datenbank und Schemata](docs/database-and-schemas.md)
+- [Backup und Restore](docs/backup-and-restore.md)
 - [Integrationen](docs/integrations.md)
 - [Mobile App](docs/mobile-app.md)
 - [Runbook und Betrieb](docs/runbook.md)

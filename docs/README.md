@@ -7,6 +7,7 @@ Diese Dokumentation beschreibt den aktuellen Stand des Projekts.
 - [Architektur](./architecture.md)
 - [Services und API](./services-and-api.md)
 - [Datenbank und Schemata](./database-and-schemas.md)
+- [Backup und Restore](./backup-and-restore.md)
 - [Integrationen](./integrations.md)
 - [Mobile App](./mobile-app.md)
 - [Runbook und Betrieb](./runbook.md)
