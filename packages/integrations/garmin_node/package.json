@@ -1,0 +1,13 @@
+{
+  "name": "trainmind-garmin-node-helper",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Node helper for Garmin Connect access used by TrainMind backend",
+  "main": "cli.js",
+  "scripts": {
+    "check": "node cli.js health"
+  },
+  "dependencies": {
+    "garmin-connect": "^1.6.2"
+  }
+}

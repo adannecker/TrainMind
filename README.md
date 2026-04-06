@@ -73,5 +73,5 @@ Account manuell anlegen:
 
 ## Analyse-Leitlinie
 
-- AktivitÃ¤tsanalysen mÃ¼ssen immer zeitbezogen mit dem zum AktivitÃ¤tszeitpunkt gÃ¼ltigen `FTP` und dem bis dahin hÃ¶chsten gÃ¼ltigen `MaxHF`-Wert rechnen.
+- Aktivitätsanalysen müssen immer zeitbezogen mit dem zum Aktivitätszeitpunkt gültigen `FTP` und dem bis dahin höchsten gültigen `MaxHF`-Wert rechnen.
 - Diese Referenzwerte beeinflussen insbesondere Zonenlogik, Intervall-Erkennung und Stress-/Load-Bewertungen.

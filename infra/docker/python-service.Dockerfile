@@ -5,11 +5,16 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY apps ./apps
 COPY packages ./packages
 
-EXPOSE 8000
+RUN cd /app/packages/integrations/garmin_node && npm install
 
+EXPOSE 8000

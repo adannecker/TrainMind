@@ -150,7 +150,7 @@ function formatPer100Value(value: number | null | undefined, unit: string): stri
     if (abs >= 1) return `${round1(numeric)} mg`;
     return `${Math.round(numeric * 1000)} µg`;
   }
-  if (unit === "µg" || unit === "Âµg") {
+  if (unit === "µg" || unit === "mcg" || unit === "μg") {
     return `${round1(numeric)} µg`;
   }
   return `${round1(numeric)} ${unit}`;
@@ -178,7 +178,7 @@ function formatDisplayValue(
     if (abs >= 1) return `${round1(numeric)} mg`;
     return `${Math.round(numeric * 1000)} µg`;
   }
-  if (unit === "µg" || unit === "Âµg") {
+  if (unit === "µg" || unit === "mcg" || unit === "μg") {
     return `${round1(numeric)} µg`;
   }
   return `${round1(numeric)} ${unit}`;

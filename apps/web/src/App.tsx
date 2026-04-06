@@ -8,24 +8,33 @@ import { AchievementsPage } from "./pages/AchievementsPage";
 import { ActivityDetailPage } from "./pages/ActivityDetailPage";
 import { ActivitiesAllPage } from "./pages/ActivitiesAllPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
+import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { HomePage } from "./pages/HomePage";
 import { ImportFilesPage } from "./pages/ImportFilesPage";
 import { IngredientsPage } from "./pages/IngredientsPage";
 import { LoginPage } from "./pages/LoginPage";
 import { NutritionPage } from "./pages/NutritionPage";
+import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { RecheckRidesPage } from "./pages/RecheckRidesPage";
 import { RecipesPage } from "./pages/RecipesPage";
 import { SetPasswordPage } from "./pages/SetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ImpressumPage, PrivacyPage } from "./pages/LegalPages";
-import { TrainingBasicsPage, TrainingConfigPage, TrainingPlansPage } from "./pages/TrainingPages";
+import {
+  TrainingAnalysisPage,
+  TrainingBasicsPage,
+  TrainingConfigPage,
+  TrainingHfDevelopmentPage,
+  TrainingPlansPage,
+} from "./pages/TrainingPages";
 
 type NavItem = {
   label: string;
-  to: string;
+  to?: string;
   disabled?: boolean;
   note?: string;
+  children?: NavItem[];
 };
 
 type NavGroup = {
@@ -44,10 +53,23 @@ const navGroups: NavGroup[] = [
     label: "Setup",
     items: [
       { label: "Einstellungen", to: "/setup/settings" },
-      { label: "Neue Rides prüfen", to: "/setup/check-rides", disabled: true, note: "Verfügbar am 28.03" },
-      { label: "Import Files", to: "/setup/import-files" },
-      { label: "Recheck all Rides", to: "/setup/recheck-rides" },
-      { label: "Fix FIT file", to: "/setup/fix-fit-file" },
+      { label: "Neue Rides prüfen", to: "/setup/check-rides" },
+    ],
+  },
+  {
+    key: "helper",
+    label: "Helper",
+    items: [
+      { label: "Recheck Achievements", to: "/helper/recheck-achievements" },
+      { label: "Recheck Missing Data", to: "/helper/recheck-missing-data" },
+    ],
+  },
+  {
+    key: "tools",
+    label: "Tools",
+    items: [
+      { label: "Import Files", to: "/tools/import-files" },
+      { label: "Fix FIT file", to: "/tools/fix-fit-file" },
     ],
   },
   {
@@ -73,6 +95,11 @@ const navGroups: NavGroup[] = [
     label: "Training",
     items: [
       { label: "Grunddaten", to: "/training/basics" },
+      {
+        label: "Analyse",
+        to: "/training/analysis",
+        children: [{ label: "HF Entwicklung", to: "/training/analysis/hf-development" }],
+      },
       { label: "Training Konfiguration", to: "/training/configuration" },
       { label: "Trainingspläne", to: "/training/plans" },
     ],
@@ -95,10 +122,42 @@ function getDefaultNavGroupOrder(): string[] {
 }
 
 function normalizeNavGroupOrder(order: string[] | null | undefined): string[] {
-  const validKeys = new Set(navGroups.map((group) => group.key));
-  const normalized = (order ?? []).filter((key) => validKeys.has(key));
-  const missing = getDefaultNavGroupOrder().filter((key) => !normalized.includes(key));
-  return normalized.length ? [...normalized, ...missing] : getDefaultNavGroupOrder();
+  const defaultOrder = getDefaultNavGroupOrder();
+  const validKeys = new Set(defaultOrder);
+  const normalized = (order ?? []).filter((key, index, list) => validKeys.has(key) && list.indexOf(key) === index);
+  if (!normalized.length) {
+    return defaultOrder;
+  }
+
+  const result = normalized.slice();
+  for (const key of defaultOrder) {
+    if (result.includes(key)) continue;
+
+    const defaultIndex = defaultOrder.indexOf(key);
+    let insertAt = result.length;
+
+    for (let index = defaultIndex + 1; index < defaultOrder.length; index += 1) {
+      const nextKeyIndex = result.indexOf(defaultOrder[index]);
+      if (nextKeyIndex !== -1) {
+        insertAt = nextKeyIndex;
+        break;
+      }
+    }
+
+    if (insertAt === result.length) {
+      for (let index = defaultIndex - 1; index >= 0; index -= 1) {
+        const previousKeyIndex = result.indexOf(defaultOrder[index]);
+        if (previousKeyIndex !== -1) {
+          insertAt = previousKeyIndex + 1;
+          break;
+        }
+      }
+    }
+
+    result.splice(insertAt, 0, key);
+  }
+
+  return result;
 }
 
 function navOrdersEqual(left: string[] | null, right: string[]): boolean {
@@ -111,6 +170,7 @@ function SidebarGroup({
   open,
   onToggle,
   items,
+  currentPath,
   draggable,
   dragging,
   dropTarget,
@@ -124,6 +184,7 @@ function SidebarGroup({
   open: boolean;
   onToggle: () => void;
   items: NavItem[];
+  currentPath: string;
   draggable?: boolean;
   dragging?: boolean;
   dropTarget?: boolean;
@@ -132,6 +193,64 @@ function SidebarGroup({
   onDragOver?: (event: ReactDragEvent<HTMLDivElement>, key: string) => void;
   onDrop?: (event: ReactDragEvent<HTMLDivElement>, key: string) => void;
 }) {
+  function isPathActive(path?: string): boolean {
+    if (!path) return false;
+    return currentPath === path || currentPath.startsWith(`${path}/`);
+  }
+
+  function renderItem(item: NavItem, depth = 0): JSX.Element {
+    const hasChildren = Boolean(item.children?.length);
+    const childActive = hasChildren ? item.children!.some((child) => isPathActive(child.to)) : false;
+    const itemActive = isPathActive(item.to) || childActive;
+    const className = `nav-sub-link ${depth > 0 ? "nav-sub-link-child" : ""} ${itemActive ? "active" : ""}`.trim();
+
+    if (item.disabled && item.to !== "/setup/check-rides") {
+      return (
+        <div key={`${item.label}-${depth}`} className={`${className} disabled`} aria-disabled="true">
+          <span>{item.label}</span>
+          {item.note ? <small>{item.note}</small> : null}
+        </div>
+      );
+    }
+
+    if (hasChildren) {
+      return (
+        <div key={item.to ?? item.label} className="nav-sub-section">
+          {item.to ? (
+            <NavLink to={item.to} end className={() => className}>
+              <span>{item.label}</span>
+              {item.note ? <small>{item.note}</small> : null}
+            </NavLink>
+          ) : (
+            <div className={className}>
+              <span>{item.label}</span>
+              {item.note ? <small>{item.note}</small> : null}
+            </div>
+          )}
+          <div className="nav-sub-children">
+            {item.children!.map((child) => renderItem(child, depth + 1))}
+          </div>
+        </div>
+      );
+    }
+
+    if (item.to) {
+      return (
+        <NavLink key={item.to} to={item.to} end className={() => className}>
+          <span>{item.label}</span>
+          {item.note ? <small>{item.note}</small> : null}
+        </NavLink>
+      );
+    }
+
+    return (
+      <div key={item.label} className={className}>
+        <span>{item.label}</span>
+        {item.note ? <small>{item.note}</small> : null}
+      </div>
+    );
+  }
+
   return (
     <div
       className={`nav-group ${dragging ? "nav-group-dragging" : ""} ${dropTarget ? "nav-group-drop-target" : ""}`}
@@ -152,38 +271,10 @@ function SidebarGroup({
       </button>
       {open ? (
         <div className="nav-sub-list">
-          {items.map((item) =>
-            item.disabled ? (
-              <div key={item.to} className="nav-sub-link disabled" aria-disabled="true">
-                <span>{item.label}</span>
-                {item.note ? <small>{item.note}</small> : null}
-              </div>
-            ) : (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                className={({ isActive }) => `nav-sub-link ${isActive ? "active" : ""}`}
-              >
-                <span>{item.label}</span>
-                {item.note ? <small>{item.note}</small> : null}
-              </NavLink>
-            ),
-          )}
+          {items.map((item) => renderItem(item))}
         </div>
       ) : null}
     </div>
-  );
-}
-
-function FeatureUnavailablePage({ title, note }: { title: string; note: string }) {
-  return (
-    <section className="page">
-      <div className="hero">
-        <p className="eyebrow">Setup</p>
-        <h1>{title}</h1>
-        <p className="lead">{note}</p>
-      </div>
-    </section>
   );
 }
 
@@ -214,6 +305,8 @@ function Layout() {
   const [savedGroupOrder, setSavedGroupOrder] = useState<string[] | null>(null);
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
     setup: true,
+    helper: true,
+    tools: true,
     activities: true,
     nutrition: true,
     training: true,
@@ -476,6 +569,7 @@ function Layout() {
                     }))
                   }
                   items={group.items}
+                  currentPath={location.pathname}
                   draggable
                   dragging={draggedGroupKey === group.key}
                   dropTarget={dropTargetGroupKey === group.key}
@@ -503,13 +597,23 @@ function Layout() {
             <Routes>
               <Route path="/" element={<HomePage />} />
               <Route path="/setup/settings" element={<SettingsPage />} />
+              <Route path="/setup/check-rides" element={<CheckRidesPage />} />
+              <Route path="/setup/import-files" element={<Navigate to="/tools/import-files" replace />} />
+              <Route path="/setup/recheck-rides" element={<Navigate to="/helper/recheck-achievements" replace />} />
+              <Route path="/setup/fix-fit-file" element={<Navigate to="/tools/fix-fit-file" replace />} />
+              <Route path="/helper/recheck-achievements" element={<RecheckRidesPage />} />
               <Route
-                path="/setup/check-rides"
-                element={<FeatureUnavailablePage title="Neue Rides prüfen" note="Verfügbar am 28.03." />}
+                path="/helper/recheck-missing-data"
+                element={
+                  <PlaceholderPage
+                    badge="Helper"
+                    title="Recheck Missing Data"
+                    description="Hier können wir künftig einmal komplett prüfen, ob berechnete Felder, Kennzahlen und Analyse-Caches für alle Aktivitäten vollständig belegt sind."
+                  />
+                }
               />
-              <Route path="/setup/import-files" element={<ImportFilesPage />} />
-              <Route path="/setup/recheck-rides" element={<RecheckRidesPage />} />
-              <Route path="/setup/fix-fit-file" element={<FitRepairPage />} />
+              <Route path="/tools/import-files" element={<ImportFilesPage />} />
+              <Route path="/tools/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
               <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
               <Route path="/nutrition/entries" element={<NutritionPage />} />
@@ -517,6 +621,8 @@ function Layout() {
               <Route path="/nutrition/products" element={<IngredientsPage initialKind="product" />} />
               <Route path="/nutrition/recipes" element={<RecipesPage />} />
               <Route path="/training/basics" element={<TrainingBasicsPage />} />
+              <Route path="/training/analysis" element={<TrainingAnalysisPage />} />
+              <Route path="/training/analysis/hf-development" element={<TrainingHfDevelopmentPage />} />
               <Route path="/training/configuration" element={<TrainingConfigPage />} />
               <Route path="/training/plans" element={<TrainingPlansPage />} />
               <Route path="/achievements/cycling" element={<AchievementsPage initialSection="Radfahren" />} />

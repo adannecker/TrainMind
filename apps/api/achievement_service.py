@@ -4,13 +4,15 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy import delete, select
 
 from apps.api.training_service import get_user_zone_model_settings, get_zone_model
 from packages.db.models import Activity, ActivityLap, ActivityRecord, ActivitySession, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
 from packages.db.session import SessionLocal
+
+ACHIEVEMENT_RECHECK_PASSES = 7
 
 SECTION_META: dict[str, dict[str, Any]] = {
     "cycling": {
@@ -299,16 +301,23 @@ def _parse_hf_achievement_key(key: str) -> tuple[str, int] | None:
 def _compute_hf_bucket_matrix(
     activities: list[Activity],
     records_by_activity: dict[int, list[ActivityRecord]],
+    progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     best_by_cell: dict[tuple[str, int], dict[str, Any]] = {}
     highest_bucket: int | None = None
 
-    for activity in activities:
+    total_activities = len(activities)
+    if progress_callback is not None:
+        progress_callback(0, total_activities)
+
+    for index, activity in enumerate(activities, start=1):
         activity_records = records_by_activity.get(activity.id, [])
         power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
         hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
         series_length = min(len(power_series), len(hr_series))
         if series_length <= 0:
+            if progress_callback is not None:
+                progress_callback(index, total_activities)
             continue
         power_series = power_series[:series_length]
         hr_series = hr_series[:series_length]
@@ -340,6 +349,8 @@ def _compute_hf_bucket_matrix(
                     "achieved_at": _serialize_datetime(activity.started_at),
                     "achieved_at_label": _format_date(activity.started_at),
                 }
+        if progress_callback is not None:
+            progress_callback(index, total_activities)
 
     windows = [{"key": key, "seconds": seconds, "label": label} for key, seconds, label in HF_WINDOW_DEFINITIONS]
     if highest_bucket is None:
@@ -543,7 +554,10 @@ def get_activity_achievement_check_status(user_id: int) -> dict[str, Any]:
     }
 
 
-def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
+def rebuild_activity_achievement_checks(
+    user_id: int,
+    progress_callback: Callable[[str, int, int, int, int], None] | None = None,
+) -> dict[str, Any]:
     zone_settings = get_user_zone_model_settings(user_id)
     max_hr_zone_model_key = zone_settings.get("max_hr", {}).get("model_key")
     with SessionLocal() as session:
@@ -586,7 +600,11 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
         summaries = {activity.id: _empty_activity_check_summary(activity) for activity in activities}
 
         week_totals: dict[date, float] = defaultdict(float)
-        for activity in activities:
+        total_activities = len(activities)
+        if progress_callback is not None:
+            progress_callback("Distanz und Wochen", 1, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
+
+        for index, activity in enumerate(activities, start=1):
             ride_km = _km(activity.distance_m)
             for definition in DISTANCE_DEFINITIONS:
                 if ride_km >= float(definition.threshold or 0):
@@ -600,6 +618,8 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                         proof=f"{round(ride_km, 1)} km",
                     )
             if activity.started_at is None:
+                if progress_callback is not None:
+                    progress_callback("Distanz und Wochen", 1, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
                 continue
             week_key = _week_start(activity.started_at.date())
             previous_week_km = week_totals[week_key]
@@ -617,6 +637,8 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                         hashtag=_definition_hashtag(definition),
                         proof=f"Woche bei {round(current_week_km, 1)} km",
                     )
+            if progress_callback is not None:
+                progress_callback("Distanz und Wochen", 1, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
 
         day_counts: dict[date, int] = defaultdict(int)
         for activity in activities:
@@ -632,8 +654,13 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
             previous_day = day
         weekend_days = set(active_days)
 
-        for activity in activities:
+        if progress_callback is not None:
+            progress_callback("Momente", 2, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
+
+        for index, activity in enumerate(activities, start=1):
             if activity.started_at is None:
+                if progress_callback is not None:
+                    progress_callback("Momente", 2, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
                 continue
             ride_day = activity.started_at.date()
             start_minutes = activity.started_at.hour * 60 + activity.started_at.minute
@@ -672,8 +699,13 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                         hashtag=_definition_hashtag(definition),
                         proof=f"Serie {current_streak} Tage",
                     )
+            if progress_callback is not None:
+                progress_callback("Momente", 2, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
 
-        for activity in activities:
+        if progress_callback is not None:
+            progress_callback("Zonen", 3, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
+
+        for index, activity in enumerate(activities, start=1):
             zone1_seconds = _longest_zone1_seconds(
                 records_by_activity.get(activity.id, []),
                 _effective_max_hr(metrics, activity.started_at),
@@ -691,9 +723,14 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                         hashtag=_definition_hashtag(definition),
                         proof=f"{int(round(zone1_minutes))} min",
                     )
+            if progress_callback is not None:
+                progress_callback("Zonen", 3, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
 
         record_values: dict[str, float] = {}
-        for activity in activities:
+        if progress_callback is not None:
+            progress_callback("Records", 4, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
+
+        for index, activity in enumerate(activities, start=1):
             activity_records = records_by_activity.get(activity.id, [])
             power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
             hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
@@ -726,8 +763,18 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                     hashtag=_definition_hashtag(definition),
                     proof=f"{round(candidate_value)} {unit}",
                 )
+            if progress_callback is not None:
+                progress_callback("Records", 4, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
 
-        hf_bucket_matrix = _compute_hf_bucket_matrix(activities, records_by_activity)
+        hf_bucket_matrix = _compute_hf_bucket_matrix(
+            activities,
+            records_by_activity,
+            progress_callback=(
+                None
+                if progress_callback is None
+                else lambda current, total: progress_callback("HF-Buckets", 5, ACHIEVEMENT_RECHECK_PASSES, current, total)
+            ),
+        )
         for row in hf_bucket_matrix["rows"]:
             bucket_label = str(row["bucket_label"])
             for index, value in enumerate(row["values"]):
@@ -742,7 +789,7 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                     category="hf",
                     detail="Beste gefundene Durchschnitts-HF in diesem Watt- und Zeitfenster.",
                     hashtag=_slugify_hashtag(f"hf {window['label']} {bucket_label}"),
-                    proof=f"Avg HF {round(float(value['avg_hr_bpm']))} bpm bei Avg Power {round(float(value['avg_power_w']))} W",
+                    proof=f"Ø HF {round(float(value['avg_hr_bpm']))} bpm bei Ø Power {round(float(value['avg_power_w']))} W",
                     meta={
                         "bucket_start_w": row["bucket_start_w"],
                         "bucket_end_w": row["bucket_end_w"],
@@ -756,11 +803,16 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
                 )
 
         checked_at = datetime.utcnow()
-        for activity in activities:
+        if progress_callback is not None:
+            progress_callback("Persistieren", 6, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
+
+        for index, activity in enumerate(activities, start=1):
             public_summary = _public_activity_check_summary(summaries[activity.id])
             activity.achievements_checked_at = checked_at
             activity.achievements_check_version = ACHIEVEMENT_CHECK_VERSION
             activity.achievements_summary_json = json.dumps(public_summary, ensure_ascii=False)
+            if progress_callback is not None:
+                progress_callback("Persistieren", 6, ACHIEVEMENT_RECHECK_PASSES, index, total_activities)
         _persist_cycling_achievements(
             session,
             user_id=user_id,
@@ -768,6 +820,9 @@ def rebuild_activity_achievement_checks(user_id: int) -> dict[str, Any]:
             metrics=metrics,
             records_by_activity=records_by_activity,
             hf_bucket_matrix=hf_bucket_matrix,
+            progress_callback=progress_callback,
+            pass_index=7,
+            pass_count=ACHIEVEMENT_RECHECK_PASSES,
         )
         session.commit()
 
@@ -1035,13 +1090,20 @@ def _persist_cycling_achievements(
     metrics: list[UserTrainingMetric],
     records_by_activity: dict[int, list[ActivityRecord]],
     hf_bucket_matrix: dict[str, Any],
+    progress_callback: Callable[[str, int, int, int, int], None] | None = None,
+    pass_index: int = 7,
+    pass_count: int = ACHIEVEMENT_RECHECK_PASSES,
 ) -> None:
     zone_settings = get_user_zone_model_settings(user_id)
     max_hr_zone_model_key = zone_settings.get("max_hr", {}).get("model_key")
     results = {definition.key: _locked(definition) for definition in CYCLING_DEFINITIONS}
 
+    total_activities = len(activities)
+
     max_ride_km = 0.0
-    for activity in activities:
+    if progress_callback is not None:
+        progress_callback("Cycling-Achievements", pass_index, pass_count, 0, total_activities)
+    for index, activity in enumerate(activities, start=1):
         ride_km = _km(activity.distance_m)
         max_ride_km = max(max_ride_km, ride_km)
         for definition in DISTANCE_DEFINITIONS:
@@ -1053,6 +1115,8 @@ def _persist_cycling_achievements(
                 result["achieved_at"] = activity.started_at
                 result["activity_id"] = activity.id
                 result["activity_name"] = activity.name or "Aktivitaet"
+        if progress_callback is not None:
+            progress_callback("Cycling-Achievements", pass_index, pass_count, index, total_activities)
 
     week_totals: dict[date, float] = defaultdict(float)
     for activity in activities:
@@ -1262,7 +1326,7 @@ def _persist_cycling_achievements(
                     activity_id=int(value["activity_id"]),
                     activity_name=value["activity_name"],
                     current_value=float(value["avg_hr_bpm"]),
-                    current_value_label=f"Avg HF {round(float(value['avg_hr_bpm']))} bpm bei Avg Power {round(float(value['avg_power_w']))} W",
+                    current_value_label=f"Ø HF {round(float(value['avg_hr_bpm']))} bpm bei Ø Power {round(float(value['avg_power_w']))} W",
                     sort_index=hf_sort_base + (row["bucket_start_w"] * 10) + index,
                     created_at=now,
                     updated_at=now,

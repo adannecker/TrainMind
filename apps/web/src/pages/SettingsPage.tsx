@@ -11,10 +11,64 @@ type CredentialStatus = {
   active_source: "db" | "env" | "none";
 };
 
+type GarminSessionStatus = {
+  provider: string;
+  active_source: "env" | "none";
+  email_configured: boolean;
+  token_files_present: boolean;
+  tokenstore_path: string;
+  auth_mode: string | null;
+  login_ok: boolean | null;
+};
+
 type LlmStatus = {
   provider: string;
   configured: boolean;
   key_hint: string | null;
+  model: string | null;
+  admin_key_configured: boolean;
+  balance_available: boolean;
+  balance_value: number | null;
+  balance_currency: string | null;
+  balance_note: string | null;
+  org_costs: {
+    today: LlmCostSummary;
+    last_7_days: LlmCostSummary;
+    last_30_days: LlmCostSummary;
+  };
+  local_usage: LlmLocalUsage;
+  recent_events: LlmRecentEvent[];
+};
+
+type LlmCostSummary = {
+  available: boolean;
+  value: number | null;
+  currency: string | null;
+  message: string | null;
+};
+
+type LlmLocalUsage = {
+  last_7_days_requests: number;
+  last_30_days_requests: number;
+  last_30_days_success: number;
+  last_30_days_errors: number;
+  last_30_days_input_tokens: number;
+  last_30_days_output_tokens: number;
+  last_30_days_total_tokens: number;
+  last_used_at: string | null;
+};
+
+type LlmRecentEvent = {
+  id: number;
+  feature_key: string;
+  model: string | null;
+  status: string;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  latency_ms: number | null;
+  created_at: string;
+  error_message: string | null;
 };
 
 type UserProfile = {
@@ -80,7 +134,7 @@ type AuthMe = {
 
 const baseTabs: Array<{ id: Exclude<SettingsTab, "admin">; label: string; description: string }> = [
   { id: "personal", label: "Persönliche Daten", description: "Name und Zielrahmen pflegen" },
-  { id: "garmin", label: "Garmin Zugang", description: "Zugangsdaten sicher hinterlegen" },
+  { id: "garmin", label: "Garmin Zugang", description: ".env-Status und Verbindung pruefen" },
   { id: "weight", label: "Gewicht", description: "Verlauf und Messpunkte verwalten" },
   { id: "llm", label: "LLM Zugang", description: "OpenAI-Konfiguration prüfen" },
 ];
@@ -115,18 +169,44 @@ function normalizeTextValue(value: string | null | undefined): string {
   return (value || "").trim();
 }
 
+function formatCurrencyValue(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null) return "-";
+  const normalizedCurrency = (currency || "usd").toUpperCase();
+  try {
+    return new Intl.NumberFormat("de-DE", {
+      style: "currency",
+      currency: normalizedCurrency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  } catch {
+    return `${value.toFixed(2)} ${normalizedCurrency}`;
+  }
+}
+
+function formatTokenCount(value: number | null | undefined): string {
+  if (value == null) return "-";
+  return new Intl.NumberFormat("de-DE").format(value);
+}
+
+function formatLlmFeatureLabel(value: string): string {
+  if (value === "training_plan:derive") return "Trainingsplan";
+  if (value === "training_config:profile") return "Athletenprofil";
+  if (value === "training_config:goals") return "Ziele";
+  if (value === "training_config:week") return "Wochenorganisation";
+  if (value === "training_config:sources") return "Quellen";
+  return value;
+}
+
 export function SettingsPage() {
   const [activeTab, setActiveTab] = useState<SettingsTab>("personal");
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<number | null>(null);
 
   const [status, setStatus] = useState<CredentialStatus | null>(null);
+  const [sessionStatus, setSessionStatus] = useState<GarminSessionStatus | null>(null);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
 
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [llmLoading, setLlmLoading] = useState(true);
@@ -177,15 +257,23 @@ export function SettingsPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/garmin/credentials-status`);
-      const payload = await parseJsonSafely<CredentialStatus | { detail?: string }>(response);
-      if (!response.ok) {
-        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Failed to load credential status");
+      const [credentialsResponse, sessionResponse] = await Promise.all([
+        apiFetch(`${API_BASE_URL}/garmin/credentials-status`),
+        apiFetch(`${API_BASE_URL}/garmin/session-status`),
+      ]);
+      const credentialsPayload = await parseJsonSafely<CredentialStatus | { detail?: string }>(credentialsResponse);
+      const sessionPayload = await parseJsonSafely<GarminSessionStatus | { detail?: string }>(sessionResponse);
+      if (!credentialsResponse.ok) {
+        throw new Error(typeof credentialsPayload === "object" && credentialsPayload && "detail" in credentialsPayload && credentialsPayload.detail ? credentialsPayload.detail : "Failed to load credential status");
       }
-      if (!payload) {
-        throw new Error("Failed to load credential status: empty response");
+      if (!sessionResponse.ok) {
+        throw new Error(typeof sessionPayload === "object" && sessionPayload && "detail" in sessionPayload && sessionPayload.detail ? sessionPayload.detail : "Garmin-Session konnte nicht geprueft werden.");
       }
-      setStatus(payload as CredentialStatus);
+      if (!credentialsPayload || !sessionPayload) {
+        throw new Error("Garmin-Status konnte nicht geladen werden: leere Antwort.");
+      }
+      setStatus(credentialsPayload as CredentialStatus);
+      setSessionStatus(sessionPayload as GarminSessionStatus);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -346,31 +434,6 @@ export function SettingsPage() {
     }
   }
 
-  async function saveCredentials(e: FormEvent) {
-    e.preventDefault();
-    if (!email.trim() || !password.trim() || saving) return;
-    setSaving(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/garmin/credentials`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password: password.trim() }),
-      });
-      const payload = await parseJsonSafely<{ status?: string; detail?: string }>(response);
-      if (!response.ok) {
-        throw new Error(typeof payload === "object" && payload && payload.detail ? payload.detail : "Failed to save credentials");
-      }
-      setPassword("");
-      setMessage("Garmin-Zugang verschlüsselt in der DB gespeichert.");
-      await loadStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
-    } finally {
-      setSaving(false);
-    }
-  }
 
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
@@ -588,36 +651,40 @@ export function SettingsPage() {
                     <strong>{status.active_source}</strong>
                   </div>
                   <div className="settings-status-chip">
-                    <span>DB verschlüsselt</span>
-                    <strong>{status.has_encrypted_credentials ? "Ja" : "Nein"}</strong>
-                  </div>
-                  <div className="settings-status-chip">
                     <span>Env vorhanden</span>
                     <strong>{status.has_env_credentials ? "Ja" : "Nein"}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Service-Speicherung</span>
+                    <strong>Deaktiviert</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Session-Modus</span>
+                    <strong>{sessionStatus?.auth_mode ?? "-"}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Token-Dateien</span>
+                    <strong>{sessionStatus?.token_files_present ? "Ja" : "Nein"}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Login-Test</span>
+                    <strong>{sessionStatus?.login_ok ? "OK" : sessionStatus?.login_ok === false ? "Fehler" : "-"}</strong>
                   </div>
                 </div>
               ) : null}
               {error ? <p className="error-text">{error}</p> : null}
-              {message ? <p className="info-text">{message}</p> : null}
-
-              <form className="settings-form settings-form-wide" onSubmit={(e) => void saveCredentials(e)}>
-                <label className="settings-label">
-                  Garmin E-Mail
-                  <input className="settings-input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="username" required />
-                </label>
-                <label className="settings-label">
-                  Garmin Passwort
-                  <input className="settings-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required />
-                </label>
-                <div className="settings-actions">
-                  <button className="primary-button" type="submit" disabled={saving}>
-                    {saving ? "Speichere..." : "Verschlüsselt speichern"}
-                  </button>
-                  <button className="secondary-button" type="button" disabled={loading || saving} onClick={() => void loadStatus()}>
-                    Status aktualisieren
-                  </button>
-                </div>
-              </form>
+              <p className="info-text">
+                Garmin nutzt aktuell nur <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> aus der <code>.env</code>.
+                Das Speichern im Service ist vorerst deaktiviert.
+              </p>
+              {sessionStatus?.tokenstore_path ? (
+                <p className="info-text">Tokenstore: <code>{sessionStatus.tokenstore_path}</code></p>
+              ) : null}
+              <div className="settings-actions">
+                <button className="secondary-button" type="button" disabled={loading} onClick={() => void loadStatus()}>
+                  Status aktualisieren
+                </button>
+              </div>
             </div>
           ) : null}
 
@@ -727,10 +794,110 @@ export function SettingsPage() {
                       <span>Key-Hinweis</span>
                       <strong>{llmStatus.key_hint ?? "-"}</strong>
                     </div>
+                    <div className="settings-status-chip">
+                      <span>Modell</span>
+                      <strong>{llmStatus.model ?? "-"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Admin-Key</span>
+                      <strong>{llmStatus.admin_key_configured ? "Ja" : "Nein"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Restguthaben</span>
+                      <strong>
+                        {llmStatus.balance_available
+                          ? formatCurrencyValue(llmStatus.balance_value, llmStatus.balance_currency)
+                          : "Nicht direkt verfügbar"}
+                      </strong>
+                    </div>
                   </div>
-                  <p className="info-text">
-                    Der OpenAI-Schlüssel wird serverseitig aus `.env` gelesen. Änderungen an `.env` werden nach einem API-Neustart sichtbar.
-                  </p>
+                  <div className="settings-note-card">
+                    <p className="info-text">
+                      Der OpenAI-Schlüssel wird serverseitig aus `.env` gelesen. Änderungen an `.env` werden nach einem API-Neustart sichtbar.
+                    </p>
+                    {llmStatus.balance_note ? <p className="info-text">{llmStatus.balance_note}</p> : null}
+                  </div>
+
+                  <div className="section-title-row settings-subsection-title">
+                    <h3>Lokale Nutzung</h3>
+                  </div>
+                  <div className="settings-status-grid">
+                    <div className="settings-status-chip">
+                      <span>Requests 7 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_7_days_requests)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Requests 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_requests)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Erfolge 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_success)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Fehler 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_errors)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Input-Tokens 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_input_tokens)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Output-Tokens 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_output_tokens)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Total Tokens 30 Tage</span>
+                      <strong>{formatTokenCount(llmStatus.local_usage.last_30_days_total_tokens)}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Letzte Nutzung</span>
+                      <strong>{llmStatus.local_usage.last_used_at ? new Date(llmStatus.local_usage.last_used_at).toLocaleString() : "-"}</strong>
+                    </div>
+                  </div>
+
+                  <div className="section-title-row settings-subsection-title">
+                    <h3>OpenAI Kosten</h3>
+                  </div>
+                  <div className="settings-status-grid">
+                    <div className="settings-status-chip">
+                      <span>Heute</span>
+                      <strong>{formatCurrencyValue(llmStatus.org_costs.today.value, llmStatus.org_costs.today.currency)}</strong>
+                      <small>{llmStatus.org_costs.today.available ? "Org/Account" : llmStatus.org_costs.today.message ?? "Nicht verfügbar"}</small>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Letzte 7 Tage</span>
+                      <strong>{formatCurrencyValue(llmStatus.org_costs.last_7_days.value, llmStatus.org_costs.last_7_days.currency)}</strong>
+                      <small>{llmStatus.org_costs.last_7_days.available ? "Org/Account" : llmStatus.org_costs.last_7_days.message ?? "Nicht verfügbar"}</small>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Letzte 30 Tage</span>
+                      <strong>{formatCurrencyValue(llmStatus.org_costs.last_30_days.value, llmStatus.org_costs.last_30_days.currency)}</strong>
+                      <small>{llmStatus.org_costs.last_30_days.available ? "Org/Account" : llmStatus.org_costs.last_30_days.message ?? "Nicht verfügbar"}</small>
+                    </div>
+                  </div>
+
+                  <div className="section-title-row settings-subsection-title">
+                    <h3>Letzte LLM-Aufrufe</h3>
+                  </div>
+                  <div className="settings-llm-events">
+                    {llmStatus.recent_events.length === 0 ? <p className="info-text">Noch keine lokal protokollierten LLM-Aufrufe vorhanden.</p> : null}
+                    {llmStatus.recent_events.map((event) => (
+                      <article className="settings-llm-event" key={event.id}>
+                        <div className="settings-llm-event-head">
+                          <strong>{formatLlmFeatureLabel(event.feature_key)}</strong>
+                          <span>{new Date(event.created_at).toLocaleString()}</span>
+                        </div>
+                        <div className="settings-llm-event-meta">
+                          <span>Modell: {event.model ?? "-"}</span>
+                          <span>Status: {event.status}</span>
+                          <span>Tokens: {formatTokenCount(event.total_tokens)}</span>
+                          <span>Latenz: {event.latency_ms != null ? `${event.latency_ms} ms` : "-"}</span>
+                        </div>
+                        {event.error_message ? <p className="error-text">{event.error_message}</p> : null}
+                      </article>
+                    ))}
+                  </div>
                   <div className="settings-actions">
                     <button className="secondary-button" type="button" onClick={() => void loadLlmStatus()}>
                       Status aktualisieren

@@ -2,17 +2,24 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+import uuid
+from collections import deque
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from dotenv import load_dotenv
 
-from apps.api.achievement_service import get_achievement_section
+from apps.api.achievement_service import ACHIEVEMENT_RECHECK_PASSES, get_achievement_section
 from apps.api.activity_service import (
+    MAX_HR_RECHECK_PASSES,
     delete_activity,
+    derive_activity_llm_analysis,
     get_available_activity_weeks,
     get_activity_detail,
     get_activity_achievement_check_status,
@@ -23,16 +30,17 @@ from apps.api.activity_service import (
 )
 from apps.api.admin_service import delete_user_as_admin, invite_user_as_admin, list_users
 from apps.api.auth_service import get_current_user_from_token, login_user, logout_user, set_password_from_invite
-from apps.api.credential_service import get_service_credentials_status, set_service_credentials
 from apps.api.garmin_service import (
     ingest_recent_garmin_rides,
     get_imported_garmin_summary,
     get_missing_garmin_rides,
     get_missing_garmin_rides_for_period,
+    get_garmin_session_status,
     import_selected_garmin_rides,
     reset_imported_garmin_data,
 )
 from apps.api.garmin_file_import_service import analyze_fit_dump_zip, analyze_saved_fit_dump_zip, import_fit_dump_zip, list_saved_fit_dump_archives
+from apps.api.llm_service import get_llm_status
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
     create_entry,
@@ -62,7 +70,9 @@ from apps.api.training_service import (
     derive_athlete_profile_with_llm,
     derive_training_config_with_llm,
     derive_training_plan_with_llm,
+    get_hf_development,
     list_training_metrics,
+    rebuild_hf_development_cache,
     update_training_metric,
     upsert_training_zone_setting,
 )
@@ -87,6 +97,10 @@ def _parse_cors_origins() -> list[str]:
 
 app = FastAPI(title="TrainMind API", version="0.1.0")
 bearer_scheme = HTTPBearer(auto_error=False)
+_recheck_jobs_lock = threading.Lock()
+_recheck_jobs: dict[int, dict[str, object]] = {}
+_recheck_job_conditions: dict[int, threading.Condition] = {}
+_recheck_job_queues: dict[int, deque[dict[str, object]]] = {}
 
 app.add_middleware(
     CORSMiddleware,
@@ -120,6 +134,167 @@ def get_admin_user(current_user: dict = Depends(get_current_user)) -> dict:
     if not bool(current_user.get("is_admin")):
         raise HTTPException(status_code=403, detail="Admin access required.")
     return current_user
+
+
+def _job_timestamp() -> str:
+    return datetime.utcnow().isoformat() + "Z"
+
+
+def _get_recheck_job_condition(user_id: int) -> threading.Condition:
+    with _recheck_jobs_lock:
+        condition = _recheck_job_conditions.get(user_id)
+        if condition is None:
+            condition = threading.Condition()
+            _recheck_job_conditions[user_id] = condition
+        return condition
+
+
+def _get_recheck_job_queue(user_id: int) -> deque[dict[str, object]]:
+    with _recheck_jobs_lock:
+        queue = _recheck_job_queues.get(user_id)
+        if queue is None:
+            queue = deque()
+            _recheck_job_queues[user_id] = queue
+        return queue
+
+
+def _compute_recheck_progress(job: dict[str, object]) -> int:
+    pass_current = int(job.get("pass_current") or job.get("phase_current") or 0)
+    pass_total = int(job.get("pass_total") or job.get("phase_total") or 0)
+    pass_progress = 0.0 if pass_total <= 0 else min(max(pass_current / pass_total, 0.0), 1.0)
+    pass_index = int(job.get("pass_index") or 0)
+    pass_count = int(job.get("pass_count") or 0)
+    if pass_count <= 0:
+        return 0
+    completed_passes = pass_count if str(job.get("status") or "") == "completed" else max(0, pass_index - 1)
+    overall = ((completed_passes + pass_progress) / pass_count) * 100.0
+    return max(0, min(100, int(round(overall))))
+
+
+def _snapshot_recheck_job(user_id: int) -> dict[str, object]:
+    with _recheck_jobs_lock:
+        job = dict(_recheck_jobs.get(user_id) or {})
+    if not job:
+        return {
+            "status": "idle",
+            "progress_percent": 0,
+            "phase": None,
+            "phase_label": None,
+            "phase_current": 0,
+            "phase_total": 0,
+            "pass_index": 0,
+            "pass_count": 0,
+            "pass_label": None,
+            "pass_current": 0,
+            "pass_total": 0,
+            "version": 0,
+            "result": None,
+            "error": None,
+        }
+    job["progress_percent"] = _compute_recheck_progress(job)
+    return job
+
+
+def _store_recheck_job(user_id: int, updates: dict[str, object]) -> dict[str, object]:
+    condition = _get_recheck_job_condition(user_id)
+    queue = _get_recheck_job_queue(user_id)
+    with _recheck_jobs_lock:
+        current = dict(_recheck_jobs.get(user_id) or {})
+        current.update(updates)
+        current["version"] = int(current.get("version") or 0) + 1
+        current["progress_percent"] = _compute_recheck_progress(current)
+        _recheck_jobs[user_id] = current
+        snapshot = dict(current)
+        queue.append(snapshot)
+    with condition:
+        condition.notify_all()
+    return snapshot
+
+
+def _run_recheck_job(user_id: int, rebuild_max_hr: bool, rebuild_achievements: bool) -> None:
+    try:
+        result: dict[str, object] = {"status": "ok"}
+        total_activities = int(get_activity_achievement_check_status(user_id=user_id).get("total_activities") or 0)
+        total_passes = (MAX_HR_RECHECK_PASSES if rebuild_max_hr else 0) + (ACHIEVEMENT_RECHECK_PASSES if rebuild_achievements else 0) + 1
+        pass_offset = 0
+
+        def _progress_update(global_pass_index: int, pass_label: str, current: int, total: int, phase: str, phase_label: str) -> None:
+            _store_recheck_job(
+                user_id,
+                {
+                    "status": "running",
+                    "phase": phase,
+                    "phase_label": phase_label,
+                    "phase_current": current,
+                    "phase_total": total,
+                    "pass_index": global_pass_index,
+                    "pass_count": total_passes,
+                    "pass_label": pass_label,
+                    "pass_current": current,
+                    "pass_total": total,
+                    "updated_at": _job_timestamp(),
+                },
+            )
+
+        if rebuild_max_hr:
+            _progress_update(pass_offset + 1, "Auslesen", 0, 5, "max_hr", "MaxHF-Verlauf")
+            result["max_hr"] = rebuild_historical_max_hr_from_activities(
+                user_id=user_id,
+                progress_callback=lambda pass_label, pass_index, pass_count, current, total: _progress_update(
+                    pass_offset + pass_index,
+                    pass_label,
+                    current,
+                    total,
+                    "max_hr",
+                    "MaxHF-Verlauf",
+                ),
+            )
+            pass_offset += MAX_HR_RECHECK_PASSES
+
+        if rebuild_achievements:
+            _progress_update(pass_offset + 1, "Distanz und Wochen", 0, total_activities, "achievements", "Achievement-Checks")
+            result["achievements"] = rebuild_activity_achievement_checks(
+                user_id=user_id,
+                progress_callback=lambda pass_label, pass_index, pass_count, current, total: _progress_update(
+                    pass_offset + pass_index,
+                    pass_label,
+                    current,
+                    total,
+                    "achievements",
+                    "Achievement-Checks",
+                ),
+            )
+            pass_offset += ACHIEVEMENT_RECHECK_PASSES
+
+        _progress_update(pass_offset + 1, "Analyse-Cache", 0, total_activities, "hf_analysis", "HF-Analyse")
+        result["hf_analysis"] = rebuild_hf_development_cache(user_id=user_id)
+        pass_offset += 1
+
+        _store_recheck_job(
+            user_id,
+            {
+                "status": "completed",
+                "phase_current": int(_snapshot_recheck_job(user_id).get("phase_total") or 0),
+                "pass_index": total_passes,
+                "pass_count": total_passes,
+                "pass_current": int(_snapshot_recheck_job(user_id).get("pass_total") or 0),
+                "pass_total": int(_snapshot_recheck_job(user_id).get("pass_total") or 0),
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "result": result,
+                "message": "Historischer Recheck erfolgreich abgeschlossen.",
+            },
+        )
+    except Exception as exc:
+        _store_recheck_job(
+            user_id,
+            {
+                "status": "error",
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "error": str(exc),
+            },
+        )
 
 
 class AuthLoginRequest(BaseModel):
@@ -247,13 +422,10 @@ def profile_update(payload: UserProfileUpdateRequest, current_user: dict = Depen
 
 @app.get("/llm/status")
 def llm_status(current_user: dict = Depends(get_current_user)) -> dict:
-    _ = current_user
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    return {
-        "provider": "openai",
-        "configured": bool(api_key),
-        "key_hint": f"...{api_key[-6:]}" if len(api_key) >= 6 else None,
-    }
+    return get_llm_status(
+        user_id=int(current_user["id"]),
+        include_org_costs=bool(current_user.get("is_admin")),
+    )
 
 
 @app.get("/profile/weight-logs")
@@ -335,11 +507,6 @@ class GarminRecentIngestRequest(BaseModel):
     days_back: int = Field(default=3, ge=0, le=30)
     batch_size: int = Field(default=20, ge=1, le=100)
     sleep_seconds: float = Field(default=1.0, ge=0, le=5)
-
-
-class GarminCredentialsRequest(BaseModel):
-    email: str
-    password: str
 
 
 class GarminResetRequest(BaseModel):
@@ -552,7 +719,6 @@ class TrainingPlanDeriveRequest(BaseModel):
 for request_model in (
     AuthLoginRequest,
     GarminImportRequest,
-    GarminCredentialsRequest,
     GarminResetRequest,
     GarminImportSavedFileRequest,
     ActivityHistoricalRecheckRequest,
@@ -584,12 +750,26 @@ for request_model in (
 
 @app.get("/garmin/credentials-status")
 def garmin_credentials_status(current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    has_env_credentials = bool((os.getenv("GARMIN_EMAIL") or "").strip() and (os.getenv("GARMIN_PASSWORD") or "").strip())
+    return {
+        "provider": "garmin",
+        "has_encrypted_credentials": False,
+        "has_env_credentials": has_env_credentials,
+        "active_source": "env" if has_env_credentials else "none",
+    }
+
+
+@app.get("/garmin/session-status")
+def garmin_session_status(current_user: dict = Depends(get_current_user)) -> dict:
     try:
-        return get_service_credentials_status("garmin", user_id=int(current_user["id"]))
+        return get_garmin_session_status(user_id=int(current_user["id"]))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Unexpected credential error: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin session error: {exc}") from exc
 
 
 @app.get("/training/metrics")
@@ -600,6 +780,20 @@ def training_metrics_get(current_user: dict = Depends(get_current_user)) -> dict
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected training error: {exc}") from exc
+
+
+@app.get("/training/analysis/hf-development")
+def training_hf_development_get(
+    window_key: str | None = Query(default=None),
+    bucket_start_w: int | None = Query(default=None),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return get_hf_development(user_id=int(current_user["id"]), window_key=window_key, bucket_start_w=bucket_start_w)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected training analysis error: {exc}") from exc
 
 
 @app.post("/training/metrics")
@@ -664,9 +858,9 @@ def training_config_section_llm_prompt(payload: TrainingConfigSectionDeriveReque
 
 @app.post("/training/config-section/derive")
 def training_config_section_derive(payload: TrainingConfigSectionDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    _ = current_user
     try:
         return derive_training_config_with_llm(
+            user_id=int(current_user["id"]),
             section_key=payload.section_key,
             section_title=payload.section_title,
             selected_focus_labels=payload.focus_labels,
@@ -695,9 +889,11 @@ def training_plan_draft_llm_prompt(payload: TrainingPlanDeriveRequest, current_u
 
 @app.post("/training/plan-draft/derive")
 def training_plan_draft_derive(payload: TrainingPlanDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    _ = current_user
     try:
-        return derive_training_plan_with_llm(sections=[section.model_dump() for section in payload.sections])
+        return derive_training_plan_with_llm(
+            user_id=int(current_user["id"]),
+            sections=[section.model_dump() for section in payload.sections],
+        )
     except ValueError as exc:
         detail = str(exc)
         status_code = 503 if "OPENAI_API_KEY" in detail else 400
@@ -721,9 +917,12 @@ def training_athlete_profile_llm_prompt(payload: AthleteProfileDeriveRequest, cu
 
 @app.post("/training/athlete-profile/derive")
 def training_athlete_profile_derive(payload: AthleteProfileDeriveRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    _ = current_user
     try:
-        return derive_athlete_profile_with_llm(selected_focus_labels=payload.focus_labels, notes=payload.notes)
+        return derive_athlete_profile_with_llm(
+            user_id=int(current_user["id"]),
+            selected_focus_labels=payload.focus_labels,
+            notes=payload.notes,
+        )
     except ValueError as exc:
         detail = str(exc)
         status_code = 503 if "OPENAI_API_KEY" in detail else 400
@@ -735,13 +934,12 @@ def training_athlete_profile_derive(payload: AthleteProfileDeriveRequest, curren
 
 
 @app.post("/garmin/credentials")
-def garmin_credentials_save(payload: GarminCredentialsRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    try:
-        return set_service_credentials("garmin", payload.email, payload.password, user_id=int(current_user["id"]))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Unexpected credential error: {exc}") from exc
+def garmin_credentials_save(current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    raise HTTPException(
+        status_code=410,
+        detail="Garmin-Credentials werden aktuell nicht im Service gespeichert. Bitte GARMIN_EMAIL und GARMIN_PASSWORD in .env verwenden.",
+    )
 
 
 @app.post("/garmin/import-rides")
@@ -797,11 +995,57 @@ def activities_recheck_history(
             result["max_hr"] = rebuild_historical_max_hr_from_activities(user_id=int(current_user["id"]))
         if payload.rebuild_achievements:
             result["achievements"] = rebuild_activity_achievement_checks(user_id=int(current_user["id"]))
+        result["hf_analysis"] = rebuild_hf_development_cache(user_id=int(current_user["id"]))
         return result
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity recheck error: {exc}") from exc
+
+
+@app.post("/activities/recheck-history/start")
+def activities_recheck_history_start(
+    payload: ActivityHistoricalRecheckRequest,
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    user_id = int(current_user["id"])
+    current_job = _snapshot_recheck_job(user_id)
+    if current_job.get("status") == "running":
+        return current_job
+
+    job_id = str(uuid.uuid4())
+    with _recheck_jobs_lock:
+        _recheck_job_queues[user_id] = deque()
+    _store_recheck_job(
+        user_id,
+        {
+            "job_id": job_id,
+            "status": "running",
+            "phase": "queued",
+            "phase_label": "Vorbereitung",
+            "phase_current": 0,
+            "phase_total": 0,
+            "rebuild_max_hr": payload.rebuild_max_hr,
+            "rebuild_achievements": payload.rebuild_achievements,
+            "started_at": _job_timestamp(),
+            "updated_at": _job_timestamp(),
+            "finished_at": None,
+            "result": None,
+            "error": None,
+            "message": None,
+        },
+    )
+    worker = threading.Thread(
+        target=_run_recheck_job,
+        kwargs={
+            "user_id": user_id,
+            "rebuild_max_hr": payload.rebuild_max_hr,
+            "rebuild_achievements": payload.rebuild_achievements,
+        },
+        daemon=True,
+    )
+    worker.start()
+    return _snapshot_recheck_job(user_id)
 
 
 @app.get("/activities/recheck-history/status")
@@ -812,6 +1056,41 @@ def activities_recheck_history_status(current_user: dict = Depends(get_current_u
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity recheck status error: {exc}") from exc
+
+
+@app.get("/activities/recheck-history/job-status")
+def activities_recheck_history_job_status(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return _snapshot_recheck_job(int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity recheck job status error: {exc}") from exc
+
+
+@app.get("/activities/recheck-history/job-stream")
+def activities_recheck_history_job_stream(current_user: dict = Depends(get_current_user)) -> StreamingResponse:
+    user_id = int(current_user["id"])
+
+    def generate():
+        condition = _get_recheck_job_condition(user_id)
+        queue = _get_recheck_job_queue(user_id)
+        initial_snapshot = _snapshot_recheck_job(user_id)
+        yield json.dumps(initial_snapshot) + "\n"
+
+        while True:
+            snapshot: dict[str, object] | None = None
+            with condition:
+                condition.wait_for(lambda: len(queue) > 0, timeout=15.0)
+                if queue:
+                    snapshot = queue.popleft()
+            if snapshot is None:
+                continue
+            yield json.dumps(snapshot) + "\n"
+            if str(snapshot.get("status") or "") in {"completed", "error", "idle"}:
+                break
+
+    return StreamingResponse(generate(), media_type="application/x-ndjson")
 
 
 @app.get("/achievements/{section_key}")
@@ -1032,6 +1311,20 @@ def activity_detail(activity_id: int, current_user: dict = Depends(get_current_u
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.post("/activities/{activity_id}/llm-analysis")
+def activity_llm_analysis(activity_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return derive_activity_llm_analysis(user_id=int(current_user["id"]), activity_id=activity_id)
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OPENAI_API_KEY" in detail else 404 if detail == "Activity not found." else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity LLM error: {exc}") from exc
 
 
 @app.post("/nutrition/entries")

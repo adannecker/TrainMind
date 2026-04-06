@@ -14,7 +14,9 @@ type ActivityRow = {
   duration_label: string | null;
   distance_m: number | null;
   avg_power_w: number | null;
+  max_power_w: number | null;
   avg_hr_bpm: number | null;
+  max_hr_bpm: number | null;
   avg_speed_kmh: number | null;
   stress_score: number | null;
 };
@@ -30,16 +32,6 @@ type ActivitiesResponse = {
   };
 };
 
-type SortKey =
-  | "started_at"
-  | "name"
-  | "sport"
-  | "provider"
-  | "duration_s"
-  | "distance_m"
-  | "avg_power_w"
-  | "avg_hr_bpm";
-
 type ColumnKey =
   | "started_at"
   | "name"
@@ -50,14 +42,16 @@ type ColumnKey =
   | "distance"
   | "avg_speed"
   | "avg_power"
+  | "max_power"
   | "avg_hr"
+  | "max_hr"
   | "stress"
   | "external_id";
 
 type ColumnDef = {
   key: ColumnKey;
   label: string;
-  sortable?: SortKey;
+  sortable?: boolean;
   render: (row: ActivityRow) => string;
 };
 
@@ -81,69 +75,85 @@ const COLUMN_DEFS: ColumnDef[] = [
   {
     key: "started_at",
     label: "Start",
-    sortable: "started_at",
+    sortable: true,
     render: (row) => formatDateTime(row.started_at),
   },
   {
     key: "name",
     label: "Name",
-    sortable: "name",
+    sortable: true,
     render: (row) => row.name,
   },
   {
     key: "sport",
     label: "Sport",
-    sortable: "sport",
+    sortable: true,
     render: (row) => row.sport || "-",
   },
   {
     key: "provider",
     label: "Provider",
-    sortable: "provider",
+    sortable: true,
     render: (row) => row.provider || "-",
   },
   {
     key: "garmin_id",
     label: "Garmin-ID",
+    sortable: true,
     render: (row) => ((row.provider || "").toLowerCase() === "garmin" ? row.external_id || "-" : "-"),
   },
   {
     key: "duration",
     label: "Dauer",
-    sortable: "duration_s",
+    sortable: true,
     render: (row) => row.duration_label || "-",
   },
   {
     key: "distance",
     label: "Distanz",
-    sortable: "distance_m",
+    sortable: true,
     render: (row) => formatDistance(row.distance_m),
   },
   {
     key: "avg_speed",
     label: "Ø km/h",
+    sortable: true,
     render: (row) => formatDecimal(row.avg_speed_kmh, 1),
   },
   {
     key: "avg_power",
     label: "Ø Watt",
-    sortable: "avg_power_w",
+    sortable: true,
     render: (row) => formatInteger(row.avg_power_w, "W"),
+  },
+  {
+    key: "max_power",
+    label: "Max Watt",
+    sortable: true,
+    render: (row) => formatInteger(row.max_power_w, "W"),
   },
   {
     key: "avg_hr",
     label: "Ø HF",
-    sortable: "avg_hr_bpm",
+    sortable: true,
     render: (row) => formatInteger(row.avg_hr_bpm, "bpm"),
+  },
+  {
+    key: "max_hr",
+    label: "Max HF",
+    sortable: true,
+    render: (row) => formatInteger(row.max_hr_bpm, "bpm"),
   },
   {
     key: "stress",
     label: "Stress",
+    sortable: true,
     render: (row) => formatDecimal(row.stress_score, 1),
   },
   {
     key: "external_id",
     label: "Externe ID",
+    sortable: true,
     render: (row) => row.external_id || "-",
   },
 ];
@@ -212,6 +222,58 @@ function addNumberParam(params: URLSearchParams, key: string, value: string) {
   params.set(key, trimmed);
 }
 
+function garminIdValue(row: ActivityRow): string {
+  return (row.provider || "").toLowerCase() === "garmin" ? row.external_id || "" : "";
+}
+
+function rowSortValue(row: ActivityRow, key: ColumnKey): number | string | null {
+  switch (key) {
+    case "started_at":
+      return row.started_at ? new Date(row.started_at).getTime() : null;
+    case "name":
+      return row.name || "";
+    case "sport":
+      return row.sport || "";
+    case "provider":
+      return row.provider || "";
+    case "garmin_id":
+      return garminIdValue(row);
+    case "duration":
+      return row.duration_s;
+    case "distance":
+      return row.distance_m;
+    case "avg_speed":
+      return row.avg_speed_kmh;
+    case "avg_power":
+      return row.avg_power_w;
+    case "max_power":
+      return row.max_power_w;
+    case "avg_hr":
+      return row.avg_hr_bpm;
+    case "max_hr":
+      return row.max_hr_bpm;
+    case "stress":
+      return row.stress_score;
+    case "external_id":
+      return row.external_id || "";
+    default:
+      return null;
+  }
+}
+
+function compareSortValues(left: number | string | null, right: number | string | null, direction: "asc" | "desc"): number {
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+
+  const multiplier = direction === "asc" ? 1 : -1;
+  if (typeof left === "number" && typeof right === "number") {
+    return (left - right) * multiplier;
+  }
+
+  return String(left).localeCompare(String(right), "de", { numeric: true, sensitivity: "base" }) * multiplier;
+}
+
 export function ActivitiesAllPage() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<ActivityRow[]>([]);
@@ -228,7 +290,7 @@ export function ActivitiesAllPage() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [columnOverlayOpen, setColumnOverlayOpen] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<AdvancedFilters>(EMPTY_ADVANCED_FILTERS);
-  const [sortBy, setSortBy] = useState<SortKey>("started_at");
+  const [sortBy, setSortBy] = useState<ColumnKey>("started_at");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [visibleColumns, setVisibleColumns] = useState<ColumnKey[]>(() => (typeof window === "undefined" ? DEFAULT_COLUMNS : loadStoredColumns()));
   const [deleteCandidate, setDeleteCandidate] = useState<ActivityRow | null>(null);
@@ -239,6 +301,14 @@ export function ActivitiesAllPage() {
     [visibleColumns],
   );
 
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((left, right) => {
+      const primary = compareSortValues(rowSortValue(left, sortBy), rowSortValue(right, sortBy), sortDir);
+      if (primary !== 0) return primary;
+      return compareSortValues(rowSortValue(left, "started_at"), rowSortValue(right, "started_at"), "desc");
+    });
+  }, [rows, sortBy, sortDir]);
+
   useEffect(() => {
     window.localStorage.setItem(COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
   }, [visibleColumns]);
@@ -248,9 +318,7 @@ export function ActivitiesAllPage() {
     setError(null);
     try {
       const params = new URLSearchParams({
-        sort_by: sortBy,
-        sort_dir: sortDir,
-        limit: "500",
+        limit: "1000",
       });
       if (query.trim()) params.set("q", query.trim());
       if (provider) params.set("provider", provider);
@@ -288,10 +356,6 @@ export function ActivitiesAllPage() {
     void loadActivities();
   }, []);
 
-  useEffect(() => {
-    void loadActivities();
-  }, [sortBy, sortDir]);
-
   function toggleColumn(columnKey: ColumnKey, checked: boolean) {
     setVisibleColumns((current) => {
       if (checked) {
@@ -305,12 +369,12 @@ export function ActivitiesAllPage() {
 
   function toggleSort(column: ColumnDef) {
     if (!column.sortable) return;
-    if (sortBy === column.sortable) {
+    if (sortBy === column.key) {
       setSortDir((current) => (current === "asc" ? "desc" : "asc"));
       return;
     }
-    setSortBy(column.sortable);
-    setSortDir(column.sortable === "name" || column.sortable === "sport" || column.sortable === "provider" ? "asc" : "desc");
+    setSortBy(column.key);
+    setSortDir(column.key === "name" || column.key === "sport" || column.key === "provider" || column.key === "garmin_id" || column.key === "external_id" ? "asc" : "desc");
   }
 
   function updateAdvancedFilter(key: keyof AdvancedFilters, value: string) {
@@ -488,7 +552,7 @@ export function ActivitiesAllPage() {
                   <th key={column.key}>
                     {column.sortable ? (
                       <button className="secondary-button" type="button" onClick={() => toggleSort(column)}>
-                        {column.label} {sortBy === column.sortable ? (sortDir === "asc" ? "↑" : "↓") : ""}
+                        {column.label} {sortBy === column.key ? (sortDir === "asc" ? "↑" : "↓") : ""}
                       </button>
                     ) : (
                       column.label
@@ -499,12 +563,12 @@ export function ActivitiesAllPage() {
               </tr>
             </thead>
             <tbody>
-              {!loading && rows.length === 0 ? (
+              {!loading && sortedRows.length === 0 ? (
                 <tr>
                   <td colSpan={visibleColumnDefs.length + 1}>Keine Aktivitäten für die aktuelle Filterung gefunden.</td>
                 </tr>
               ) : null}
-              {rows.map((row) => (
+              {sortedRows.map((row) => (
                 <tr key={row.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/activities/${row.id}`)}>
                   {visibleColumnDefs.map((column) => (
                     <td key={`${row.id}-${column.key}`}>{column.render(row)}</td>

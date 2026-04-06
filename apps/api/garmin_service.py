@@ -4,20 +4,21 @@ import logging
 import os
 import json
 import re
+import subprocess
 import time
+import base64
 from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
-from garminconnect import Garmin, GarminConnectAuthenticationError, GarminConnectConnectionError
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from apps.api.achievement_service import rebuild_activity_achievement_checks, reset_achievement_data
-from apps.api.credential_service import get_service_credentials
-from apps.api.training_service import create_imported_max_hr_metric_if_new_peak
+from apps.api.activity_service import _hydrate_activity_streams_from_fit, clear_activity_list_cache
+from apps.api.training_service import create_imported_max_hr_metric_if_new_peak, rebuild_hf_development_cache
 from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, UserTrainingMetric
 from packages.db.session import SessionLocal
 
@@ -26,7 +27,119 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 GARMIN_RATE_LIMIT_COOLDOWN = timedelta(minutes=15)
 _garmin_rate_limited_until_by_user: dict[int, datetime] = {}
 _GARMIN_TOKENSTORE_ROOT = REPO_ROOT / "data" / "garmin_tokens"
+_GARMIN_NODE_HELPER_DIR = REPO_ROOT / "packages" / "integrations" / "garmin_node"
+_GARMIN_NODE_HELPER_SCRIPT = _GARMIN_NODE_HELPER_DIR / "cli.js"
 logger = logging.getLogger(__name__)
+
+
+class NodeGarminClient:
+    def __init__(self, user_id: int, email: str, password: str, source_label: str) -> None:
+        self.user_id = user_id
+        self.email = email
+        self.password = password
+        self.source_label = source_label
+        self.tokenstore_path = _garmin_tokenstore_path(user_id=user_id, email=email)
+        self.last_auth_mode: str | None = None
+
+    def get_activities(self, start: int, limit: int) -> list[dict[str, Any]]:
+        payload = self._run("recent-activities", {"start": int(start), "limit": int(limit)})
+        activities = payload.get("activities")
+        if not isinstance(activities, list):
+            raise RuntimeError("Node Garmin helper returned invalid activities payload.")
+        return activities
+
+    def get_activity(self, activity_id: int) -> dict[str, Any]:
+        payload = self._run("activity", {"activity_id": str(activity_id)})
+        activity = payload.get("activity")
+        if not isinstance(activity, dict):
+            raise RuntimeError("Node Garmin helper returned invalid activity payload.")
+        return activity
+
+    def download_activity_original(self, activity_id: int) -> bytes:
+        payload = self._run("download-original", {"activity_id": str(activity_id)})
+        content_base64 = payload.get("content_base64")
+        if not isinstance(content_base64, str) or not content_base64:
+            raise RuntimeError("Node Garmin helper returned no download content.")
+        try:
+            return base64.b64decode(content_base64)
+        except Exception as exc:
+            raise RuntimeError("Node Garmin helper returned invalid base64 activity content.") from exc
+
+    def get_session_status(self, check_login: bool = True) -> dict[str, Any]:
+        payload = self._run("session-status", {"check_login": bool(check_login)})
+        return {
+            "email_configured": bool(payload.get("email_configured")),
+            "token_files_present": bool(payload.get("token_files_present")),
+            "tokenstore_path": str(payload.get("tokenstore_path") or self.tokenstore_path),
+            "auth_mode": payload.get("auth_mode"),
+            "login_ok": payload.get("login_ok"),
+        }
+
+    def _run(self, command: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not _GARMIN_NODE_HELPER_SCRIPT.exists():
+            raise RuntimeError(f"Missing Garmin Node helper script at {_GARMIN_NODE_HELPER_SCRIPT}.")
+
+        _ensure_private_dir(self.tokenstore_path)
+        env = os.environ.copy()
+        env["GARMIN_EMAIL"] = self.email
+        env["GARMIN_PASSWORD"] = self.password
+        env["GARMIN_TOKENSTORE_PATH"] = str(self.tokenstore_path)
+
+        result = subprocess.run(
+            ["node", str(_GARMIN_NODE_HELPER_SCRIPT), command, json.dumps(payload)],
+            cwd=str(_GARMIN_NODE_HELPER_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            raise self._build_error(result.stderr or result.stdout or "Unknown Garmin Node helper error.")
+
+        stdout_text = (result.stdout or "").strip()
+        if not stdout_text:
+            raise RuntimeError("Garmin Node helper returned empty stdout.")
+
+        json_text = stdout_text
+        if "\n" in stdout_text:
+            candidate_lines = [line.strip() for line in stdout_text.splitlines() if line.strip()]
+            for line in reversed(candidate_lines):
+                if line.startswith("{") and line.endswith("}"):
+                    json_text = line
+                    break
+
+        try:
+            decoded = json.loads(json_text)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Garmin Node helper returned invalid JSON: {exc}") from exc
+
+        if not isinstance(decoded, dict) or not decoded.get("ok"):
+            raise RuntimeError("Garmin Node helper returned an unexpected response.")
+        auth_mode = decoded.get("auth_mode")
+        if isinstance(auth_mode, str) and auth_mode.strip():
+            self.last_auth_mode = auth_mode.strip()
+        return decoded
+
+    def _build_error(self, raw_error: str) -> RuntimeError:
+        message = raw_error.strip()
+        try:
+            parsed = json.loads(message)
+            if isinstance(parsed, dict):
+                message = str(parsed.get("error") or parsed.get("details") or message)
+        except json.JSONDecodeError:
+            pass
+
+        if _is_rate_limit_error_message(message):
+            _garmin_rate_limited_until_by_user[self.user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
+            return RuntimeError(
+                "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
+                "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
+            )
+
+        return RuntimeError(f"Garmin Node helper failed via {self.source_label} credentials: {message}")
 
 
 def _sanitize_filename(value: str, max_len: int = 80) -> str:
@@ -217,9 +330,12 @@ def _collect_loaded_ids(user_id: int) -> set[str]:
     return loaded_ids
 
 
-def _is_rate_limit_error(exc: Exception) -> bool:
-    message = str(exc)
+def _is_rate_limit_error_message(message: str) -> bool:
     return "429" in message or "Too Many Requests" in message
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    return _is_rate_limit_error_message(str(exc))
 
 
 def _garmin_tokenstore_path(user_id: int, email: str) -> Path:
@@ -239,22 +355,31 @@ def _tokenstore_has_session(path: Path) -> bool:
     return path.exists() and any(path.glob("*.json"))
 
 
-def _persist_client_session(client: Garmin, tokenstore_path: Path) -> None:
-    garth_client = getattr(client, "garth", None)
-    dump = getattr(garth_client, "dump", None)
-    if dump is None:
+def _clear_tokenstore_session(path: Path) -> None:
+    if not path.exists():
         return
-
-    _ensure_private_dir(tokenstore_path)
-    dump(str(tokenstore_path))
-    for json_file in tokenstore_path.glob("*.json"):
+    for json_file in path.glob("*.json"):
         try:
-            os.chmod(json_file, 0o600)
+            json_file.unlink()
         except OSError:
             pass
 
 
-def _build_client(user_id: int) -> Garmin:
+def _load_env_credentials() -> tuple[str, str]:
+    load_dotenv(dotenv_path=REPO_ROOT / ".env")
+    env_email = (os.getenv("GARMIN_EMAIL") or "").strip()
+    env_password = (os.getenv("GARMIN_PASSWORD") or "").strip()
+    if not env_email or not env_password:
+        raise ValueError("GARMIN_EMAIL und GARMIN_PASSWORD muessen in .env gesetzt sein.")
+    return env_email, env_password
+
+
+def _build_client_for_credentials(user_id: int, email: str, password: str, source_label: str) -> NodeGarminClient:
+    logger.info("Attempting Garmin access for user_id=%s via %s credentials through Node helper", user_id, source_label)
+    return NodeGarminClient(user_id=user_id, email=email, password=password, source_label=source_label)
+
+
+def _build_client(user_id: int) -> NodeGarminClient:
     blocked_until = _garmin_rate_limited_until_by_user.get(user_id)
     if blocked_until and blocked_until > datetime.utcnow():
         retry_minutes = max(1, int((blocked_until - datetime.utcnow()).total_seconds() // 60) + 1)
@@ -263,67 +388,40 @@ def _build_client(user_id: int) -> Garmin:
             f"Bitte in etwa {retry_minutes} Minute(n) erneut versuchen."
         )
 
-    load_dotenv(dotenv_path=REPO_ROOT / ".env")
-    stored = get_service_credentials("garmin", user_id=user_id)
-    if stored is not None:
-        email, password = stored
-    else:
-        email = os.getenv("GARMIN_EMAIL")
-        password = os.getenv("GARMIN_PASSWORD")
-    if not email or not password:
-        raise ValueError("GARMIN_EMAIL and GARMIN_PASSWORD must be set in environment or .env")
-
-    tokenstore_path = _garmin_tokenstore_path(user_id=user_id, email=email)
-    if _tokenstore_has_session(tokenstore_path):
-        try:
-            logger.info("Attempting Garmin token login for user_id=%s", user_id)
-            client = Garmin()
-            client.login(str(tokenstore_path))
-            _garmin_rate_limited_until_by_user.pop(user_id, None)
-            logger.info("Garmin token login successful for user_id=%s", user_id)
-            return client
-        except Exception as exc:
-            if _is_rate_limit_error(exc):
-                _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
-                raise RuntimeError(
-                    "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
-                    "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
-                ) from exc
-            logger.warning("Garmin token login failed for user_id=%s: %s", user_id, exc)
-
-    _ensure_private_dir(tokenstore_path)
-    client = Garmin(email, password)
-    try:
-        logger.info("Attempting Garmin credential login for user_id=%s", user_id)
-        client.login()
-        _persist_client_session(client, tokenstore_path)
-        _garmin_rate_limited_until_by_user.pop(user_id, None)
-        logger.info("Garmin credential login successful for user_id=%s", user_id)
-    except GarminConnectAuthenticationError as exc:
-        if _is_rate_limit_error(exc):
-            _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
-            raise RuntimeError(
-                "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
-                "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
-            ) from exc
-        raise RuntimeError(f"Garmin authentication failed: {exc}") from exc
-    except GarminConnectConnectionError as exc:
-        if _is_rate_limit_error(exc):
-            _garmin_rate_limited_until_by_user[user_id] = datetime.utcnow() + GARMIN_RATE_LIMIT_COOLDOWN
-            raise RuntimeError(
-                "Garmin blockiert den Login gerade wegen zu vieler Anfragen (HTTP 429). "
-                "Bitte etwa 15 Minuten warten und es dann erneut versuchen."
-            ) from exc
-        raise RuntimeError(f"Garmin connection failed: {exc}") from exc
+    email, password = _load_env_credentials()
+    source_label = "env"
+    client = _build_client_for_credentials(
+        user_id=user_id,
+        email=email,
+        password=password,
+        source_label=source_label,
+    )
+    _garmin_rate_limited_until_by_user.pop(user_id, None)
     return client
 
 
-def _download_fit_bytes(client: Garmin, activity_id: int) -> bytes:
-    try:
-        return client.download_activity(activity_id, dl_fmt=client.ActivityDownloadFormat.ORIGINAL)
-    except AttributeError:
-        pass
+def _download_fit_bytes(client: NodeGarminClient, activity_id: int) -> bytes:
     return client.download_activity_original(activity_id)
+
+
+def get_garmin_session_status(user_id: int) -> dict[str, Any]:
+    email, password = _load_env_credentials()
+    client = _build_client_for_credentials(
+        user_id=user_id,
+        email=email,
+        password=password,
+        source_label="env",
+    )
+    status = client.get_session_status(check_login=True)
+    return {
+        "provider": "garmin",
+        "active_source": "env",
+        "email_configured": status["email_configured"],
+        "token_files_present": status["token_files_present"],
+        "tokenstore_path": status["tokenstore_path"],
+        "auth_mode": status["auth_mode"],
+        "login_ok": status["login_ok"],
+    }
 
 
 def get_missing_garmin_rides(user_id: int, limit: int = 50) -> dict[str, Any]:
@@ -490,7 +588,7 @@ def get_imported_garmin_summary(user_id: int) -> dict[str, Any]:
 
 
 def _import_selected_garmin_rides_with_client(
-    client: Garmin,
+    client: NodeGarminClient,
     user_id: int,
     activity_ids: list[str],
     sleep_seconds: float = 0.0,
@@ -501,6 +599,7 @@ def _import_selected_garmin_rides_with_client(
         return {"loaded": 0, "skipped": 0, "errors": [], "imported_ids": [], "interesting_updates": []}
 
     loaded_ids: list[str] = []
+    loaded_db_ids: list[int] = []
     skipped_ids: list[str] = []
     errors: list[dict[str, str]] = []
     interesting_updates: list[dict[str, Any]] = []
@@ -601,8 +700,11 @@ def _import_selected_garmin_rides_with_client(
                 )
                 if created_activity is not None:
                     _upsert_laps_for_activity(session, created_activity.id, summary)
+                    _hydrate_activity_streams_from_fit(session, created_activity)
 
                 session.commit()
+                if created_activity is not None:
+                    loaded_db_ids.append(int(created_activity.id))
                 max_hr_bpm = _pick_value(summary, "maxHR")
                 if max_hr_bpm is not None:
                     try:
@@ -647,9 +749,14 @@ def _import_selected_garmin_rides_with_client(
     }
     if loaded_ids:
         try:
+            result["hf_analysis"] = rebuild_hf_development_cache(user_id=user_id, activity_ids=loaded_db_ids)
+        except Exception as exc:
+            result["hf_analysis_rebuild_error"] = str(exc)
+        try:
             result["achievements"] = rebuild_activity_achievement_checks(user_id=user_id)
         except Exception as exc:
             result["achievement_rebuild_error"] = str(exc)
+        clear_activity_list_cache(user_id=user_id)
     return result
 
 
@@ -841,6 +948,7 @@ def reset_imported_garmin_data(user_id: int, delete_derived_metrics: bool = Fals
         session.commit()
 
     reset_achievement_data(user_id=user_id)
+    clear_activity_list_cache(user_id=user_id)
     return {
         "status": "deleted",
         "deleted_activities": deleted_activities,

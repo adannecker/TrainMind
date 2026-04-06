@@ -15,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from apps.api.achievement_service import rebuild_activity_achievement_checks
+from apps.api.activity_service import _hydrate_activity_streams_from_fit, clear_activity_list_cache
+from apps.api.training_service import rebuild_hf_development_cache
 from packages.db.models import Activity, FitFile, FitFilePayload
 from packages.db.session import SessionLocal
 
@@ -1439,6 +1441,7 @@ def import_fit_dump_zip(file_bytes: bytes, filename: str, user_id: int, selectio
             )
 
     imported_items: list[dict[str, Any]] = []
+    imported_activity_ids: list[int] = []
     skipped_items: list[dict[str, Any]] = []
     seen_external_ids: set[tuple[str, str]] = set()
     seen_hashes: set[str] = set()
@@ -1549,7 +1552,15 @@ def import_fit_dump_zip(file_bytes: bytes, filename: str, user_id: int, selectio
                         created_at=datetime.utcnow(),
                     )
                 )
+                session.flush()
+                created_activity = session.scalar(
+                    select(Activity).where(Activity.user_id == user_id, Activity.source_fit_file_id == fit_file.id)
+                )
+                if created_activity is not None:
+                    _hydrate_activity_streams_from_fit(session, created_activity)
                 session.commit()
+                if created_activity is not None:
+                    imported_activity_ids.append(int(created_activity.id))
                 imported_items.append(
                     {
                         "export_file_name": export_file_name,
@@ -1584,7 +1595,12 @@ def import_fit_dump_zip(file_bytes: bytes, filename: str, user_id: int, selectio
     }
     if imported_items:
         try:
+            result["hf_analysis"] = rebuild_hf_development_cache(user_id=user_id, activity_ids=imported_activity_ids)
+        except Exception as exc:
+            result["hf_analysis_rebuild_error"] = str(exc)
+        try:
             result["achievements"] = rebuild_activity_achievement_checks(user_id=user_id)
         except Exception as exc:
             result["achievement_rebuild_error"] = str(exc)
+        clear_activity_list_cache(user_id=user_id)
     return result

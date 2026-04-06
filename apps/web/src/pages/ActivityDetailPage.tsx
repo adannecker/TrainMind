@@ -9,6 +9,12 @@ type ActivitySummary = {
   name: string;
   provider: string | null;
   sport: string | null;
+  environment_label: string | null;
+  is_virtual_ride: boolean;
+  is_indoor_ride: boolean;
+  virtual_platform: string | null;
+  likely_power_controlled: boolean;
+  environment_note: string | null;
   started_at: string | null;
   duration_s: number | null;
   duration_label: string | null;
@@ -18,6 +24,13 @@ type ActivitySummary = {
   avg_hr_bpm: number | null;
   max_power_w: number | null;
   max_hr_bpm: number | null;
+  normalized_power_w: number | null;
+  intensity_factor: number | null;
+  variability_index: number | null;
+  training_stress_score: number | null;
+  calories_kcal: number | null;
+  ftp_reference_w: number | null;
+  max_hr_reference_bpm: number | null;
   max_cadence_rpm: number | null;
   max_speed_kmh: number | null;
   min_altitude_m: number | null;
@@ -97,13 +110,75 @@ type ActivityRecordRow = {
 
 type ActivityDetailResponse = {
   activity: ActivitySummary;
+  llm_analysis_status: ActivityLlmStatus;
+  llm_analysis: ActivityLlmResponse | null;
   achievement_analysis?: ActivityAchievementAnalysis | null;
   sessions: ActivitySessionRow[];
   laps: ActivityLapRow[];
   records: ActivityRecordRow[];
 };
 
-type TabKey = "general" | "charts" | "laps" | "analysis" | "achievements";
+type ActivityLlmFactRow = {
+  label: string;
+  value: string;
+  fact: string;
+};
+
+type ActivityLlmResponse = {
+  activity_id: number;
+  activity_name: string;
+  generated_at: string;
+  model: string;
+  analysis_version: number;
+  current_version: number;
+  from_cache: boolean;
+  is_current: boolean;
+  has_newer_version: boolean;
+  context_snapshot: {
+    records_count: number;
+    laps_count: number;
+    sessions_count: number;
+    ftp_reference_w: number | null;
+    max_hr_reference_bpm: number | null;
+    environment_label: string | null;
+    is_virtual_ride: boolean;
+    virtual_platform: string | null;
+    likely_power_controlled: boolean;
+  };
+  analysis: {
+    headline: string;
+    summary: string;
+    deep_analysis: string[];
+    numbers_and_facts: ActivityLlmFactRow[];
+    performance_signals: string[];
+    coaching_recommendations: string[];
+    todo: string[];
+  };
+};
+
+type ActivityLlmStatus = {
+  available: boolean;
+  analysis_version: number | null;
+  current_version: number;
+  is_current: boolean;
+  has_newer_version: boolean;
+  generated_at: string | null;
+  model: string | null;
+};
+
+type ActivityMetricItem = {
+  label: string;
+  value: string;
+  help?: string;
+};
+
+type ActivityMetricSection = {
+  title: string;
+  note: string;
+  items: ActivityMetricItem[];
+};
+
+type TabKey = "general" | "charts" | "laps" | "analysis" | "llm" | "achievements";
 type ZoomSelection = {
   chartKey: string;
   anchor: number;
@@ -159,13 +234,72 @@ const TABS: Array<{ key: TabKey; title: string; note: string }> = [
   { key: "general", title: "Allgemeine Infos", note: "Kernwerte und Metadaten" },
   { key: "charts", title: "Diagramme", note: "HF, Watt und Verlauf" },
   { key: "laps", title: "Runden", note: "Laps und Sessions" },
-  { key: "analysis", title: "Trainingsanalyse", note: "Platzhalter für den nächsten Schritt" },
+  { key: "analysis", title: "Trainingsanalyse", note: "Deterministisch und regelbasiert" },
+  { key: "llm", title: "LLM Analyse", note: "Tiefenanalyse und Coaching" },
   { key: "achievements", title: "Achievements", note: "Ride-Checks und Treffer" },
 ];
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) return null;
   return JSON.parse(text) as T;
+}
+
+function formatAnalysisVersion(value: number | null): string {
+  return value == null ? "-" : `v${value}`;
+}
+
+function buildLlmStatusFromAnalysis(analysis: ActivityLlmResponse): ActivityLlmStatus {
+  return {
+    available: true,
+    analysis_version: analysis.analysis_version,
+    current_version: analysis.current_version,
+    is_current: analysis.is_current,
+    has_newer_version: analysis.has_newer_version,
+    generated_at: analysis.generated_at,
+    model: analysis.model,
+  };
+}
+
+function ActivityMetricHelp({ title, description }: { title: string; description: string }) {
+  return (
+    <span className="activity-metric-help" tabIndex={0} aria-label={`${title}: ${description}`}>
+      <span className="activity-metric-help-trigger" aria-hidden="true">
+        ?
+      </span>
+      <span className="activity-metric-help-tooltip" role="tooltip">
+        <strong>{title}</strong>
+        <span>{description}</span>
+      </span>
+    </span>
+  );
+}
+
+function ActivityMetricCard({ label, value, help }: ActivityMetricItem) {
+  return (
+    <div className="activity-metric-card">
+      <div className="activity-metric-label-row">
+        <span className="activity-metric-label">{label}</span>
+        {help ? <ActivityMetricHelp title={label} description={help} /> : null}
+      </div>
+      <strong className="activity-metric-value">{value}</strong>
+    </div>
+  );
+}
+
+function ActivityMetricSectionCard({ title, note, items }: ActivityMetricSection) {
+  return (
+    <article className="activity-summary-section">
+      <div className="activity-summary-head">
+        <h3>{title}</h3>
+        <span>{note}</span>
+      </div>
+      <div className="activity-metric-grid">
+        {items.map((item) => (
+          <ActivityMetricCard key={item.label} {...item} />
+        ))}
+      </div>
+    </article>
+  );
 }
 
 function formatDateTime(value: string | null): string {
@@ -520,7 +654,7 @@ function MiniChart({
           ) : null}
         </div>
       ) : (
-        <p className="training-note">Noch keine Zeitreihendaten fÃ¼r dieses Diagramm vorhanden.</p>
+        <p className="training-note">Noch keine Zeitreihendaten für dieses Diagramm vorhanden.</p>
       )}
     </div>
   );
@@ -537,6 +671,9 @@ export function ActivityDetailPage() {
   const [smoothingMode, setSmoothingMode] = useState<SmoothingMode>("raw");
   const [hoverSecond, setHoverSecond] = useState<number | null>(null);
   const [activeAchievementCategory, setActiveAchievementCategory] = useState<string>("all");
+  const [llmAnalysis, setLlmAnalysis] = useState<ActivityLlmResponse | null>(null);
+  const [llmLoading, setLlmLoading] = useState(false);
+  const [llmError, setLlmError] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadDetail() {
@@ -550,6 +687,7 @@ export function ActivityDetailPage() {
           throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Aktivität konnte nicht geladen werden.");
         }
         setData(payload);
+        setLlmAnalysis(payload.llm_analysis ?? null);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unbekannter Fehler");
       } finally {
@@ -564,12 +702,108 @@ export function ActivityDetailPage() {
   const totalDuration = normalizedRecords.length ? normalizedRecords[normalizedRecords.length - 1].chart_elapsed_s : 0;
   const viewStart = viewRange?.start ?? 0;
   const viewEnd = viewRange?.end ?? totalDuration;
+  const llmStatus = data?.llm_analysis_status ?? null;
+  const llmNeedsUpdate = Boolean(llmStatus?.has_newer_version);
+  const llmButtonClassName = llmNeedsUpdate ? "primary-button analysis-stale" : "primary-button";
+  const llmButtonLabel = llmLoading
+    ? "Analysiere..."
+    : llmNeedsUpdate
+      ? `Analyse auf ${formatAnalysisVersion(llmStatus?.current_version ?? null)} aktualisieren`
+      : llmStatus?.available
+        ? "Gespeicherte Analyse laden"
+        : "Ausführliche Analyse starten";
+  const generalInfoSections: ActivityMetricSection[] = data
+    ? [
+        {
+          title: "Stammdaten",
+          note: "Kontext und Rahmendaten",
+          items: [
+            { label: "Quelle", value: data.activity.provider || "-" },
+            { label: "Sport", value: data.activity.sport || "-" },
+            { label: "Umgebung", value: data.activity.environment_label || "-" },
+            { label: "Start", value: formatDateTime(data.activity.started_at) },
+            { label: "Dauer", value: data.activity.duration_label || "-" },
+            { label: "Distanz", value: formatDistanceMeters(data.activity.distance_m) },
+          ],
+        },
+        {
+          title: "Leistung & Tempo",
+          note: "Watt, Geschwindigkeit und Referenzen",
+          items: [
+            { label: "Ø Watt", value: formatNumber(data.activity.avg_power_w, 0, " W") },
+            {
+              label: "NP",
+              value: formatNumber(data.activity.normalized_power_w, 0, " W"),
+              help: "Normalized Power schätzt die physiologische Belastung der Fahrt und gewichtet Leistungsspitzen stärker als den einfachen Durchschnitt.",
+            },
+            {
+              label: "FTP Referenz",
+              value: formatNumber(data.activity.ftp_reference_w, 0, " W"),
+              help: "Die FTP Referenz ist der zum Aktivitätszeitpunkt gültige Schwellenwert und dient als Basis für IF, TSS und Leistungszonen.",
+            },
+            { label: "Max Watt", value: formatNumber(data.activity.max_power_w, 0, " W") },
+            { label: "Ø km/h", value: formatNumber(data.activity.avg_speed_kmh, 1, " km/h") },
+            { label: "Max km/h", value: formatNumber(data.activity.max_speed_kmh, 1, " km/h") },
+            { label: "Max Kadenz", value: formatNumber(data.activity.max_cadence_rpm, 0, " rpm") },
+          ],
+        },
+        {
+          title: "Belastung & Energie",
+          note: "Trainingsstress und energetische Einordnung",
+          items: [
+            {
+              label: "IF",
+              value: formatNumber(data.activity.intensity_factor, 2),
+              help: "Intensity Factor setzt die Normalized Power ins Verhältnis zur FTP. Ein Wert von 1.00 entspricht ungefähr einer Stunde an FTP-Niveau.",
+            },
+            {
+              label: "VI",
+              value: formatNumber(data.activity.variability_index, 2),
+              help: "Variability Index ist NP geteilt durch Ø Watt. Werte nahe 1.00 sprechen für eine sehr gleichmäßige Leistung.",
+            },
+            {
+              label: "TSS",
+              value: formatNumber(data.activity.training_stress_score, 1),
+              help: "Training Stress Score kombiniert Dauer und Intensität zu einem Belastungswert. Rund 100 TSS entsprechen grob einer Stunde bei FTP.",
+            },
+            {
+              label: "Stress",
+              value: formatNumber(data.activity.stress_score, 1),
+              help: "Das ist der verfügbare Belastungswert für diese Aktivität. Wenn kein externer Stresswert vorliegt, verwenden wir den berechneten TSS.",
+            },
+            {
+              label: "Kalorien",
+              value: formatNumber(data.activity.calories_kcal, 0, " kcal"),
+              help: "Kalorien stammen wenn möglich direkt aus Garmin oder dem Provider. Falls sie fehlen, werden sie aus der mechanischen Arbeit geschätzt.",
+            },
+          ],
+        },
+        {
+          title: "Herzfrequenz & Daten",
+          note: "HF, Höhe und Datenqualität",
+          items: [
+            { label: "Ø HF", value: formatNumber(data.activity.avg_hr_bpm, 0, " bpm") },
+            { label: "Max HF", value: formatNumber(data.activity.max_hr_bpm, 0, " bpm") },
+            { label: "Höhe min", value: formatNumber(data.activity.min_altitude_m, 0, " m") },
+            { label: "Höhe max", value: formatNumber(data.activity.max_altitude_m, 0, " m") },
+            { label: "Runden", value: String(data.activity.laps_count) },
+            { label: "Records", value: String(data.activity.records_count) },
+          ],
+        },
+      ]
+    : [];
 
   useEffect(() => {
     setViewRange(null);
     setDragSelection(null);
     setHoverSecond(null);
   }, [activityId, totalDuration]);
+
+  useEffect(() => {
+    setLlmAnalysis(null);
+    setLlmError(null);
+    setLlmLoading(false);
+  }, [activityId]);
 
   const matchedAchievements = data?.achievement_analysis?.matched ?? [];
   const availableAchievementCategories = useMemo(() => {
@@ -629,6 +863,34 @@ export function ActivityDetailPage() {
     setDragSelection(null);
   }
 
+  async function runLlmAnalysis() {
+    if (!activityId) return;
+    setLlmLoading(true);
+    setLlmError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/activities/${activityId}/llm-analysis`, {
+        method: "POST",
+      });
+      const payload = await parseJsonSafely<ActivityLlmResponse | { detail?: string }>(response);
+      if (!response.ok || !payload || !("analysis" in payload)) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "LLM Analyse konnte nicht erstellt werden.");
+      }
+      setLlmAnalysis(payload);
+      setData((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          llm_analysis: payload,
+          llm_analysis_status: buildLlmStatusFromAnalysis(payload),
+        };
+      });
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unbekannter Fehler bei der LLM Analyse");
+    } finally {
+      setLlmLoading(false);
+    }
+  }
+
   return (
     <section className="page">
       <div className="hero">
@@ -656,9 +918,15 @@ export function ActivityDetailPage() {
         <div className="settings-tabs-layout">
           <div className="settings-tabs-nav card">
             {TABS.map((tab) => (
-              <button key={tab.key} className={`settings-tab-button ${activeTab === tab.key ? "active" : ""}`} type="button" onClick={() => setActiveTab(tab.key)}>
+              <button
+                key={tab.key}
+                className={`settings-tab-button ${activeTab === tab.key ? "active" : ""} ${tab.key === "llm" && llmNeedsUpdate ? "needs-attention" : ""}`}
+                type="button"
+                onClick={() => setActiveTab(tab.key)}
+              >
                 <strong>{tab.title}</strong>
                 <span>{tab.note}</span>
+                {tab.key === "llm" && llmNeedsUpdate ? <small className="settings-tab-alert">Neuere Analyse-Version verfügbar</small> : null}
               </button>
             ))}
           </div>
@@ -670,24 +938,12 @@ export function ActivityDetailPage() {
                   <h2>Allgemeine Infos</h2>
                   <span className="training-note">{data.activity.provider || "-"} | {data.activity.sport || "-"}</span>
                 </div>
-                <div className="settings-status-grid">
-                  <div className="settings-static-field"><strong>Name:</strong>&nbsp;<span>{data.activity.name}</span></div>
-                  <div className="settings-static-field"><strong>Start:</strong>&nbsp;<span>{formatDateTime(data.activity.started_at)}</span></div>
-                  <div className="settings-static-field"><strong>Dauer:</strong>&nbsp;<span>{data.activity.duration_label || "-"}</span></div>
-                  <div className="settings-static-field"><strong>Distanz:</strong>&nbsp;<span>{formatDistanceMeters(data.activity.distance_m)}</span></div>
-                  <div className="settings-static-field"><strong>Ø km/h:</strong>&nbsp;<span>{formatNumber(data.activity.avg_speed_kmh, 1)}</span></div>
-                  <div className="settings-static-field"><strong>Ø Watt:</strong>&nbsp;<span>{formatNumber(data.activity.avg_power_w, 0, " W")}</span></div>
-                  <div className="settings-static-field"><strong>Max Watt:</strong>&nbsp;<span>{formatNumber(data.activity.max_power_w, 0, " W")}</span></div>
-                  <div className="settings-static-field"><strong>Ø HF:</strong>&nbsp;<span>{formatNumber(data.activity.avg_hr_bpm, 0, " bpm")}</span></div>
-                  <div className="settings-static-field"><strong>Max HF:</strong>&nbsp;<span>{formatNumber(data.activity.max_hr_bpm, 0, " bpm")}</span></div>
-                  <div className="settings-static-field"><strong>Max Kadenz:</strong>&nbsp;<span>{formatNumber(data.activity.max_cadence_rpm, 0, " rpm")}</span></div>
-                  <div className="settings-static-field"><strong>Max km/h:</strong>&nbsp;<span>{formatNumber(data.activity.max_speed_kmh, 1)}</span></div>
-                  <div className="settings-static-field"><strong>Höhe min:</strong>&nbsp;<span>{formatNumber(data.activity.min_altitude_m, 0, " m")}</span></div>
-                  <div className="settings-static-field"><strong>Höhe max:</strong>&nbsp;<span>{formatNumber(data.activity.max_altitude_m, 0, " m")}</span></div>
-                  <div className="settings-static-field"><strong>Stress:</strong>&nbsp;<span>{formatNumber(data.activity.stress_score, 1)}</span></div>
-                  <div className="settings-static-field"><strong>Runden:</strong>&nbsp;<span>{data.activity.laps_count}</span></div>
-                  <div className="settings-static-field"><strong>Records:</strong>&nbsp;<span>{data.activity.records_count}</span></div>
+                <div className="activity-summary-grid">
+                  {generalInfoSections.map((section) => (
+                    <ActivityMetricSectionCard key={section.title} {...section} />
+                  ))}
                 </div>
+                {data.activity.environment_note ? <div className="activity-info-callout">{data.activity.environment_note}</div> : null}
               </div>
             ) : null}
 
@@ -699,14 +955,14 @@ export function ActivityDetailPage() {
                     <div className="settings-actions">
                       <select className="settings-input" value={smoothingMode} onChange={(event) => setSmoothingMode(event.target.value as SmoothingMode)}>
                         <option value="raw">Original</option>
-                        <option value="avg3">3s geglÃ¤ttet</option>
-                        <option value="avg5">5s geglÃ¤ttet</option>
-                        <option value="avg10">10s geglÃ¤ttet</option>
-                        <option value="avg30">30s geglÃ¤ttet</option>
-                        <option value="avg60">1min geglÃ¤ttet</option>
+                        <option value="avg3">3s geglättet</option>
+                        <option value="avg5">5s geglättet</option>
+                        <option value="avg10">10s geglättet</option>
+                        <option value="avg30">30s geglättet</option>
+                        <option value="avg60">1min geglättet</option>
                       </select>
                       <button className="secondary-button" type="button" onClick={resetChartZoom} disabled={viewRange === null}>
-                        Zoom zurÃ¼cksetzen
+                        Zoom zurücksetzen
                       </button>
                     </div>
                   </div>
@@ -718,7 +974,7 @@ export function ActivityDetailPage() {
                 <MiniChart chartKey="power" title="Watt" color="#6cc63f" records={normalizedRecords} pick={(row) => row.power_w} suffix=" W" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
                 <MiniChart chartKey="cadence" title="Trittfrequenz" color="#f39a1f" records={normalizedRecords} pick={(row) => row.cadence_rpm} suffix=" rpm" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
                 <MiniChart chartKey="speed" title="Geschwindigkeit" color="#5ab1f3" records={normalizedRecords} pick={(row) => row.speed_kmh} suffix=" km/h" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
-                <MiniChart chartKey="altitude" title="HÃ¶he" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
+                <MiniChart chartKey="altitude" title="Höhe" color="#8db4e8" records={normalizedRecords} pick={(row) => row.altitude_m} suffix=" m" smoothingMode={smoothingMode} viewStart={viewStart} viewEnd={viewEnd} dragSelection={dragSelection} hoverSecond={hoverSecond} onHoverChange={setHoverSecond} onSelectionStart={handleSelectionStart} onSelectionMove={handleSelectionMove} onSelectionEnd={handleSelectionEnd} />
               </div>
             ) : null}
 
@@ -736,10 +992,10 @@ export function ActivityDetailPage() {
                           <th>Start</th>
                           <th>Dauer</th>
                           <th>Distanz</th>
-                          <th>Ã˜ km/h</th>
-                          <th>Ã˜ Watt</th>
+                          <th>Ø km/h</th>
+                          <th>Ø Watt</th>
                           <th>Max Watt</th>
-                          <th>Ã˜ HF</th>
+                          <th>Ø HF</th>
                           <th>Max HF</th>
                         </tr>
                       </thead>
@@ -780,9 +1036,9 @@ export function ActivityDetailPage() {
                           <th>Start</th>
                           <th>Dauer</th>
                           <th>Distanz</th>
-                          <th>Ã˜ km/h</th>
-                          <th>Ã˜ Watt</th>
-                          <th>Ã˜ HF</th>
+                          <th>Ø km/h</th>
+                          <th>Ø Watt</th>
+                          <th>Ø HF</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -816,8 +1072,155 @@ export function ActivityDetailPage() {
                   <h2>Trainingsanalyse</h2>
                 </div>
                 <p className="training-note">
-                  Diese Sektion ist als nächster Schritt vorgesehen. Hier können wir später Zonen, Intervalle, Belastungsblöcke und eine zeitbezogene Analyse mit FTP und MaxHF einbauen.
+                  Hier kommt die deterministische Analyse hinein. Dieser Bereich ist für regelbasierte Auswertungen wie Pacing, Zonenzeit, Drift, Effizienz, Intervall-Erkennung und Belastungsstruktur ohne LLM vorgesehen.
                 </p>
+                <div className="training-info-stack">
+                  <div className="training-info-point">Deterministische Analyse: nachvollziehbar, reproduzierbar und ohne Modellinterpretation.</div>
+                  <div className="training-info-point">LLM Analyse: textuelle Tiefenanalyse, Einordnung und Coaching-Hinweise auf Basis derselben Daten.</div>
+                  <div className="training-info-point">Beide Bereiche sollen später zusammenarbeiten, bleiben aber bewusst getrennt.</div>
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "llm" ? (
+              <div style={{ display: "grid", gap: "1rem" }}>
+                <div className="card">
+                  <div className="section-title-row">
+                    <h2>LLM Analyse</h2>
+                    <div className="settings-actions">
+                      <button className={llmButtonClassName} type="button" onClick={() => void runLlmAnalysis()} disabled={llmLoading}>
+                        {llmButtonLabel}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="training-note">
+                    Erstellt eine ausführliche Textanalyse mit Daten, Fakten und Coaching-Hinweisen auf Basis dieser Aktivität. FTP, MaxHF, Sessions, Runden und abgeleitete Kennzahlen werden dafür mit in die Anfrage gegeben. Gespeicherte Analysen werden wiederverwendet, solange ihre Version noch aktuell ist.
+                  </p>
+                  <div className="training-mini-grid">
+                    <div className="training-mini-card">
+                      <span>Analyse Version</span>
+                      <strong>{formatAnalysisVersion(llmAnalysis?.analysis_version ?? llmStatus?.analysis_version ?? null)}</strong>
+                      <small>Aktuell: {formatAnalysisVersion(llmAnalysis?.current_version ?? llmStatus?.current_version ?? null)}</small>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>Umgebung</span>
+                      <strong>{llmAnalysis?.context_snapshot.environment_label ?? data.activity.environment_label ?? "-"}</strong>
+                      {llmAnalysis?.context_snapshot.virtual_platform ?? data.activity.virtual_platform ? (
+                        <small>{llmAnalysis?.context_snapshot.virtual_platform ?? data.activity.virtual_platform}</small>
+                      ) : null}
+                    </div>
+                    <div className="training-mini-card">
+                      <span>FTP Referenz</span>
+                      <strong>{formatNumber(llmAnalysis?.context_snapshot.ftp_reference_w ?? data.activity.ftp_reference_w, 0, " W")}</strong>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>MaxHF Referenz</span>
+                      <strong>{formatNumber(llmAnalysis?.context_snapshot.max_hr_reference_bpm ?? data.activity.max_hr_reference_bpm, 0, " bpm")}</strong>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>Runden</span>
+                      <strong>{llmAnalysis?.context_snapshot.laps_count ?? data.activity.laps_count}</strong>
+                    </div>
+                    <div className="training-mini-card">
+                      <span>Records</span>
+                      <strong>{llmAnalysis?.context_snapshot.records_count ?? data.activity.records_count}</strong>
+                    </div>
+                  </div>
+                  <div className="training-info-stack">
+                    {llmStatus?.available ? (
+                      <div className="training-info-point">
+                        Gespeichert ist {formatAnalysisVersion(llmStatus.analysis_version)} vom {formatDateTime(llmStatus.generated_at)}.
+                        {llmStatus.has_newer_version ? ` Aktuell verfügbar ist ${formatAnalysisVersion(llmStatus.current_version)}.` : " Diese Analyse ist aktuell."}
+                      </div>
+                    ) : (
+                      <div className="training-info-point">Für diese Aktivität ist noch keine gespeicherte LLM Analyse vorhanden.</div>
+                    )}
+                    <div className="training-info-point">Die Analyse läuft über die konfigurierte OpenAI-API und wird im LLM-Usage-Log mitprotokolliert.</div>
+                    <div className="training-info-point">Die Antwort kombiniert textuelle Tiefenanalyse mit Zahlen, Fakten und konkreten Coaching-Hinweisen.</div>
+                    {llmAnalysis ? <div className="training-info-point">{llmAnalysis.from_cache ? "Aktuell angezeigt wird die gespeicherte Cache-Version." : "Die Analyse wurde in dieser Version frisch berechnet und im Cache gespeichert."}</div> : null}
+                    {data.activity.environment_note ? <div className="training-info-point">{data.activity.environment_note}</div> : null}
+                    <div className="training-info-point">TODO: Diese Analyse muss künftig zusätzlich auf das Trainingsziel aus dem Trainingsplan angepasst werden.</div>
+                  </div>
+                  {llmError ? <p className="error-text">{llmError}</p> : null}
+                </div>
+
+                {llmAnalysis ? (
+                  <>
+                    <div className="card">
+                      <div className="section-title-row">
+                        <h2>{llmAnalysis.analysis.headline}</h2>
+                        <span className="training-note">
+                          {formatAnalysisVersion(llmAnalysis.analysis_version)} | {llmAnalysis.model} | {formatDateTime(llmAnalysis.generated_at)}
+                        </span>
+                      </div>
+                      <p className="lead">{llmAnalysis.analysis.summary}</p>
+                    </div>
+
+                    {llmAnalysis.analysis.numbers_and_facts.length ? (
+                      <div className="training-config-detail-grid">
+                        {llmAnalysis.analysis.numbers_and_facts.map((item) => (
+                          <article key={`${item.label}-${item.value}`} className="training-config-detail-card">
+                            <h3>{item.label}</h3>
+                            <strong>{item.value}</strong>
+                            <p className="training-note">{item.fact}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    <div className="training-config-detail-grid">
+                      {llmAnalysis.analysis.deep_analysis.length ? (
+                        <article className="training-config-detail-card">
+                          <h3>Textuelle Tiefenanalyse</h3>
+                          <ul className="training-config-list">
+                            {llmAnalysis.analysis.deep_analysis.map((item, index) => (
+                              <li key={`deep-${index}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      ) : null}
+
+                      {llmAnalysis.analysis.performance_signals.length ? (
+                        <article className="training-config-detail-card">
+                          <h3>Leistungssignale</h3>
+                          <ul className="training-config-list">
+                            {llmAnalysis.analysis.performance_signals.map((item, index) => (
+                              <li key={`signal-${index}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      ) : null}
+
+                      {llmAnalysis.analysis.coaching_recommendations.length ? (
+                        <article className="training-config-detail-card">
+                          <h3>Coaching Empfehlungen</h3>
+                          <ul className="training-config-list">
+                            {llmAnalysis.analysis.coaching_recommendations.map((item, index) => (
+                              <li key={`recommendation-${index}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      ) : null}
+
+                      {llmAnalysis.analysis.todo.length ? (
+                        <article className="training-config-detail-card">
+                          <h3>TODO</h3>
+                          <ul className="training-config-list">
+                            {llmAnalysis.analysis.todo.map((item, index) => (
+                              <li key={`todo-${index}`}>{item}</li>
+                            ))}
+                          </ul>
+                        </article>
+                      ) : null}
+                    </div>
+                  </>
+                ) : (
+                  <div className="card">
+                    <p className="training-note">
+                      Starte die LLM Analyse per Button, dann bekommst du hier eine datenbasierte Tiefenanalyse mit Text, Zahlen und konkreten Handlungshinweisen.
+                    </p>
+                  </div>
+                )}
               </div>
             ) : null}
 

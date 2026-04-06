@@ -42,6 +42,10 @@ type HfBucketValue = {
   proof?: string | null;
 };
 
+function hfPowerLabel(value: HfBucketValue): string {
+  return value.avg_power_w != null ? `Ø Power ${Math.round(value.avg_power_w)} W` : "HF Bestwert";
+}
+
 type AchievementCategory = {
   id: string;
   label: string;
@@ -268,14 +272,12 @@ export function AchievementsPage({ initialSection = "Radfahren" }: AchievementsP
                                   <td key={`${row.bucket_start_w}-${activeCategoryData.hf_bucket_matrix?.windows[index]?.key ?? index}`}>
                                     {value ? (
                                       <Link className="achievement-hf-cell achievement-hf-cell-link" to={`/activities/${value.activity_id}`}>
-                                        <strong>{Math.round(value.avg_hr_bpm)} bpm</strong>
-                                        <span>{value.proof ?? (value.avg_power_w != null ? `Avg Power ${Math.round(value.avg_power_w)} W` : "HF Bestwert")}</span>
-                                        <small>{value.achieved_at_label ?? "-"}</small>
+                                        <strong>{Math.round(value.avg_hr_bpm)}</strong>
                                         <div className="achievement-hf-hover-panel">
                                           <strong>{value.activity_name}</strong>
                                           <span>{value.achieved_at_label ?? "-"}</span>
-                                          <span>Avg HF {Math.round(value.avg_hr_bpm)} bpm</span>
-                                          <span>{value.proof ?? (value.avg_power_w != null ? `Avg Power ${Math.round(value.avg_power_w)} W` : "HF Bestwert")}</span>
+                                          <span>Ø HF {Math.round(value.avg_hr_bpm)} bpm</span>
+                                          <span>{hfPowerLabel(value)}</span>
                                           <p>Klick öffnet die zugehörige Fahrt.</p>
                                         </div>
                                       </Link>

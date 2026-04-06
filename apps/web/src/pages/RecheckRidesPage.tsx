@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import { Link } from "react-router-dom";
 
 import { apiFetch } from "../api";
+import { getAuthToken } from "../auth";
 import { API_BASE_URL } from "../config";
 
 type MaxHrRecheckResult = {
@@ -64,6 +66,26 @@ type HistoricalRecheckStatusResponse = {
   achievements?: AchievementRecheckStatus;
 };
 
+type HistoricalRecheckJobStatus = {
+  job_id?: string | null;
+  status: string;
+  phase?: string | null;
+  phase_label?: string | null;
+  rebuild_max_hr?: boolean;
+  rebuild_achievements?: boolean;
+  pass_index?: number;
+  pass_count?: number;
+  pass_label?: string | null;
+  pass_current?: number;
+  pass_total?: number;
+  phase_current?: number;
+  phase_total?: number;
+  progress_percent?: number;
+  message?: string | null;
+  error?: string | null;
+  result?: HistoricalRecheckResponse | null;
+};
+
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
   if (!text) return null;
@@ -77,6 +99,13 @@ function formatDateTime(value: string | null | undefined): string {
   return dt.toLocaleString("de-CH", { dateStyle: "short", timeStyle: "short" });
 }
 
+function progressCardStyle(percent: number): CSSProperties {
+  const safe = Math.max(0, Math.min(100, percent));
+  return {
+    background: `linear-gradient(90deg, rgba(31, 139, 111, 0.18) 0%, rgba(31, 139, 111, 0.18) ${safe}%, #f7fbf9 ${safe}%, #f7fbf9 100%)`,
+  };
+}
+
 export function RecheckRidesPage() {
   const [running, setRunning] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -85,22 +114,18 @@ export function RecheckRidesPage() {
   const [statusLoading, setStatusLoading] = useState(true);
   const [maxHrResult, setMaxHrResult] = useState<MaxHrRecheckResult | null>(null);
   const [achievementResult, setAchievementResult] = useState<AchievementRecheckResult | null>(null);
-  const [displayCounter, setDisplayCounter] = useState(0);
+  const [jobStatus, setJobStatus] = useState<HistoricalRecheckJobStatus | null>(null);
 
   const openActivities = status?.open_activities ?? 0;
   const totalActivities = status?.total_activities ?? 0;
-
-  useEffect(() => {
-    if (!running) {
-      setDisplayCounter(0);
-      return;
-    }
-    const target = Math.max(openActivities, 1);
-    const timer = window.setInterval(() => {
-      setDisplayCounter((current) => (current >= target ? current : current + 1));
-    }, 220);
-    return () => window.clearInterval(timer);
-  }, [running, openActivities]);
+  const progressCurrent = jobStatus?.pass_current ?? jobStatus?.phase_current ?? 0;
+  const progressTotal = jobStatus?.pass_total ?? jobStatus?.phase_total ?? 0;
+  const progressPercent = jobStatus?.progress_percent ?? 0;
+  const passIndex = jobStatus?.pass_index ?? 0;
+  const passCount = jobStatus?.pass_count ?? 0;
+  const currentLabel = jobStatus?.pass_label || jobStatus?.phase_label || "Vorbereitung";
+  const phaseProgressPercent = progressTotal > 0 ? Math.round((progressCurrent / progressTotal) * 100) : 0;
+  const progressUnitLabel = currentLabel === "Auslesen" ? "Ladeschritte" : "Gecheckte Aktivitäten";
 
   async function loadStatus() {
     setStatusLoading(true);
@@ -122,36 +147,108 @@ export function RecheckRidesPage() {
     void loadStatus();
   }, []);
 
+  async function loadJobStatus() {
+    const response = await apiFetch(`${API_BASE_URL}/activities/recheck-history/job-status`);
+    const payload = await parseJsonSafely<HistoricalRecheckJobStatus | { detail?: string }>(response);
+    if (!response.ok || !payload || !("status" in payload)) {
+      throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Recheck-Jobstatus konnte nicht geladen werden.");
+    }
+    const job = payload as HistoricalRecheckJobStatus;
+    applyJobStatus(job);
+  }
+
+  function applyJobStatus(job: HistoricalRecheckJobStatus) {
+    setJobStatus(job);
+    if (job.status === "running") {
+      setRunning(true);
+      return;
+    }
+    if (job.status === "completed") {
+      setRunning(false);
+      setMaxHrResult(job.result?.max_hr ?? null);
+      setAchievementResult(job.result?.achievements ?? null);
+      setMessage(job.message ?? "Historischer Recheck erfolgreich abgeschlossen.");
+      return;
+    }
+    if (job.status === "error") {
+      setRunning(false);
+      setError(job.error || "Historischer Recheck fehlgeschlagen.");
+    }
+  }
+
+  useEffect(() => {
+    void loadJobStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!running) return;
+    const controller = new AbortController();
+
+    async function streamJobStatus() {
+      const token = getAuthToken();
+      const response = await fetch(`${API_BASE_URL}/activities/recheck-history/job-stream`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        signal: controller.signal,
+      });
+      if (!response.ok || !response.body) {
+        throw new Error("Recheck-Livestream konnte nicht gestartet werden.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let newlineIndex = buffer.indexOf("\n");
+        while (newlineIndex >= 0) {
+          const line = buffer.slice(0, newlineIndex).trim();
+          buffer = buffer.slice(newlineIndex + 1);
+          if (line) {
+            applyJobStatus(JSON.parse(line) as HistoricalRecheckJobStatus);
+          }
+          newlineIndex = buffer.indexOf("\n");
+        }
+      }
+    }
+
+    void streamJobStatus().catch(() => {
+      void loadJobStatus();
+    });
+    return () => controller.abort();
+  }, [running]);
+
   const recentChecked = useMemo(() => status?.recent_checked ?? [], [status]);
 
   async function runHistoricalRecheck() {
     setRunning(true);
     setMessage(null);
     setError(null);
+    setJobStatus(null);
+    setMaxHrResult(null);
+    setAchievementResult(null);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/activities/recheck-history`, {
+      const response = await apiFetch(`${API_BASE_URL}/activities/recheck-history/start`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rebuild_max_hr: true, rebuild_achievements: true }),
       });
-      const payload = await parseJsonSafely<HistoricalRecheckResponse | { detail?: string }>(response);
-      if (!response.ok) {
+      const payload = await parseJsonSafely<HistoricalRecheckJobStatus | { detail?: string }>(response);
+      if (!response.ok || !payload || !("status" in payload)) {
         throw new Error(
           typeof payload === "object" && payload && "detail" in payload && payload.detail
             ? payload.detail
             : "Historischer Recheck fehlgeschlagen.",
         );
       }
-      const body = payload as HistoricalRecheckResponse;
-      setMaxHrResult(body.max_hr ?? null);
-      setAchievementResult(body.achievements ?? null);
-      setMessage("MaxHF und Achievement-Checks wurden erfolgreich für alle relevanten Fahrten aktualisiert.");
-      await loadStatus();
+      setJobStatus(payload as HistoricalRecheckJobStatus);
+      setMessage("Recheck wurde gestartet.");
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : "Historischer Recheck fehlgeschlagen.");
       setMaxHrResult(null);
       setAchievementResult(null);
-    } finally {
       setRunning(false);
     }
   }
@@ -159,8 +256,8 @@ export function RecheckRidesPage() {
   return (
     <section className="page">
       <div className="hero">
-        <p className="eyebrow">Setup</p>
-        <h1>Recheck all Rides</h1>
+        <p className="eyebrow">Helper</p>
+        <h1>Recheck Achievements</h1>
         <p className="lead">
           Hier prüfen wir bestehende Fahrten erneut, bauen MaxHF sauber historisch auf und markieren Achievement-Checks für neue Fahrten oder neue Check-Versionen.
         </p>
@@ -330,12 +427,20 @@ export function RecheckRidesPage() {
             </p>
             <div className="training-mini-grid">
               <div className="training-mini-card">
-                <span>Fortschritt</span>
-                <strong>{Math.min(displayCounter, Math.max(openActivities, 1))} / {Math.max(openActivities, 1)}</strong>
+                <span>Durchgang</span>
+                <strong>{passIndex || "-"} / {passCount || "-"}</strong>
               </div>
               <div className="training-mini-card">
-                <span>Gesamte Fahrten</span>
-                <strong>{totalActivities}</strong>
+                <span>Aktuell</span>
+                <strong>{currentLabel}</strong>
+              </div>
+              <div className="training-mini-card" style={progressCardStyle(phaseProgressPercent)}>
+                <span>{progressUnitLabel}</span>
+                <strong>{progressCurrent} / {progressTotal || "-"}</strong>
+              </div>
+              <div className="training-mini-card" style={progressCardStyle(progressPercent)}>
+                <span>Fortschritt</span>
+                <strong>{progressPercent}%</strong>
               </div>
             </div>
           </div>

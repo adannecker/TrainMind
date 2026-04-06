@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
@@ -118,6 +119,29 @@ type TrainingConfigProfilePayload = {
     updated_at?: string | null;
   } | null;
   training_plan?: TrainingPlanDraftResponse | null;
+};
+
+type HfDevelopmentPoint = {
+  date: string;
+  avg_hr_bpm: number;
+  avg_power_w: number;
+  activity_id: number;
+  activity_name: string;
+  started_at: string | null;
+};
+
+type HfDevelopmentResponse = {
+  window_options: Array<{ key: string; label: string; seconds: number }>;
+  bucket_options: Array<{ bucket_start_w: number; bucket_end_w: number; label: string }>;
+  selected_window_key: string;
+  selected_bucket_start_w: number;
+  selected_bucket_label: string;
+  points: HfDevelopmentPoint[];
+  summary: {
+    points_count: number;
+    activities_considered: number;
+    window_label: string;
+  };
 };
 
 const TRAINING_CONFIG_DRAFT_STORAGE_KEY = "trainmind:training-config-draft";
@@ -333,97 +357,97 @@ const trainingConfigTabs: TrainingConfigTab[] = [
     key: "profile",
     title: "Athletenprofil",
     note: "Ausgangslage, Erfahrung und Entwicklungsstufe",
-    description: "Von Gewichtsverlust und gesunder RegelmÃ¤ÃŸigkeit bis zu ambitioniertem Amateur- und Semiprofi-Kontext sollen mehrere Entwicklungsstufen abbildbar sein.",
+    description: "Von Gewichtsverlust und gesunder Regelmäßigkeit bis zu ambitioniertem Amateur- und Semiprofi-Kontext sollen mehrere Entwicklungsstufen abbildbar sein.",
     previewKind: "pills",
     previewItems: athleteProfiles,
     questions: [
-      "Was ist das Hauptmotiv: Gesundheit, Gewichtsverlust, SpaÃŸ, Eventleistung oder Wettkampf?",
+      "Was ist das Hauptmotiv: Gesundheit, Gewichtsverlust, Spaß, Eventleistung oder Wettkampf?",
       "Wie viel strukturierte Trainingserfahrung ist bereits vorhanden?",
       "Wie stabil sind Erholung, Schlaf und Alltagsbelastung aktuell?",
       "Wie sicher sind Technik, Gruppenfahren, lange Ausfahrten und harte Belastungen?",
     ],
     meanings: [
-      "Das Profil steuert, wie aggressiv Umfang und IntensitÃ¤t Ã¼berhaupt wachsen dÃ¼rfen.",
+      "Das Profil steuert, wie aggressiv Umfang und Intensität überhaupt wachsen dürfen.",
       "Es entscheidet, ob wir eher Routine, Belastbarkeit oder gezielte Spitzenleistung priorisieren.",
-      "Es beeinflusst, wie viel Einfachheit oder Feinsteuerung der Plan vertrÃ¤gt.",
+      "Es beeinflusst, wie viel Einfachheit oder Feinsteuerung der Plan verträgt.",
     ],
     fineTuning: [
-      "BelastungsvertrÃ¤glichkeit in Stufen statt nur AnfÃ¤nger/Fortgeschritten.",
-      "Trainingshistorie der letzten 8-12 Wochen als RealitÃ¤tscheck.",
-      "Eigenwahrnehmung fÃ¼r locker, mittel, hart und lange Einheiten getrennt erfassen.",
+      "Belastungsverträglichkeit in Stufen statt nur Anfänger/Fortgeschritten.",
+      "Trainingshistorie der letzten 8-12 Wochen als Realitätscheck.",
+      "Eigenwahrnehmung für locker, mittel, hart und lange Einheiten getrennt erfassen.",
     ],
   },
   {
     key: "goals",
     title: "Ziele und Eventkontext",
-    note: "Zielbild, Zeithorizont und PrioritÃ¤t",
-    description: "Normale Rennen, sehr lange Events oder Triathlon beeinflussen die Wochenlogik unterschiedlich. Diese Entscheidung soll die spÃ¤tere Planfamilie direkt steuern.",
+    note: "Zielbild, Zeithorizont und Priorität",
+    description: "Normale Rennen, sehr lange Events oder Triathlon beeinflussen die Wochenlogik unterschiedlich. Diese Entscheidung soll die spätere Planfamilie direkt steuern.",
     previewKind: "pills",
     previewItems: trainingGoals,
     questions: [
-      "Welches Ziel hat PrioritÃ¤t: fitter werden, schneller werden, lÃ¤nger durchhalten oder ein konkretes Event?",
-      "Gibt es ein fixes Eventdatum, mehrere SaisonhÃ¶hepunkte oder nur einen offenen Zielkorridor?",
-      "Ist das Ziel straÃŸen-, gravel-, berg-, ultra- oder triathlonorientiert?",
+      "Welches Ziel hat Priorität: fitter werden, schneller werden, länger durchhalten oder ein konkretes Event?",
+      "Gibt es ein fixes Eventdatum, mehrere Saisonhöhepunkte oder nur einen offenen Zielkorridor?",
+      "Ist das Ziel straßen-, gravel-, berg-, ultra- oder triathlonorientiert?",
       "Wie wichtig ist Radperformance im Vergleich zu Gewicht, Alltagstauglichkeit oder multisportiver Balance?",
     ],
     meanings: [
       "Ziele bestimmen, welche Leistungsdimension wir aufbauen: Schwelle, VO2max, Ausdauer, Robustheit oder Effizienz.",
-      "Der Eventkontext beeinflusst die LÃ¤nge der langen Einheiten, SpezifitÃ¤t und den Belastungsverlauf Ã¼ber Wochen.",
-      "Die PrioritÃ¤t entscheidet, worauf wir bei Zielkonflikten optimieren.",
+      "Der Eventkontext beeinflusst die Länge der langen Einheiten, Spezifität und den Belastungsverlauf über Wochen.",
+      "Die Priorität entscheidet, worauf wir bei Zielkonflikten optimieren.",
     ],
     fineTuning: [
       "A-/B-/C-Ziele mit unterschiedlicher Wichtigkeit.",
-      "Saisonfenster, Peak-Dauer und gewÃ¼nschter Formaufbau.",
-      "Eventprofil wie HÃ¶henmeter, Dauer, Untergrund, Wetter oder Verpflegungskontext.",
+      "Saisonfenster, Peak-Dauer und gewünschter Formaufbau.",
+      "Eventprofil wie Höhenmeter, Dauer, Untergrund, Wetter oder Verpflegungskontext.",
     ],
   },
   {
     key: "week",
     title: "Wochenorganisation",
-    note: "VerfÃ¼gbarkeit, Rhythmus und echte AlltagsspielrÃ¤ume",
-    description: "Wichtige Fragen sind Anzahl Trainingstage, mÃ¶gliche Doppeltage, verfÃ¼gbare Zeitfenster, Krafttraining sowie welche Tage fÃ¼r Radfahren realistisch frei sind.",
+    note: "Verfügbarkeit, Rhythmus und echte Alltagsspielräume",
+    description: "Wichtige Fragen sind Anzahl Trainingstage, mögliche Doppeltage, verfügbare Zeitfenster, Krafttraining sowie welche Tage für Radfahren realistisch frei sind.",
     previewKind: "checks",
-    previewItems: ["2-3 Tage kompakt", "4 Tage strukturiert", "5-6 Tage leistungsorientiert", "Triathlon mit Rad-PrioritÃ¤ten"],
+    previewItems: ["2-3 Tage kompakt", "4 Tage strukturiert", "5-6 Tage leistungsorientiert", "Triathlon mit Rad-Prioritäten"],
     questions: [
-      "An welchen Tagen ist Training realistisch und wie lang dÃ¼rfen Einheiten dort sein?",
-      "Gibt es feste No-Go-Tage, Schichtarbeit, Familie, Pendeln oder saisonale EinschrÃ¤nkungen?",
-      "Sind Doppeltage, Indoor-Einheiten oder kurze FrÃ¼heinheiten praktikabel?",
+      "An welchen Tagen ist Training realistisch und wie lang dürfen Einheiten dort sein?",
+      "Gibt es feste No-Go-Tage, Schichtarbeit, Familie, Pendeln oder saisonale Einschränkungen?",
+      "Sind Doppeltage, Indoor-Einheiten oder kurze Früheinheiten praktikabel?",
       "Welche anderen Belastungen laufen parallel: Krafttraining, Laufen, Schwimmen, Arbeitsspitzen?",
     ],
     meanings: [
       "Die Wochenorganisation entscheidet, ob ein Plan alltagstauglich bleibt oder nur theoretisch gut aussieht.",
-      "Sie beeinflusst, wo harte Reize sinnvoll liegen und wie viel Erholung dazwischen mÃ¶glich ist.",
+      "Sie beeinflusst, wo harte Reize sinnvoll liegen und wie viel Erholung dazwischen möglich ist.",
       "Sie ist oft wichtiger als die perfekte Trainingslogik, weil Konsistenz aus realistischen Strukturen entsteht.",
     ],
     fineTuning: [
       "Pflicht-, Wunsch- und flexible Trainingstage getrennt erfassen.",
       "Zeitfenster in groben Klassen wie 30, 60, 90 oder 180+ Minuten.",
-      "Indoor, Outdoor, Gruppe, Rolle, Pendeln und lange Wochenendfenster getrennt fÃ¼hren.",
+      "Indoor, Outdoor, Gruppe, Rolle, Pendeln und lange Wochenendfenster getrennt führen.",
     ],
   },
   {
     key: "sources",
     title: "Quellenbasierte Setups",
-    note: "Modelle, Annahmen und spÃ¤tere Regelwerke",
-    description: "FÃ¼r jede Konfiguration wollen wir spÃ¤ter belastbare Trainings-Setups und Trainingszonen hinterlegen, inklusive verlinkter Quellen aus Forschung, VerbÃ¤nden oder anerkannten Coaching-AnsÃ¤tzen.",
+    note: "Modelle, Annahmen und spätere Regelwerke",
+    description: "Für jede Konfiguration wollen wir später belastbare Trainings-Setups und Trainingszonen hinterlegen, inklusive verlinkter Quellen aus Forschung, Verbänden oder anerkannten Coaching-Ansätzen.",
     previewKind: "note",
-    previewNote: "NÃ¤chster sinnvoller Schritt: Fragenkatalog definieren, Ergebniscluster bilden und dazu eine zitierfÃ¤hige Referenzbibliothek aufbauen.",
+    previewNote: "Nächster sinnvoller Schritt: Fragenkatalog definieren, Ergebniscluster bilden und dazu eine zitierfähige Referenzbibliothek aufbauen.",
     highlight: true,
     questions: [
       "Welche Modelle wollen wir als Default hinterlegen: pyramidal, polarized, sweetspot-lastig oder event-spezifisch?",
-      "Welche Kennzahlen stehen sicher zur VerfÃ¼gung: FTP, MaxHF, Gewicht, Trainingszeit, Historie, subjektive ErmÃ¼dung?",
-      "Welche Regeln sollen transparent begrÃ¼ndbar sein und welche nur als Empfehlung laufen?",
-      "Welche Quellen gelten bei uns als primÃ¤r: Forschung, VerbÃ¤nde, Coaching-Modelle oder interne Heuristik?",
+      "Welche Kennzahlen stehen sicher zur Verfügung: FTP, MaxHF, Gewicht, Trainingszeit, Historie, subjektive Ermüdung?",
+      "Welche Regeln sollen transparent begründbar sein und welche nur als Empfehlung laufen?",
+      "Welche Quellen gelten bei uns als primär: Forschung, Verbände, Coaching-Modelle oder interne Heuristik?",
     ],
     meanings: [
-      "Dieses Segment entscheidet, wie nachvollziehbar und erklÃ¤rbar TrainMind Empfehlungen spÃ¤ter begrÃ¼nden kann.",
+      "Dieses Segment entscheidet, wie nachvollziehbar und erklärbar TrainMind Empfehlungen später begründen kann.",
       "Es trennt harte Eingaben von heuristischen Annahmen und macht Feinjustierung kontrollierbar.",
-      "Es legt fest, welche Konfigurationen wir automatisieren dÃ¼rfen und wo der Nutzer bewusst entscheiden sollte.",
+      "Es legt fest, welche Konfigurationen wir automatisieren dürfen und wo der Nutzer bewusst entscheiden sollte.",
     ],
     fineTuning: [
       "Pro Setup die Quelle, Annahmen und Grenzen sichtbar machen.",
-      "ProgressionshÃ¤rte, Recovery-KonservativitÃ¤t und Volumenanstieg getrennt fÃ¼hren.",
-      "SpÃ¤ter adaptive Regeln ergÃ¤nzen: verpasste Einheiten, schlechte Erholung oder neue Messwerte.",
+      "Progressionshärte, Recovery-Konservativität und Volumenanstieg getrennt führen.",
+      "Später adaptive Regeln ergänzen: verpasste Einheiten, schlechte Erholung oder neue Messwerte.",
     ],
   },
 ];
@@ -3279,8 +3303,8 @@ export function TrainingBasicsPage() {
 
   const activeMetricConfig = metricConfigs[activeMetricTab];
   const activeEntries = activeMetricTab === "ftp" ? ftpEntries : maxHrEntries;
-  const activeZoneSetting = activeMetricTab === "ftp" ? zoneSettings.ftp ?? null : zoneSettings.max_hr ?? null;
-  const activeZoneOptions = activeMetricTab === "ftp" ? zoneOptions.ftp ?? [] : zoneOptions.max_hr ?? [];
+  const activeZoneSetting = activeMetricTab === "ftp" ? (zoneSettings.ftp ?? null) : (zoneSettings.max_hr ?? null);
+  const activeZoneOptions = activeMetricTab === "ftp" ? (zoneOptions.ftp ?? []) : (zoneOptions.max_hr ?? []);
   const activeZoneSaving = zoneSavingMetric === activeMetricConfig.apiMetricType;
   const activeEducationZones = useMemo(() => {
     const currentEntry = activeEntries[0] ?? null;
@@ -4285,9 +4309,9 @@ export function TrainingConfigPage() {
     setSaveMessage(null);
     try {
       await persistTrainingConfigToProfile(draftTrainingPlan, "Plan im Profil gespeichert.");
-      setLlmMessage("Trainingsplan im Profil ?bernommen.");
+      setLlmMessage("Trainingsplan im Profil übernommen.");
     } catch (err) {
-      setPlanAdoptError(err instanceof Error ? err.message : "Plan konnte nicht ?bernommen werden.");
+      setPlanAdoptError(err instanceof Error ? err.message : "Plan konnte nicht übernommen werden.");
     } finally {
       setPlanAdoptLoading(false);
     }
@@ -4827,6 +4851,300 @@ export function TrainingConfigPage() {
   );
 }
 
+function formatHfDevelopmentDate(value: string): string {
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) {
+    return value;
+  }
+  return parsed.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+}
+
+function HfDevelopmentChart({ points }: { points: HfDevelopmentPoint[] }) {
+  if (!points.length) {
+    return (
+      <div className="training-empty-state">
+        <strong>Noch keine passenden Punkte gefunden.</strong>
+        <span>Wähle ein anderes Zeitfenster oder einen anderen Wattbereich, um den Verlauf zu sehen.</span>
+      </div>
+    );
+  }
+
+  const width = 960;
+  const height = 320;
+  const left = 64;
+  const right = 28;
+  const top = 20;
+  const bottom = 48;
+  const innerWidth = width - left - right;
+  const innerHeight = height - top - bottom;
+  const hrValues = points.map((point) => point.avg_hr_bpm);
+  const minHr = Math.min(...hrValues);
+  const maxHr = Math.max(...hrValues);
+  const axisMin = Math.floor((minHr - 3) / 5) * 5;
+  const axisMax = Math.ceil((maxHr + 3) / 5) * 5;
+  const axisSpan = Math.max(1, axisMax - axisMin);
+  const maxIndex = Math.max(1, points.length - 1);
+
+  const mappedPoints = points.map((point, index) => {
+    const x = left + (index / maxIndex) * innerWidth;
+    const y = top + innerHeight - ((point.avg_hr_bpm - axisMin) / axisSpan) * innerHeight;
+    return { ...point, x, y };
+  });
+
+  const polyline = mappedPoints.map((point) => `${point.x},${point.y}`).join(" ");
+  const ticks = Array.from({ length: 5 }, (_value, index) => axisMin + (axisSpan / 4) * index);
+  const xLabels = [mappedPoints[0], mappedPoints[Math.floor(maxIndex / 2)], mappedPoints[maxIndex]].filter(
+    (point, index, array) => array.findIndex((entry) => entry.date === point.date) === index,
+  );
+
+  return (
+    <div className="training-hf-chart-card">
+      <svg viewBox={`0 0 ${width} ${height}`} className="training-hf-chart" role="img" aria-label="HF Entwicklung">
+        {ticks.map((tick) => {
+          const y = top + innerHeight - ((tick - axisMin) / axisSpan) * innerHeight;
+          return (
+            <g key={tick}>
+              <line x1={left} y1={y} x2={left + innerWidth} y2={y} stroke="#dbe9e4" strokeWidth="1" />
+              <text x={left - 10} y={y + 4} textAnchor="end" fontSize="12" fill="#58716a">
+                {Math.round(tick)}
+              </text>
+            </g>
+          );
+        })}
+        <line x1={left} y1={top + innerHeight} x2={left + innerWidth} y2={top + innerHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+        <line x1={left} y1={top} x2={left} y2={top + innerHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+        <polyline fill="none" stroke="#209a7f" strokeWidth="3" strokeLinejoin="round" strokeLinecap="round" points={polyline} />
+        {mappedPoints.map((point) => (
+          <a key={`${point.date}-${point.activity_id}`} href={`/activities/${point.activity_id}`}>
+            <circle cx={point.x} cy={point.y} r="5.5" fill="#f8fffc" stroke="#146f5b" strokeWidth="2.5">
+              <title>{`${formatHfDevelopmentDate(point.date)} | ${Math.round(point.avg_hr_bpm)} bpm | ${Math.round(point.avg_power_w)} W | ${point.activity_name}`}</title>
+            </circle>
+          </a>
+        ))}
+        {xLabels.map((point) => (
+          <text key={`label-${point.date}-${point.activity_id}`} x={point.x} y={height - 18} textAnchor="middle" fontSize="12" fill="#58716a">
+            {formatHfDevelopmentDate(point.date)}
+          </text>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
+function TrainingHfDevelopmentSection() {
+  const [data, setData] = useState<HfDevelopmentResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedWindowKey, setSelectedWindowKey] = useState("5m");
+  const [selectedBucketStart, setSelectedBucketStart] = useState<number | null>(null);
+  const [windowMenuOpen, setWindowMenuOpen] = useState(false);
+  const [bucketMenuOpen, setBucketMenuOpen] = useState(false);
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams();
+        if (selectedWindowKey) {
+          params.set("window_key", selectedWindowKey);
+        }
+        if (selectedBucketStart != null) {
+          params.set("bucket_start_w", String(selectedBucketStart));
+        }
+        const response = await apiFetch(`${API_BASE_URL}/training/analysis/hf-development?${params.toString()}`);
+        const payload = await parseJsonSafely<HfDevelopmentResponse | { detail?: string }>(response);
+        if (!response.ok || !payload || !("points" in payload)) {
+          throw new Error(
+            typeof payload === "object" && payload && "detail" in payload && payload.detail
+              ? payload.detail
+              : "HF Entwicklung konnte nicht geladen werden.",
+          );
+        }
+        const resolved = payload as HfDevelopmentResponse;
+        setData(resolved);
+        setSelectedWindowKey(resolved.selected_window_key);
+        setSelectedBucketStart(resolved.selected_bucket_start_w);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "HF Entwicklung konnte nicht geladen werden.");
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    void load();
+  }, [selectedWindowKey, selectedBucketStart]);
+
+  const points = data?.points ?? [];
+  const bestPoint = useMemo(
+    () => (points.length ? points.reduce((best, point) => (point.avg_hr_bpm < best.avg_hr_bpm ? point : best), points[0]) : null),
+    [points],
+  );
+  const latestPoint = points.length ? points[points.length - 1] : null;
+  const selectedWindowLabel =
+    data?.window_options.find((option) => option.key === selectedWindowKey)?.label ?? selectedWindowKey;
+  const selectedBucketLabel =
+    data?.bucket_options.find((option) => option.bucket_start_w === selectedBucketStart)?.label ?? data?.selected_bucket_label ?? "-";
+
+  return (
+      <TrainingSection
+        title="HF Entwicklung"
+        description="Pro Tag wird der niedrigste gefundene Durchschnitts-HF-Wert gezeigt. Wenn an einem Tag mehrere Fahrten passen, bleibt nur der beste Tagespunkt sichtbar."
+        highlight
+      >
+        {loading ? <p className="training-note">HF Verlauf wird geladen...</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+
+        {data && !loading && !error ? (
+          <>
+            <div className="training-analysis-summary-grid">
+              <div className="training-analysis-summary-card training-analysis-summary-card-select">
+                <div className="training-analysis-summary-line">
+                  <span>Zeitfenster:</span>
+                  <strong>{selectedWindowLabel}</strong>
+                </div>
+                <button
+                  className="training-analysis-select-trigger"
+                  type="button"
+                  aria-expanded={windowMenuOpen}
+                  onClick={() => {
+                    setWindowMenuOpen((current) => !current);
+                    setBucketMenuOpen(false);
+                  }}
+                >
+                  Zeitfenster wählen
+                </button>
+                {windowMenuOpen ? (
+                  <div className="training-analysis-popover" role="dialog" aria-label="Zeitfenster Auswahl">
+                    <div className="training-analysis-option-grid">
+                      {(data.window_options ?? []).map((option) => (
+                        <button
+                          key={option.key}
+                          className={`training-analysis-option ${selectedWindowKey === option.key ? "active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedWindowKey(option.key);
+                            setSelectedBucketStart(null);
+                            setWindowMenuOpen(false);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="training-analysis-summary-card training-analysis-summary-card-select">
+                <div className="training-analysis-summary-line">
+                  <span>Bereich:</span>
+                  <strong>{selectedBucketLabel}</strong>
+                </div>
+                <button
+                  className="training-analysis-select-trigger"
+                  type="button"
+                  aria-expanded={bucketMenuOpen}
+                  onClick={() => {
+                    setBucketMenuOpen((current) => !current);
+                    setWindowMenuOpen(false);
+                  }}
+                >
+                  Bereich wählen
+                </button>
+                {bucketMenuOpen ? (
+                  <div className="training-analysis-popover training-analysis-popover-buckets" role="dialog" aria-label="Wattbereich Auswahl">
+                    <div className="training-analysis-option-grid training-analysis-option-grid-buckets">
+                      {(data.bucket_options ?? []).map((option) => (
+                        <button
+                          key={option.bucket_start_w}
+                          className={`training-analysis-option ${selectedBucketStart === option.bucket_start_w ? "active" : ""}`}
+                          type="button"
+                          onClick={() => {
+                            setSelectedBucketStart(option.bucket_start_w);
+                            setBucketMenuOpen(false);
+                          }}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              <div className="training-analysis-summary-card">
+                <div className="training-analysis-summary-line">
+                  <span>Punkte:</span>
+                  <strong>{data.summary.points_count}</strong>
+                </div>
+              </div>
+              <div className="training-analysis-summary-card">
+                <div className="training-analysis-summary-line">
+                  <span>Bester Tag:</span>
+                  <strong>{bestPoint ? `${Math.round(bestPoint.avg_hr_bpm)} bpm` : "-"}</strong>
+                </div>
+              </div>
+            </div>
+
+            <HfDevelopmentChart points={points} />
+
+            {latestPoint || bestPoint ? (
+              <div className="training-analysis-summary-grid">
+                <div className="training-analysis-summary-card">
+                  <span>Letzter Punkt</span>
+                  <strong>{latestPoint ? formatHfDevelopmentDate(latestPoint.date) : "-"}</strong>
+                  <small>{latestPoint ? `${Math.round(latestPoint.avg_hr_bpm)} bpm bei ${Math.round(latestPoint.avg_power_w)} W` : ""}</small>
+                </div>
+                <div className="training-analysis-summary-card">
+                  <span>Bester Punkt</span>
+                  <strong>{bestPoint ? formatHfDevelopmentDate(bestPoint.date) : "-"}</strong>
+                  <small>{bestPoint ? `${Math.round(bestPoint.avg_hr_bpm)} bpm bei ${Math.round(bestPoint.avg_power_w)} W` : ""}</small>
+                </div>
+              </div>
+            ) : null}
+          </>
+        ) : null}
+      </TrainingSection>
+  );
+}
+
+export function TrainingAnalysisPage() {
+  return (
+    <section className="page">
+      <div className="hero">
+        <p className="eyebrow">Training</p>
+        <h1>Analyse</h1>
+        <p className="lead">
+          Hier bauen wir schrittweise Trainingsauswertungen auf. Die einzelnen Auswertungen liegen jetzt als Unterpunkte in der Navigation.
+        </p>
+      </div>
+
+      <div className="training-analysis-tabs" role="list" aria-label="Training Analyse Unterpunkte">
+        <Link to="/training/analysis/hf-development" className="training-analysis-tab">
+          <strong>HF Entwicklung</strong>
+          <span>Verlauf pro Tag im gewaehlten Fenster</span>
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+export function TrainingHfDevelopmentPage() {
+  return (
+    <section className="page">
+      <div className="hero">
+        <p className="eyebrow">Training</p>
+        <h1>HF Entwicklung</h1>
+        <p className="lead">
+          Hier siehst du je Tag den besten, also niedrigsten HF-Wert im gewaehlten Zeit- und Wattfenster.
+        </p>
+      </div>
+
+      <TrainingHfDevelopmentSection />
+    </section>
+  );
+}
+
 export function TrainingPlansPage() {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -5280,3 +5598,4 @@ export function TrainingPlansPage() {
     </section>
   );
 }
+

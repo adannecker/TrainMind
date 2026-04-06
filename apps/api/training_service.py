@@ -5,13 +5,25 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-import requests
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
-from packages.db.models import UserTrainingMetric, UserTrainingZoneSetting
+from apps.api.llm_service import DEFAULT_OPENAI_MODEL, openai_chat_completion
+from packages.db.models import Activity, ActivityHfAnalysis, ActivityRecord, UserTrainingMetric, UserTrainingZoneSetting
 from packages.db.session import SessionLocal
 
 ALLOWED_METRIC_TYPES = {"ftp", "max_hr"}
+HF_ANALYSIS_BUCKET_START_W = 130
+HF_ANALYSIS_BUCKET_SIZE_W = 5
+HF_ANALYSIS_WINDOW_DEFINITIONS = [
+    ("5m", 5 * 60, "5 min"),
+    ("10m", 10 * 60, "10 min"),
+    ("15m", 15 * 60, "15 min"),
+    ("20m", 20 * 60, "20 min"),
+    ("30m", 30 * 60, "30 min"),
+    ("45m", 45 * 60, "45 min"),
+    ("60m", 60 * 60, "60 min"),
+]
+HF_ANALYSIS_WINDOW_LOOKUP = {key: {"seconds": seconds, "label": label} for key, seconds, label in HF_ANALYSIS_WINDOW_DEFINITIONS}
 
 DEFAULT_ZONE_COLORS: dict[str, list[str]] = {
     "ftp": ["#7C7691", "#6D8FD0", "#59B78F", "#F1D96A", "#E7A458", "#D45D76", "#B86AD6"],
@@ -103,10 +115,6 @@ ZONE_MODEL_DEFINITIONS: dict[str, list[dict[str, Any]]] = {
         },
     ],
 }
-
-OPENAI_CHAT_COMPLETIONS_URL = "https://api.openai.com/v1/chat/completions"
-DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
-
 
 def _normalize_focus_labels(values: list[str] | None) -> list[str]:
     labels: list[str] = []
@@ -286,6 +294,77 @@ def _normalize_training_plan_variants(value: Any) -> list[dict[str, Any]]:
         )
 
     return normalized_variants
+
+
+def _normalize_hf_analysis_window_key(value: str | None) -> str:
+    key = str(value or "").strip().lower()
+    if key in HF_ANALYSIS_WINDOW_LOOKUP:
+        return key
+    return HF_ANALYSIS_WINDOW_DEFINITIONS[0][0]
+
+
+def _round_half_up(value: float) -> int:
+    return int(value + 0.5) if value >= 0 else int(value - 0.5)
+
+
+def _hf_analysis_bucket_start(avg_power_w: float) -> int | None:
+    rounded_power = _round_half_up(avg_power_w)
+    if rounded_power < HF_ANALYSIS_BUCKET_START_W:
+        return None
+    return HF_ANALYSIS_BUCKET_START_W + ((rounded_power - HF_ANALYSIS_BUCKET_START_W) // HF_ANALYSIS_BUCKET_SIZE_W) * HF_ANALYSIS_BUCKET_SIZE_W
+
+
+def _normalize_hf_analysis_bucket_start(value: int | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        bucket_start = int(value)
+    except (TypeError, ValueError):
+        return None
+    if bucket_start < HF_ANALYSIS_BUCKET_START_W:
+        return None
+    return HF_ANALYSIS_BUCKET_START_W + ((bucket_start - HF_ANALYSIS_BUCKET_START_W) // HF_ANALYSIS_BUCKET_SIZE_W) * HF_ANALYSIS_BUCKET_SIZE_W
+
+
+def _records_to_series(records: list[ActivityRecord], attr: str) -> list[tuple[int, float]]:
+    values: list[tuple[int, float]] = []
+    for record in records:
+        elapsed = record.elapsed_s
+        raw_value = getattr(record, attr, None)
+        if elapsed is None or raw_value is None:
+            continue
+        second = int(round(float(elapsed)))
+        if second < 0:
+            continue
+        values.append((second, float(raw_value)))
+    values.sort(key=lambda item: item[0])
+    return values
+
+
+def _expand_series(series: list[tuple[int, float]], duration_s: float | None) -> list[float]:
+    if not series:
+        return []
+    max_index = max(second for second, _value in series) + 1
+    if duration_s is not None:
+        max_index = max(max_index, int(max(0, round(float(duration_s)))))
+    if max_index <= 0:
+        return []
+    expanded: list[float] = []
+    cursor = 0
+    last_value = float(series[0][1])
+    for second, value in series:
+        while cursor < second and cursor < max_index:
+            expanded.append(last_value)
+            cursor += 1
+        if cursor >= max_index:
+            break
+        last_value = float(value)
+        expanded.append(last_value)
+        cursor = second + 1
+    while cursor < max_index:
+        expanded.append(last_value)
+        cursor += 1
+    return expanded
 
 
 def _build_plan_context_text(sections: list[dict[str, Any]]) -> str:
@@ -551,6 +630,7 @@ def _fallback_key_workouts(variants: list[dict[str, Any]]) -> list[str]:
 
 
 def derive_training_config_with_llm(
+    user_id: int,
     section_key: str | None,
     section_title: str | None,
     selected_focus_labels: list[str] | None,
@@ -563,50 +643,18 @@ def derive_training_config_with_llm(
         notes=notes,
     )
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY is not configured.")
-
     model = os.getenv("OPENAI_MODEL", "").strip() or DEFAULT_OPENAI_MODEL
-    response = requests.post(
-        OPENAI_CHAT_COMPLETIONS_URL,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a structured endurance coach. Respond in German. "
-                        "Return valid JSON only and do not include markdown."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt_payload["prompt"],
-                },
-            ],
-            "temperature": 0.5,
-        },
+    body = openai_chat_completion(
+        user_id=user_id,
+        feature_key=f"training_config:{prompt_payload['section_key']}",
+        system_prompt=(
+            "You are a structured endurance coach. Respond in German. "
+            "Return valid JSON only and do not include markdown."
+        ),
+        user_prompt=prompt_payload["prompt"],
+        temperature=0.5,
         timeout=45,
     )
-
-    if response.status_code >= 400:
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = {}
-        detail = (
-            payload.get("error", {}).get("message")
-            if isinstance(payload, dict)
-            else None
-        ) or response.text.strip() or "LLM request failed."
-        raise RuntimeError(detail)
-
-    body = response.json()
     content = (
         body.get("choices", [{}])[0]
         .get("message", {})
@@ -636,8 +684,9 @@ def derive_training_config_with_llm(
     }
 
 
-def derive_athlete_profile_with_llm(selected_focus_labels: list[str] | None, notes: str | None = None) -> dict[str, Any]:
+def derive_athlete_profile_with_llm(user_id: int, selected_focus_labels: list[str] | None, notes: str | None = None) -> dict[str, Any]:
     payload = derive_training_config_with_llm(
+        user_id=user_id,
         section_key="profile",
         section_title="Athletenprofil",
         selected_focus_labels=selected_focus_labels,
@@ -740,53 +789,21 @@ def build_training_plan_prompt(sections: list[dict[str, Any]] | None) -> dict[st
     }
 
 
-def derive_training_plan_with_llm(sections: list[dict[str, Any]] | None) -> dict[str, Any]:
+def derive_training_plan_with_llm(user_id: int, sections: list[dict[str, Any]] | None) -> dict[str, Any]:
     prompt_payload = build_training_plan_prompt(sections)
 
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("OPENAI_API_KEY is not configured.")
-
     model = os.getenv("OPENAI_MODEL", "").strip() or DEFAULT_OPENAI_MODEL
-    response = requests.post(
-        OPENAI_CHAT_COMPLETIONS_URL,
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": model,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a structured endurance coach. Respond in German. "
-                        "Return valid JSON only and do not include markdown."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt_payload["prompt"],
-                },
-            ],
-            "temperature": 0.45,
-        },
+    body = openai_chat_completion(
+        user_id=user_id,
+        feature_key="training_plan:derive",
+        system_prompt=(
+            "You are a structured endurance coach. Respond in German. "
+            "Return valid JSON only and do not include markdown."
+        ),
+        user_prompt=prompt_payload["prompt"],
+        temperature=0.45,
         timeout=45,
     )
-
-    if response.status_code >= 400:
-        try:
-            payload = response.json()
-        except ValueError:
-            payload = {}
-        detail = (
-            payload.get("error", {}).get("message")
-            if isinstance(payload, dict)
-            else None
-        ) or response.text.strip() or "LLM request failed."
-        raise RuntimeError(detail)
-
-    body = response.json()
     content = body.get("choices", [{}])[0].get("message", {}).get("content", "")
     parsed = _extract_json_object(content)
 
@@ -1063,6 +1080,212 @@ def list_training_metrics(user_id: int) -> dict[str, Any]:
         for row in rows:
             grouped.setdefault(row.metric_type, []).append(_serialize_metric(row))
         return grouped
+
+
+def _build_hf_analysis_rows_for_activity(activity: Activity, records: list[ActivityRecord]) -> list[ActivityHfAnalysis]:
+    if activity.started_at is None:
+        return []
+
+    power_series = _expand_series(_records_to_series(records, "power_w"), activity.duration_s)
+    hr_series = _expand_series(_records_to_series(records, "heart_rate_bpm"), activity.duration_s)
+    series_length = min(len(power_series), len(hr_series))
+    if series_length <= 0:
+        return []
+
+    power_series = power_series[:series_length]
+    hr_series = hr_series[:series_length]
+    created_at = datetime.utcnow()
+    rows: list[ActivityHfAnalysis] = []
+
+    for window_key, window_seconds, _label in HF_ANALYSIS_WINDOW_DEFINITIONS:
+        if series_length < window_seconds:
+            continue
+
+        power_sum = sum(power_series[:window_seconds])
+        hr_sum = sum(hr_series[:window_seconds])
+        best_by_bucket: dict[int, dict[str, float]] = {}
+
+        for end_index in range(window_seconds - 1, series_length):
+            if end_index >= window_seconds:
+                power_sum += power_series[end_index] - power_series[end_index - window_seconds]
+                hr_sum += hr_series[end_index] - hr_series[end_index - window_seconds]
+
+            avg_power = power_sum / window_seconds
+            bucket_start = _hf_analysis_bucket_start(avg_power)
+            if bucket_start is None:
+                continue
+
+            avg_hr = hr_sum / window_seconds
+            current_best = best_by_bucket.get(bucket_start)
+            if current_best is not None and avg_hr >= float(current_best["avg_hr_bpm"]):
+                continue
+
+            best_by_bucket[bucket_start] = {
+                "avg_hr_bpm": round(avg_hr, 1),
+                "avg_power_w": round(avg_power, 1),
+            }
+
+        for bucket_start, values in sorted(best_by_bucket.items()):
+            rows.append(
+                ActivityHfAnalysis(
+                    user_id=activity.user_id,
+                    activity_id=activity.id,
+                    activity_date=activity.started_at.date(),
+                    window_key=window_key,
+                    window_seconds=window_seconds,
+                    bucket_start_w=bucket_start,
+                    bucket_end_w=bucket_start + HF_ANALYSIS_BUCKET_SIZE_W - 1,
+                    avg_hr_bpm=float(values["avg_hr_bpm"]),
+                    avg_power_w=float(values["avg_power_w"]),
+                    activity_name=activity.name or "Aktivitaet",
+                    started_at=activity.started_at,
+                    created_at=created_at,
+                    updated_at=created_at,
+                )
+            )
+
+    return rows
+
+
+def rebuild_hf_development_cache(user_id: int, activity_ids: list[int] | None = None) -> dict[str, Any]:
+    with SessionLocal() as session:
+        partial_requested = activity_ids is not None
+        stmt = (
+            select(Activity)
+            .where(Activity.user_id == user_id)
+            .where(Activity.started_at.is_not(None))
+            .order_by(Activity.started_at.asc(), Activity.id.asc())
+        )
+        normalized_activity_ids = sorted({int(activity_id) for activity_id in (activity_ids or []) if activity_id is not None})
+        if partial_requested and not normalized_activity_ids:
+            return {
+                "status": "ok",
+                "activities_considered": 0,
+                "activities_with_analysis": 0,
+                "rows_written": 0,
+                "mode": "partial",
+            }
+        if normalized_activity_ids:
+            stmt = stmt.where(Activity.id.in_(normalized_activity_ids))
+        activities = session.scalars(stmt).all()
+        target_activity_ids = [activity.id for activity in activities]
+
+        if partial_requested:
+            session.execute(delete(ActivityHfAnalysis).where(ActivityHfAnalysis.activity_id.in_(normalized_activity_ids)))
+        else:
+            session.execute(delete(ActivityHfAnalysis).where(ActivityHfAnalysis.user_id == user_id))
+
+        records = (
+            session.scalars(
+                select(ActivityRecord)
+                .where(ActivityRecord.activity_id.in_(target_activity_ids) if target_activity_ids else False)
+                .order_by(ActivityRecord.activity_id.asc(), ActivityRecord.elapsed_s.asc(), ActivityRecord.record_index.asc())
+            ).all()
+            if target_activity_ids
+            else []
+        )
+
+        records_by_activity: dict[int, list[ActivityRecord]] = {}
+        for record in records:
+            records_by_activity.setdefault(record.activity_id, []).append(record)
+
+        rows_to_insert: list[ActivityHfAnalysis] = []
+        activities_with_rows = 0
+        for activity in activities:
+            rows = _build_hf_analysis_rows_for_activity(activity, records_by_activity.get(activity.id, []))
+            if rows:
+                activities_with_rows += 1
+                rows_to_insert.extend(rows)
+
+        if rows_to_insert:
+            session.add_all(rows_to_insert)
+        session.commit()
+
+    return {
+        "status": "ok",
+        "activities_considered": len(activities),
+        "activities_with_analysis": activities_with_rows,
+        "rows_written": len(rows_to_insert),
+        "mode": "partial" if partial_requested else "full",
+    }
+
+
+def get_hf_development(user_id: int, window_key: str | None = None, bucket_start_w: int | None = None) -> dict[str, Any]:
+    normalized_window_key = _normalize_hf_analysis_window_key(window_key)
+    window_definition = HF_ANALYSIS_WINDOW_LOOKUP[normalized_window_key]
+
+    with SessionLocal() as session:
+        activity_count = session.scalar(
+            select(func.count(Activity.id)).where(Activity.user_id == user_id).where(Activity.started_at.is_not(None))
+        )
+        cached_rows = session.scalars(
+            select(ActivityHfAnalysis)
+            .where(ActivityHfAnalysis.user_id == user_id)
+            .where(ActivityHfAnalysis.window_key == normalized_window_key)
+            .order_by(ActivityHfAnalysis.activity_date.asc(), ActivityHfAnalysis.started_at.asc(), ActivityHfAnalysis.activity_id.asc())
+        ).all()
+
+    if not cached_rows and activity_count:
+        rebuild_hf_development_cache(user_id=user_id)
+        with SessionLocal() as session:
+            cached_rows = session.scalars(
+                select(ActivityHfAnalysis)
+                .where(ActivityHfAnalysis.user_id == user_id)
+                .where(ActivityHfAnalysis.window_key == normalized_window_key)
+                .order_by(ActivityHfAnalysis.activity_date.asc(), ActivityHfAnalysis.started_at.asc(), ActivityHfAnalysis.activity_id.asc())
+            ).all()
+
+    available_bucket_starts = sorted({int(row.bucket_start_w) for row in cached_rows})
+    bucket_options = [
+        {
+            "bucket_start_w": start,
+            "bucket_end_w": start + HF_ANALYSIS_BUCKET_SIZE_W - 1,
+            "label": f"{start}-{start + HF_ANALYSIS_BUCKET_SIZE_W - 1} W",
+        }
+        for start in available_bucket_starts
+    ]
+
+    normalized_bucket_start = _normalize_hf_analysis_bucket_start(bucket_start_w)
+    if normalized_bucket_start is None or normalized_bucket_start not in available_bucket_starts:
+        normalized_bucket_start = bucket_options[0]["bucket_start_w"] if bucket_options else HF_ANALYSIS_BUCKET_START_W
+
+    filtered_rows = [row for row in cached_rows if int(row.bucket_start_w) == int(normalized_bucket_start)]
+
+    by_day: dict[str, ActivityHfAnalysis] = {}
+    for row in filtered_rows:
+        day_key = row.activity_date.isoformat()
+        existing = by_day.get(day_key)
+        if existing is None or float(row.avg_hr_bpm) < float(existing.avg_hr_bpm):
+            by_day[day_key] = row
+
+    points = [
+        {
+            "date": day_key,
+            "avg_hr_bpm": float(row.avg_hr_bpm),
+            "avg_power_w": float(row.avg_power_w),
+            "activity_id": int(row.activity_id),
+            "activity_name": str(row.activity_name or "Aktivitaet"),
+            "started_at": _serialize_datetime(row.started_at),
+        }
+        for day_key, row in sorted(by_day.items(), key=lambda item: item[0])
+    ]
+
+    return {
+        "window_options": [
+            {"key": key, "label": label, "seconds": seconds}
+            for key, seconds, label in HF_ANALYSIS_WINDOW_DEFINITIONS
+        ],
+        "bucket_options": bucket_options,
+        "selected_window_key": normalized_window_key,
+        "selected_bucket_start_w": normalized_bucket_start,
+        "selected_bucket_label": f"{normalized_bucket_start}-{normalized_bucket_start + HF_ANALYSIS_BUCKET_SIZE_W - 1} W",
+        "points": points,
+        "summary": {
+            "points_count": len(points),
+            "activities_considered": int(activity_count or 0),
+            "window_label": str(window_definition["label"]),
+        },
+    }
 
 
 def get_current_metric_peak(user_id: int, metric_type: str) -> float | None:

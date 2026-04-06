@@ -65,6 +65,7 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     invite_tokens: Mapped[list["UserInviteToken"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    llm_usage_events: Mapped[list["LlmUsageEvent"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class ServiceCredential(Base):
@@ -252,6 +253,32 @@ class UserAchievementRecordEvent(Base):
     user: Mapped[User] = relationship(back_populates="achievement_record_events")
 
 
+class LlmUsageEvent(Base):
+    __tablename__ = "llm_usage_events"
+    __table_args__ = (
+        Index("ix_llm_usage_events_user_created", "user_id", "created_at"),
+        Index("ix_llm_usage_events_user_feature_created", "user_id", "feature_key", "created_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    feature_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    request_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="llm_usage_events")
+
+
 class FitFile(Base):
     __tablename__ = "fit_files"
     __table_args__ = (
@@ -410,6 +437,52 @@ class ActivityRecord(Base):
     temperature_c: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     activity: Mapped[Activity] = relationship(back_populates="records")
+
+
+class ActivityHfAnalysis(Base):
+    __tablename__ = "activity_hf_analysis"
+    __table_args__ = (
+        UniqueConstraint("activity_id", "window_key", "bucket_start_w", name="uq_activity_hf_analysis_activity_window_bucket"),
+        Index("ix_activity_hf_analysis_user_window_bucket_date", "user_id", "window_key", "bucket_start_w", "activity_date"),
+        Index("ix_activity_hf_analysis_activity_window", "activity_id", "window_key"),
+        {"schema": GARMIN_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    activity_id: Mapped[int] = mapped_column(ForeignKey(f"{GARMIN_SCHEMA}.activities.id", ondelete="CASCADE"), nullable=False)
+    activity_date: Mapped[date] = mapped_column(Date, nullable=False)
+    window_key: Mapped[str] = mapped_column(String(12), nullable=False)
+    window_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    bucket_start_w: Mapped[int] = mapped_column(Integer, nullable=False)
+    bucket_end_w: Mapped[int] = mapped_column(Integer, nullable=False)
+    avg_hr_bpm: Mapped[float] = mapped_column(Float, nullable=False)
+    avg_power_w: Mapped[float] = mapped_column(Float, nullable=False)
+    activity_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class ActivityLlmAnalysisCache(Base):
+    __tablename__ = "activity_llm_analysis_cache"
+    __table_args__ = (
+        UniqueConstraint("activity_id", name="uq_activity_llm_analysis_cache_activity"),
+        Index("ix_activity_llm_analysis_cache_user_activity", "user_id", "activity_id"),
+        {"schema": GARMIN_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    activity_id: Mapped[int] = mapped_column(ForeignKey(f"{GARMIN_SCHEMA}.activities.id", ondelete="CASCADE"), nullable=False)
+    activity_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    analysis_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    context_snapshot_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
 
 class FitRawMessage(Base):
