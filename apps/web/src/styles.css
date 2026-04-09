@@ -4547,6 +4547,13 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.climb-compare-status-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 1rem;
+}
+
 .climb-compare-summary-card {
   border: 1px solid var(--line);
   border-radius: 0.9rem;
@@ -4591,6 +4598,10 @@ h1 {
   margin-top: 1rem;
   display: grid;
   gap: 0.75rem;
+}
+
+.climb-compare-results-table-wrap {
+  margin-top: 0;
 }
 
 .climb-compare-match-list {
@@ -4654,12 +4665,18 @@ h1 {
   border-radius: 1rem;
   padding: 0.95rem;
   background: #ffffff;
+  cursor: pointer;
 }
 
 .climb-compare-list-card.is-selected {
   border-color: #6ab294;
   box-shadow: 0 0 0 2px rgba(31, 139, 111, 0.08);
   background: #f8fcfa;
+}
+
+.climb-compare-list-card:focus-visible {
+  outline: 2px solid #1f8b6f;
+  outline-offset: 2px;
 }
 
 .climb-compare-list-head {
@@ -4698,6 +4715,72 @@ h1 {
   margin: 0.85rem 0;
   color: #204840;
   font-size: 0.9rem;
+}
+
+.climb-compare-list-metrics-secondary {
+  justify-content: space-between;
+  margin-top: -0.45rem;
+}
+
+.climb-compare-list-version {
+  margin-left: auto;
+  text-align: right;
+  font-weight: 700;
+  color: var(--text-soft);
+}
+
+.climb-compare-sort-button {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.climb-compare-match-row:hover {
+  background: rgba(31, 139, 111, 0.06);
+}
+
+.climb-compare-match-name-cell {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.climb-compare-match-link {
+  color: var(--text);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.climb-compare-match-link:hover,
+.climb-compare-match-link:focus-visible {
+  color: #1f8b6f;
+}
+
+.climb-compare-match-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.climb-compare-match-badge.is-time {
+  border-color: #d4c391;
+  background: #fff6db;
+  color: #856000;
+}
+
+.climb-compare-match-badge.is-power {
+  border-color: #efbfaa;
+  background: #fff0ea;
+  color: #9b4a28;
+}
+
+.climb-compare-match-badge.is-hr {
+  border-color: #d8b7d8;
+  background: #f9eef9;
+  color: #7f407f;
 }
 
 .climb-compare-card-note {
@@ -4756,6 +4839,10 @@ h1 {
   color: var(--text-soft);
 }
 
+.climb-compare-rename-card {
+  width: min(460px, calc(100vw - 2rem));
+}
+
 @media (max-width: 1120px) {
   .climb-compare-layout,
   .climb-compare-detail-grid {
@@ -4765,7 +4852,8 @@ h1 {
 
 @media (max-width: 760px) {
   .climb-compare-form-grid,
-  .climb-compare-summary-grid {
+  .climb-compare-summary-grid,
+  .climb-compare-status-grid {
     grid-template-columns: 1fr;
   }
 

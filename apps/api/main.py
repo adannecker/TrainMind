@@ -34,9 +34,12 @@ from apps.api.climb_compare_service import (
     DEFAULT_CHECK_RIDES_LIMIT,
     create_climb_compare,
     delete_climb_compare,
+    duplicate_climb_compare,
     get_climb_compare_brief,
     list_climb_compares,
+    rename_climb_compare,
     trigger_climb_compare_check,
+    update_climb_compare,
 )
 from apps.api.garmin_service import (
     ingest_recent_garmin_rides,
@@ -267,12 +270,13 @@ def _store_climb_compare_job(user_id: int, compare_id: int, updates: dict[str, o
         return dict(current)
 
 
-def _run_climb_compare_job(user_id: int, compare_id: int) -> None:
+def _run_climb_compare_job(user_id: int, compare_id: int, scope: str) -> None:
     try:
         result = trigger_climb_compare_check(
             user_id=user_id,
             compare_id=compare_id,
             limit=DEFAULT_CHECK_RIDES_LIMIT,
+            full_refresh=scope == "all",
             progress_callback=lambda current, total, activity_name: _store_climb_compare_job(
                 user_id,
                 compare_id,
@@ -295,6 +299,7 @@ def _run_climb_compare_job(user_id: int, compare_id: int) -> None:
                 "current_activity_name": None,
                 "updated_at": _job_timestamp(),
                 "finished_at": _job_timestamp(),
+                "scope": scope,
                 "result": result,
                 "error": None,
                 "message": result.get("message"),
@@ -433,6 +438,10 @@ class ClimbCompareCreateRequest(BaseModel):
     start_point: GeoPointRequest
     via_point: GeoPointRequest
     end_point: GeoPointRequest
+
+
+class ClimbCompareRenameRequest(BaseModel):
+    name: str
 
 
 class WeightLogCreateRequest(BaseModel):
@@ -1430,8 +1439,42 @@ def activities_climb_compare_create(payload: ClimbCompareCreateRequest, current_
         raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
 
 
+@app.put("/activities/climb-compare/{compare_id}")
+def activities_climb_compare_update(compare_id: int, payload: ClimbCompareCreateRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return update_climb_compare(user_id=int(current_user["id"]), compare_id=compare_id, payload=payload.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare/{compare_id}/rename")
+def activities_climb_compare_rename(compare_id: int, payload: ClimbCompareRenameRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return rename_climb_compare(user_id=int(current_user["id"]), compare_id=compare_id, name=payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare/{compare_id}/copy")
+def activities_climb_compare_copy(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return duplicate_climb_compare(user_id=int(current_user["id"]), compare_id=compare_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
 @app.post("/activities/climb-compare/{compare_id}/check-rides")
-def activities_climb_compare_check(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
+def activities_climb_compare_check(
+    compare_id: int,
+    scope: str = Query(default="new", pattern=r"^(new|all)$"),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
     try:
         user_id = int(current_user["id"])
         current_job = _snapshot_climb_compare_job(user_id, compare_id)
@@ -1452,12 +1495,15 @@ def activities_climb_compare_check(compare_id: int, current_user: dict = Depends
                 "started_at": _job_timestamp(),
                 "updated_at": _job_timestamp(),
                 "finished_at": None,
+                "scope": scope,
                 "result": None,
                 "error": None,
                 "message": (
-                    f"Die letzten {DEFAULT_CHECK_RIDES_LIMIT} Rides werden jetzt geprueft."
+                    "Climb Compare wird komplett neu geprueft."
+                    if scope == "all"
+                    else f"Die letzten {DEFAULT_CHECK_RIDES_LIMIT} neuen Rides werden jetzt geprueft."
                     if DEFAULT_CHECK_RIDES_LIMIT > 0
-                    else "Alle Rides werden jetzt geprueft."
+                    else "Neue Rides werden jetzt geprueft."
                 ),
             },
         )
@@ -1466,6 +1512,7 @@ def activities_climb_compare_check(compare_id: int, current_user: dict = Depends
             kwargs={
                 "user_id": user_id,
                 "compare_id": compare_id,
+                "scope": scope,
             },
             daemon=True,
         )

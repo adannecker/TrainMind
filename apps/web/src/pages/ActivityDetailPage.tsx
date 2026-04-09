@@ -436,6 +436,35 @@ function pointerRatioInPlot(clientX: number, element: HTMLDivElement, plotLeft: 
   return Math.max(0, Math.min(1, (clientX - rect.left - plotLeftPx) / Math.max(1, plotWidthPx)));
 }
 
+function useResponsiveChartWidth(minWidth = 360): [(element: HTMLDivElement | null) => void, number] {
+  const [containerElement, setContainerElement] = useState<HTMLDivElement | null>(null);
+  const [svgWidth, setSvgWidth] = useState(1000);
+
+  useEffect(() => {
+    if (!containerElement) return;
+    const element = containerElement;
+
+    function updateWidth(nextWidth?: number) {
+      const measuredWidth = nextWidth ?? element.getBoundingClientRect().width;
+      setSvgWidth(Math.max(minWidth, Math.round(measuredWidth)));
+    }
+
+    updateWidth();
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      updateWidth(entry?.contentRect.width);
+    });
+    observer.observe(element);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [containerElement, minWidth]);
+
+  return [setContainerElement, svgWidth];
+}
+
 function filterPointsByDistanceRange<T extends { distanceM: number }>(points: T[], range: DistanceRange | null): T[] {
   if (!range) return points;
   return points.filter((point) => point.distanceM >= range.start && point.distanceM <= range.end);
@@ -592,7 +621,7 @@ function buildChartPoints(records: ChartRecord[], pick: (row: ActivityRecordRow)
   });
 }
 
-function buildPolyline(points: ChartPoint[], width = 900, height = 220): string | null {
+function buildPolyline(points: ChartPoint[], duration = 0, width = 900, height = 220): string | null {
   if (points.length < 2) return null;
   const maxValue = Math.max(...points.map((item) => item.value));
   const minValue = Math.min(...points.map((item) => item.value));
@@ -600,7 +629,7 @@ function buildPolyline(points: ChartPoint[], width = 900, height = 220): string 
   const paddedMin = rawSpan === 0 ? minValue - Math.max(1, Math.abs(minValue) * 0.1) : minValue - rawSpan * 0.08;
   const paddedMax = rawSpan === 0 ? maxValue + Math.max(1, Math.abs(maxValue) * 0.1) : maxValue + rawSpan * 0.08;
   const span = Math.max(1, paddedMax - paddedMin);
-  const maxElapsed = Math.max(...points.map((item) => item.elapsed), 1);
+  const maxElapsed = Math.max(duration, ...points.map((item) => item.elapsed), 1);
   return points
     .map((point) => {
       const x = (point.elapsed / maxElapsed) * width;
@@ -610,7 +639,7 @@ function buildPolyline(points: ChartPoint[], width = 900, height = 220): string 
     .join(" ");
 }
 
-function buildAreaPath(points: ChartPoint[], width = 900, height = 220): string | null {
+function buildAreaPath(points: ChartPoint[], duration = 0, width = 900, height = 220): string | null {
   if (points.length < 2) return null;
   const maxValue = Math.max(...points.map((item) => item.value));
   const minValue = Math.min(...points.map((item) => item.value));
@@ -618,7 +647,7 @@ function buildAreaPath(points: ChartPoint[], width = 900, height = 220): string 
   const paddedMin = rawSpan === 0 ? minValue - Math.max(1, Math.abs(minValue) * 0.1) : minValue - rawSpan * 0.08;
   const paddedMax = rawSpan === 0 ? maxValue + Math.max(1, Math.abs(maxValue) * 0.1) : maxValue + rawSpan * 0.08;
   const span = Math.max(1, paddedMax - paddedMin);
-  const maxElapsed = Math.max(...points.map((item) => item.elapsed), 1);
+  const maxElapsed = Math.max(duration, ...points.map((item) => item.elapsed), 1);
   const linePoints = points.map((point) => {
     const x = (point.elapsed / maxElapsed) * width;
     const y = height - ((point.value - paddedMin) / span) * height;
@@ -745,12 +774,14 @@ function DistanceChart({
   const values = points.map((point) => point.value);
   const bounds = useMemo(() => computeAxisBounds(values), [values]);
   const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  const [chartContainerRef, svgWidth] = useResponsiveChartWidth();
   const chartLeft = 64;
   const chartTop = 18;
-  const chartWidth = 900;
+  const chartRight = 36;
+  const chartWidth = Math.max(160, svgWidth - chartLeft - chartRight);
   const chartHeight = 220;
-  const plotLeftPercent = (chartLeft / 1000) * 100;
-  const plotWidthPercent = (chartWidth / 1000) * 100;
+  const plotLeftPercent = (chartLeft / svgWidth) * 100;
+  const plotWidthPercent = (chartWidth / svgWidth) * 100;
   const minDistanceM = points.length ? Math.min(...points.map((point) => point.distanceM)) : 0;
   const maxDistanceM = points.length ? Math.max(...points.map((point) => point.distanceM), 1) : 1;
   const distanceSpan = Math.max(1, maxDistanceM - minDistanceM);
@@ -788,7 +819,7 @@ function DistanceChart({
   const visibleSelection = activeSelection ?? committedSelection;
 
   function pointerToDistance(clientX: number, element: HTMLDivElement): number {
-    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth);
+    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth, svgWidth);
     return minDistanceM + ratio * distanceSpan;
   }
 
@@ -813,6 +844,7 @@ function DistanceChart({
       </div>
       {subtitle ? <p className="training-note">{subtitle}</p> : null}
       <div
+        ref={chartContainerRef}
         style={{ position: "relative", touchAction: "none", cursor: "crosshair", userSelect: "none", WebkitUserSelect: "none" }}
         onPointerDown={(event) => {
           if (!selectable || !onSelectionStart) return;
@@ -843,8 +875,8 @@ function DistanceChart({
           }
         }}
       >
-        <svg viewBox="0 0 1000 300" style={{ width: "100%", height: "300px", overflow: "visible" }} aria-label={`${title} Verlauf auf Distanzbasis`}>
-          <rect x="0" y="0" width="1000" height="300" rx="18" fill="#f7fcfa" />
+        <svg viewBox={`0 0 ${svgWidth} 300`} style={{ width: "100%", height: "300px", overflow: "visible", display: "block" }} aria-label={`${title} Verlauf auf Distanzbasis`}>
+          <rect x="0" y="0" width={svgWidth} height="300" rx="18" fill="#f7fcfa" />
           {yTicks.map((tick, index) => {
             const y = chartTop + chartHeight - ((tick - bounds.axisMin) / bounds.span) * chartHeight;
             return (
@@ -857,7 +889,7 @@ function DistanceChart({
             );
           })}
           {xTicks.map((tick, index) => {
-            const x = chartLeft + (tick / Math.max(1, maxDistanceM)) * chartWidth;
+            const x = chartLeft + ((tick - minDistanceM) / distanceSpan) * chartWidth;
             return (
               <g key={`${title}-x-distance-${index}`}>
                 <line x1={x} y1={chartTop} x2={x} y2={chartTop + chartHeight} stroke="#edf4f1" strokeWidth="1" />
@@ -918,7 +950,7 @@ function DistanceChart({
           <div
             style={{
               position: "absolute",
-              left: `${(hoverX! / 1000) * 100}%`,
+              left: `${(hoverX! / svgWidth) * 100}%`,
               top: "14px",
               transform: "translateX(-50%)",
               background: "#ffffff",
@@ -1177,24 +1209,32 @@ function MiniChart({
     [baseElapsed, sourceRecords],
   );
   const chartPoints = useMemo(() => buildChartPoints(chartRecords, pick, smoothingMode), [chartRecords, pick, smoothingMode]);
-  const points = useMemo(() => buildPolyline(chartPoints), [chartPoints]);
-  const areaPath = useMemo(() => buildAreaPath(chartPoints), [chartPoints]);
+  const chartDuration = Math.max(0, sourceEnd - sourceStart);
   const values = chartPoints.map((point) => point.value);
   const bounds = useMemo(() => computeAxisBounds(values), [values]);
   const min = bounds?.min ?? null;
   const max = bounds?.max ?? null;
   const average = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
-  const innerWidth = 900;
+  const [chartContainerRef, svgWidth] = useResponsiveChartWidth();
   const innerHeight = 220;
   const chartLeft = 64;
   const chartTop = 18;
-  const chartWidth = innerWidth;
+  const chartRight = 36;
+  const chartWidth = Math.max(160, svgWidth - chartLeft - chartRight);
   const chartHeight = innerHeight;
-  const plotLeftPercent = (chartLeft / 1000) * 100;
-  const plotWidthPercent = (chartWidth / 1000) * 100;
+  const points = useMemo(
+    () => buildPolyline(chartPoints, chartDuration, chartWidth, chartHeight),
+    [chartDuration, chartHeight, chartPoints, chartWidth],
+  );
+  const areaPath = useMemo(
+    () => buildAreaPath(chartPoints, chartDuration, chartWidth, chartHeight),
+    [chartDuration, chartHeight, chartPoints, chartWidth],
+  );
+  const plotLeftPercent = (chartLeft / svgWidth) * 100;
+  const plotWidthPercent = (chartWidth / svgWidth) * 100;
   const visibleStart = sourceStart;
   const visibleEnd = sourceEnd;
-  const totalDuration = Math.max(visibleEnd - visibleStart, 0);
+  const totalDuration = chartDuration;
   const gridSteps = 4;
   const yTicks =
     bounds != null
@@ -1236,7 +1276,7 @@ function MiniChart({
       : chartTop + chartHeight - ((average - axisMin) / valueSpan) * chartHeight;
 
   function pointerToSecond(clientX: number, element: HTMLDivElement): number {
-    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth);
+    const ratio = pointerRatioInPlot(clientX, element, chartLeft, chartWidth, svgWidth);
     return sourceStart + ratio * Math.max(1, sourceEnd - sourceStart);
   }
 
@@ -1250,6 +1290,7 @@ function MiniChart({
       </div>
       {points ? (
         <div
+          ref={chartContainerRef}
           style={{ position: "relative", touchAction: "none", cursor: "crosshair", userSelect: "none", WebkitUserSelect: "none" }}
           onPointerDown={(event) => {
             event.preventDefault();
@@ -1276,8 +1317,8 @@ function MiniChart({
             }
           }}
         >
-          <svg viewBox="0 0 1000 300" style={{ width: "100%", height: "300px", overflow: "visible" }} aria-label={`${title} Verlauf`}>
-            <rect x="0" y="0" width="1000" height="300" rx="18" fill="#f7fcfa" />
+          <svg viewBox={`0 0 ${svgWidth} 300`} style={{ width: "100%", height: "300px", overflow: "visible", display: "block" }} aria-label={`${title} Verlauf`}>
+            <rect x="0" y="0" width={svgWidth} height="300" rx="18" fill="#f7fcfa" />
             {yTicks.map((tick, index) => {
               const y = chartTop + chartHeight - ((tick - axisMin) / valueSpan) * chartHeight;
               return (
@@ -1324,7 +1365,7 @@ function MiniChart({
             <div
               style={{
                 position: "absolute",
-                left: `${(hoverX / 1000) * 100}%`,
+                left: `${(hoverX / svgWidth) * 100}%`,
                 top: "14px",
                 transform: "translateX(-50%)",
                 background: "#ffffff",

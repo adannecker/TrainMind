@@ -77,7 +77,7 @@ function formatDistanceMeters(value: number | null): string {
 
 function formatNumber(value: number | null, suffix: string): string {
   if (value == null) return "-";
-  return `${Math.round(value)} ${suffix}`;
+  return `${Math.round(value)} ${suffix}`.trim();
 }
 
 const monthOptions = [
@@ -424,8 +424,8 @@ export function CheckRidesPage() {
                     <th>Name</th>
                     <th>Dauer</th>
                     <th>Distanz</th>
-                    <th>O Watt</th>
-                    <th>O HF</th>
+                    <th>{"\u00D8 Watt"}</th>
+                    <th>{"\u00D8 HF"}</th>
                   </tr>
                 </thead>
                 <tbody>

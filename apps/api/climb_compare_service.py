@@ -5,7 +5,7 @@ import math
 from datetime import datetime
 from typing import Any, Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from packages.db.models import Activity, ActivityClimbCompare, ActivityRecord
 from packages.db.session import SessionLocal
@@ -13,13 +13,15 @@ from packages.db.session import SessionLocal
 
 DEFAULT_COMPARE_CENTER = {"latitude_deg": 47.61, "longitude_deg": 7.66}
 DEFAULT_SEARCH_TOLERANCE_M = 50.0
+MIN_SEARCH_TOLERANCE_M = 15.0
+MIN_PREVIEW_TOLERANCE_M = 50.0
 MAX_ROUTE_POINTS = 280
 MAX_PROFILE_POINTS = 320
 MAX_MATCH_CANDIDATES = 36
-MIN_PREVIEW_TOLERANCE_M = 50.0
 DEFAULT_CHECK_RIDES_LIMIT = 0
 MIN_MOVING_SPEED_MPS = 0.6
 MIN_MOVING_DISTANCE_M = 1.0
+CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION = 3
 
 
 def _now() -> datetime:
@@ -53,10 +55,7 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     lat2_rad = math.radians(lat2)
     delta_lat = math.radians(lat2 - lat1)
     delta_lon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(delta_lat / 2.0) ** 2
-        + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2.0) ** 2
-    )
+    a = math.sin(delta_lat / 2.0) ** 2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(delta_lon / 2.0) ** 2
     return 2.0 * radius_m * math.asin(math.sqrt(a))
 
 
@@ -111,6 +110,15 @@ def _safe_json_list(raw_json: str | None) -> list[dict[str, float | None]]:
     return clean_items
 
 
+def _safe_json_payload(raw_json: str | None) -> Any:
+    if not raw_json:
+        return None
+    try:
+        return json.loads(raw_json)
+    except Exception:
+        return None
+
+
 def _extract_geo_records(records: list[ActivityRecord]) -> list[ActivityRecord]:
     return [row for row in records if row.latitude_deg is not None and row.longitude_deg is not None]
 
@@ -124,10 +132,7 @@ def _grade_pct(distance_delta_m: float, altitude_delta_m: float) -> float | None
 def _record_point(row: ActivityRecord | None) -> dict[str, float] | None:
     if row is None or row.latitude_deg is None or row.longitude_deg is None:
         return None
-    return {
-        "latitude_deg": round(float(row.latitude_deg), 7),
-        "longitude_deg": round(float(row.longitude_deg), 7),
-    }
+    return {"latitude_deg": round(float(row.latitude_deg), 7), "longitude_deg": round(float(row.longitude_deg), 7)}
 
 
 def _record_distance_delta_m(previous: ActivityRecord, current: ActivityRecord) -> float | None:
@@ -168,11 +173,7 @@ def _local_xy_m(latitude_deg: float, longitude_deg: float, *, origin_latitude_de
     return (x_m, y_m)
 
 
-def _distance_point_to_segment_m(
-    point: dict[str, float],
-    start_row: ActivityRecord,
-    end_row: ActivityRecord,
-) -> tuple[float, float]:
+def _distance_point_to_segment_m(point: dict[str, float], start_row: ActivityRecord, end_row: ActivityRecord) -> tuple[float, float]:
     if (
         start_row.latitude_deg is None
         or start_row.longitude_deg is None
@@ -180,7 +181,6 @@ def _distance_point_to_segment_m(
         or end_row.longitude_deg is None
     ):
         return (math.inf, 0.0)
-
     ax, ay = _local_xy_m(
         float(start_row.latitude_deg),
         float(start_row.longitude_deg),
@@ -198,7 +198,6 @@ def _distance_point_to_segment_m(
     length_sq = (abx * abx) + (aby * aby)
     if length_sq <= 1e-9:
         return (math.hypot(ax, ay), 0.0)
-
     projection_t = -((ax * abx) + (ay * aby)) / length_sq
     projection_t = max(0.0, min(1.0, projection_t))
     nearest_x = ax + (projection_t * abx)
@@ -206,40 +205,59 @@ def _distance_point_to_segment_m(
     return (math.hypot(nearest_x, nearest_y), projection_t)
 
 
-def _segment_candidates(
-    records: list[ActivityRecord],
-    point: dict[str, float],
-    tolerance_m: float,
-    *,
-    after_position: float = -1.0,
-) -> list[dict[str, Any]]:
+def _build_route_distances_m(records: list[ActivityRecord]) -> list[float]:
+    if not records:
+        return []
+    route_distances_m: list[float] = [0.0]
+    first_distance_m = next((float(row.distance_m) for row in records if row.distance_m is not None), None)
+    for index in range(1, len(records)):
+        previous = records[index - 1]
+        current = records[index]
+        if first_distance_m is not None and current.distance_m is not None:
+            current_distance_m = max(0.0, float(current.distance_m) - first_distance_m)
+        else:
+            current_distance_m = route_distances_m[-1]
+            previous_point = _record_point(previous)
+            current_point = _record_point(current)
+            if previous_point is not None and current_point is not None:
+                current_distance_m += _haversine_m(
+                    previous_point["latitude_deg"],
+                    previous_point["longitude_deg"],
+                    current_point["latitude_deg"],
+                    current_point["longitude_deg"],
+                )
+        route_distances_m.append(max(route_distances_m[-1], current_distance_m))
+    return route_distances_m
+
+
+def _segment_candidates(records: list[ActivityRecord], point: dict[str, float], tolerance_m: float, *, after_route_distance_m: float = -1.0) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     if len(records) < 2:
         return candidates
-
+    route_distances_m = _build_route_distances_m(records)
     for segment_index in range(len(records) - 1):
-        if (segment_index + 1) <= after_position:
-            continue
         start_row = records[segment_index]
         end_row = records[segment_index + 1]
         distance_m, projection_t = _distance_point_to_segment_m(point, start_row, end_row)
-        position = float(segment_index) + projection_t
-        if position <= after_position:
-            continue
         if distance_m > tolerance_m:
+            continue
+        start_route_distance_m = route_distances_m[segment_index]
+        end_route_distance_m = route_distances_m[segment_index + 1]
+        projected_route_distance_m = start_route_distance_m + ((end_route_distance_m - start_route_distance_m) * projection_t)
+        if projected_route_distance_m <= after_route_distance_m:
             continue
         matched_record_index = segment_index if projection_t <= 0.5 else segment_index + 1
         candidates.append(
             {
                 "segment_index": segment_index,
-                "position": position,
+                "projection_t": projection_t,
                 "distance_m": distance_m,
+                "route_distance_m": projected_route_distance_m,
                 "matched_record_index": matched_record_index,
             }
         )
-
-    candidates.sort(key=lambda item: (float(item["distance_m"]), float(item["position"])))
-    return candidates[:MAX_MATCH_CANDIDATES]
+    candidates.sort(key=lambda item: (float(item["route_distance_m"]), float(item["distance_m"])))
+    return candidates[: max(MAX_MATCH_CANDIDATES * 4, 200)]
 
 
 def _find_best_segment_indices(
@@ -253,37 +271,29 @@ def _find_best_segment_indices(
     start_candidates = _segment_candidates(records, start_point, tolerance_m)
     if not start_candidates:
         return None
-
+    via_candidates = _segment_candidates(records, via_point, tolerance_m)
+    if not via_candidates:
+        return None
+    end_candidates = _segment_candidates(records, end_point, tolerance_m)
+    if not end_candidates:
+        return None
     best_match: dict[str, Any] | None = None
     for start_candidate in start_candidates:
-        start_distance_m = float(start_candidate["distance_m"])
-        if best_match is not None and start_distance_m >= float(best_match["score"]):
-            continue
-        via_candidates = _segment_candidates(records, via_point, tolerance_m, after_position=float(start_candidate["position"]))
-        if not via_candidates:
-            continue
         for via_candidate in via_candidates:
-            via_distance_m = float(via_candidate["distance_m"])
-            partial_score = start_distance_m + via_distance_m
-            if best_match is not None and partial_score >= float(best_match["score"]):
-                continue
-            end_candidates = _segment_candidates(records, end_point, tolerance_m, after_position=float(via_candidate["position"]))
-            if not end_candidates:
+            if float(via_candidate["route_distance_m"]) <= float(start_candidate["route_distance_m"]):
                 continue
             for end_candidate in end_candidates:
-                end_distance_m = float(end_candidate["distance_m"])
-                start_index = int(start_candidate["segment_index"])
-                via_index = int(via_candidate["matched_record_index"])
-                end_index = min(len(records) - 1, int(end_candidate["segment_index"]) + 1)
-                if via_index <= start_index:
-                    via_index = min(len(records) - 1, start_index + 1)
-                if via_index >= end_index:
-                    via_index = max(start_index + 1, end_index - 1)
-                span = end_index - start_index
-                if span < 2:
+                if float(end_candidate["route_distance_m"]) <= float(via_candidate["route_distance_m"]):
                     continue
-                score = partial_score + end_distance_m + (span * 0.05)
+                score = float(start_candidate["distance_m"]) + float(via_candidate["distance_m"]) + float(end_candidate["distance_m"])
                 if best_match is None or score < float(best_match["score"]):
+                    start_index = int(start_candidate["segment_index"])
+                    via_index = int(via_candidate["matched_record_index"])
+                    end_index = min(len(records) - 1, int(end_candidate["segment_index"]) + 1)
+                    if via_index <= start_index:
+                        via_index = min(len(records) - 1, start_index + 1)
+                    if via_index >= end_index:
+                        via_index = max(start_index + 1, end_index - 1)
                     best_match = {
                         "start_index": start_index,
                         "via_index": via_index,
@@ -291,9 +301,9 @@ def _find_best_segment_indices(
                         "matched_start_index": int(start_candidate["matched_record_index"]),
                         "matched_via_index": int(via_candidate["matched_record_index"]),
                         "matched_end_index": int(end_candidate["matched_record_index"]),
-                        "start_distance_m": start_distance_m,
-                        "via_distance_m": via_distance_m,
-                        "end_distance_m": end_distance_m,
+                        "start_route_distance_m": float(start_candidate["route_distance_m"]),
+                        "via_route_distance_m": float(via_candidate["route_distance_m"]),
+                        "end_route_distance_m": float(end_candidate["route_distance_m"]),
                         "score": score,
                     }
     return best_match
@@ -308,6 +318,8 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
             "moving_time_s": None,
             "average_speed_kmh": None,
             "average_power_w": None,
+            "max_power_w": None,
+            "avg_hr_bpm": None,
             "route_points": [],
             "profile_points": [],
         }
@@ -325,6 +337,9 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
     moving_time_s = 0.0
     moving_power_total = 0.0
     moving_power_duration_s = 0.0
+    moving_hr_total = 0.0
+    moving_hr_duration_s = 0.0
+    max_power_w: float | None = None
     previous_row: ActivityRecord | None = None
 
     for row in records:
@@ -332,18 +347,10 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
         altitude_m = float(row.altitude_m) if row.altitude_m is not None else None
         if row.latitude_deg is not None and row.longitude_deg is not None:
             current_latlon = (float(row.latitude_deg), float(row.longitude_deg))
-
         if first_distance_m is not None and row.distance_m is not None:
-            point_distance_m = max(0.0, float(row.distance_m) - first_distance_m)
-            cumulative_distance_m = max(cumulative_distance_m, point_distance_m)
+            cumulative_distance_m = max(cumulative_distance_m, max(0.0, float(row.distance_m) - first_distance_m))
         elif current_latlon is not None and previous_latlon is not None:
-            cumulative_distance_m += _haversine_m(
-                previous_latlon[0],
-                previous_latlon[1],
-                current_latlon[0],
-                current_latlon[1],
-            )
-
+            cumulative_distance_m += _haversine_m(previous_latlon[0], previous_latlon[1], current_latlon[0], current_latlon[1])
         if current_latlon is not None:
             previous_latlon = current_latlon
             local_grade_pct = None
@@ -361,19 +368,12 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
             if altitude_m is not None:
                 previous_route_altitude_m = altitude_m
                 previous_route_distance_m = cumulative_distance_m
-
         if altitude_m is not None:
             if first_altitude_m is None:
                 first_altitude_m = altitude_m
             last_altitude_m = altitude_m
             altitude_values.append(altitude_m)
-            profile_points.append(
-                {
-                    "distance_m": round(cumulative_distance_m, 1),
-                    "altitude_m": round(altitude_m, 1),
-                }
-            )
-
+            profile_points.append({"distance_m": round(cumulative_distance_m, 1), "altitude_m": round(altitude_m, 1)})
         if previous_row is not None:
             time_delta_s = _record_time_delta_s(previous_row, row)
             distance_delta_m = _record_distance_delta_m(previous_row, row)
@@ -391,9 +391,14 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
             if is_moving and time_delta_s is not None and time_delta_s > 0:
                 moving_time_s += time_delta_s
                 if row.power_w is not None:
+                    max_power_w = float(row.power_w) if max_power_w is None else max(max_power_w, float(row.power_w))
                     moving_power_total += float(row.power_w) * time_delta_s
                     moving_power_duration_s += time_delta_s
-
+                if row.heart_rate_bpm is not None:
+                    moving_hr_total += float(row.heart_rate_bpm) * time_delta_s
+                    moving_hr_duration_s += time_delta_s
+            elif row.power_w is not None:
+                max_power_w = float(row.power_w) if max_power_w is None else max(max_power_w, float(row.power_w))
         previous_row = row
 
     distance_m = cumulative_distance_m if cumulative_distance_m > 0 else None
@@ -403,7 +408,7 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
     average_grade_pct = ((ascent_m / distance_m) * 100.0) if ascent_m is not None and distance_m and distance_m > 0 else None
     average_speed_kmh = ((distance_m / moving_time_s) * 3.6) if distance_m is not None and moving_time_s > 0 else None
     average_power_w = (moving_power_total / moving_power_duration_s) if moving_power_duration_s > 0 else None
-
+    avg_hr_bpm = (moving_hr_total / moving_hr_duration_s) if moving_hr_duration_s > 0 else None
     return {
         "distance_m": _round_float(distance_m, 1),
         "ascent_m": _round_float(ascent_m, 1),
@@ -415,6 +420,8 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
         "moving_time_s": _round_float(moving_time_s, 1) if moving_time_s > 0 else None,
         "average_speed_kmh": _round_float(average_speed_kmh, 1),
         "average_power_w": _round_float(average_power_w, 1),
+        "max_power_w": _round_float(max_power_w, 1),
+        "avg_hr_bpm": _round_float(avg_hr_bpm, 1),
         "route_points": _compact_dict_points(route_points, MAX_ROUTE_POINTS),
         "profile_points": _compact_dict_points(profile_points, MAX_PROFILE_POINTS),
     }
@@ -447,7 +454,6 @@ def _find_match_on_activity(
     geo_records = _extract_geo_records(records)
     if len(geo_records) < 3:
         return None
-
     match = _find_best_segment_indices(
         geo_records,
         start_point=start_point,
@@ -457,19 +463,12 @@ def _find_match_on_activity(
     )
     if match is None:
         return None
-
     start_index = int(match["start_index"])
-    via_index = int(match["via_index"])
     end_index = int(match["end_index"])
-    matched_start_index = int(match.get("matched_start_index", start_index))
-    matched_via_index = int(match.get("matched_via_index", via_index))
-    matched_end_index = int(match.get("matched_end_index", end_index))
-
-    matched_start_record = geo_records[matched_start_index]
-    matched_via_record = geo_records[matched_via_index]
-    matched_end_record = geo_records[matched_end_index]
-    segment_records = geo_records[start_index : end_index + 1]
-    segment_summary = _derive_segment_summary(segment_records)
+    matched_start_record = geo_records[int(match.get("matched_start_index", start_index))]
+    matched_via_record = geo_records[int(match.get("matched_via_index", int(match["via_index"])))]
+    matched_end_record = geo_records[int(match.get("matched_end_index", end_index))]
+    segment_summary = _derive_segment_summary(geo_records[start_index : end_index + 1])
     if not _is_valid_climb_summary(segment_summary):
         return None
     return {
@@ -479,9 +478,6 @@ def _find_match_on_activity(
         "matched_start_point": _record_point(matched_start_record),
         "matched_via_point": _record_point(matched_via_record),
         "matched_end_point": _record_point(matched_end_record),
-        "start_distance_m": _round_float(float(match.get("start_distance_m") or 0.0), 1),
-        "via_distance_m": _round_float(float(match.get("via_distance_m") or 0.0), 1),
-        "end_distance_m": _round_float(float(match.get("end_distance_m") or 0.0), 1),
     }
 
 
@@ -500,7 +496,6 @@ def _find_representative_segment(
         .where(Activity.started_at.is_not(None))
         .order_by(Activity.started_at.desc(), Activity.id.desc())
     ).all()
-
     best_result: dict[str, Any] | None = None
     for activity in activities:
         result = _find_match_on_activity(
@@ -513,10 +508,8 @@ def _find_representative_segment(
         )
         if result is None:
             continue
-        score = float(result["score"])
-        if best_result is None or score < float(best_result["score"]):
+        if best_result is None or float(result["score"]) < float(best_result["score"]):
             best_result = result
-
     return best_result
 
 
@@ -549,73 +542,6 @@ def _find_representative_segment_with_preview_fallback(
     )
 
 
-def _refresh_compare_reference(session, compare: ActivityClimbCompare) -> None:
-    start_point = {"latitude_deg": float(compare.start_latitude_deg), "longitude_deg": float(compare.start_longitude_deg)}
-    via_point = {"latitude_deg": float(compare.via_latitude_deg), "longitude_deg": float(compare.via_longitude_deg)}
-    end_point = {"latitude_deg": float(compare.end_latitude_deg), "longitude_deg": float(compare.end_longitude_deg)}
-    tolerance_m = _normalize_compare_tolerance(compare)
-
-    result: dict[str, Any] | None = None
-    if compare.representative_activity_id is not None:
-        activity = session.scalar(select(Activity).where(Activity.id == compare.representative_activity_id))
-        if activity is not None and int(activity.user_id) == int(compare.user_id):
-            result = _find_match_on_activity(
-                session,
-                activity=activity,
-                start_point=start_point,
-                via_point=via_point,
-                end_point=end_point,
-                tolerance_m=tolerance_m,
-            )
-
-    if result is None:
-        result = _find_representative_segment_with_preview_fallback(
-            session,
-            user_id=int(compare.user_id),
-            start_point=start_point,
-            via_point=via_point,
-            end_point=end_point,
-            tolerance_m=tolerance_m,
-        )
-
-    if result is None:
-        compare.representative_activity_id = None
-        compare.representative_activity_name = None
-        compare.representative_started_at = None
-        compare.representative_distance_m = None
-        compare.representative_ascent_m = None
-        compare.representative_descent_m = None
-        compare.route_points_json = None
-        compare.profile_points_json = None
-        compare.updated_at = _now()
-        return
-
-    activity = result["activity"]
-    summary = result["summary"]
-    compare.representative_activity_id = activity.id
-    compare.representative_activity_name = activity.name or "Unbenannte Aktivität"
-    compare.representative_started_at = activity.started_at
-    compare.representative_distance_m = summary["distance_m"]
-    compare.representative_ascent_m = summary["ascent_m"]
-    compare.representative_descent_m = summary["descent_m"]
-    compare.route_points_json = json.dumps(summary["route_points"])
-    compare.profile_points_json = json.dumps(summary["profile_points"])
-    matched_start_point = result.get("matched_start_point")
-    matched_via_point = result.get("matched_via_point")
-    matched_end_point = result.get("matched_end_point")
-    if isinstance(matched_start_point, dict):
-        compare.start_latitude_deg = float(matched_start_point["latitude_deg"])
-        compare.start_longitude_deg = float(matched_start_point["longitude_deg"])
-    if isinstance(matched_via_point, dict):
-        compare.via_latitude_deg = float(matched_via_point["latitude_deg"])
-        compare.via_longitude_deg = float(matched_via_point["longitude_deg"])
-        compare.location_label = f"Mitte {compare.via_latitude_deg:.5f}, {compare.via_longitude_deg:.5f}"
-    if isinstance(matched_end_point, dict):
-        compare.end_latitude_deg = float(matched_end_point["latitude_deg"])
-        compare.end_longitude_deg = float(matched_end_point["longitude_deg"])
-    compare.updated_at = _now()
-
-
 def _load_compare(session, *, user_id: int, compare_id: int) -> ActivityClimbCompare | None:
     return session.scalar(
         select(ActivityClimbCompare).where(
@@ -627,10 +553,10 @@ def _load_compare(session, *, user_id: int, compare_id: int) -> ActivityClimbCom
 
 def _normalize_compare_tolerance(compare: ActivityClimbCompare) -> float:
     tolerance_m = float(compare.search_tolerance_m or DEFAULT_SEARCH_TOLERANCE_M)
-    if tolerance_m < DEFAULT_SEARCH_TOLERANCE_M:
-        compare.search_tolerance_m = DEFAULT_SEARCH_TOLERANCE_M
+    if tolerance_m < MIN_SEARCH_TOLERANCE_M:
+        compare.search_tolerance_m = MIN_SEARCH_TOLERANCE_M
         compare.updated_at = _now()
-        return DEFAULT_SEARCH_TOLERANCE_M
+        return MIN_SEARCH_TOLERANCE_M
     return tolerance_m
 
 
@@ -646,7 +572,6 @@ def _apply_match_to_compare(compare: ActivityClimbCompare, result: dict[str, Any
         compare.profile_points_json = None
         compare.updated_at = _now()
         return
-
     activity = result["activity"]
     summary = result["summary"]
     compare.representative_activity_id = activity.id
@@ -657,7 +582,6 @@ def _apply_match_to_compare(compare: ActivityClimbCompare, result: dict[str, Any
     compare.representative_descent_m = summary["descent_m"]
     compare.route_points_json = json.dumps(summary["route_points"])
     compare.profile_points_json = json.dumps(summary["profile_points"])
-
     start_point = result.get("matched_start_point")
     via_point = result.get("matched_via_point")
     end_point = result.get("matched_end_point")
@@ -672,6 +596,66 @@ def _apply_match_to_compare(compare: ActivityClimbCompare, result: dict[str, Any
         compare.end_latitude_deg = float(end_point["latitude_deg"])
         compare.end_longitude_deg = float(end_point["longitude_deg"])
     compare.updated_at = _now()
+
+
+def _reset_compare_search_cache(compare: ActivityClimbCompare) -> None:
+    compare.search_matches_json = None
+    compare.last_search_started_at = None
+    compare.last_search_completed_at = None
+    compare.last_search_activity_created_at = None
+    compare.last_search_checked_total = None
+    compare.last_search_matched_total = None
+    compare.last_search_algorithm_version = None
+
+
+def _serialize_cached_result(compare: ActivityClimbCompare) -> dict[str, Any] | None:
+    payload = _safe_json_payload(compare.search_matches_json)
+    if not isinstance(payload, dict):
+        return None
+    matches = payload.get("matches")
+    return {
+        "status": str(payload.get("status") or "completed"),
+        "message": payload.get("message"),
+        "checked_total": int(compare.last_search_checked_total or payload.get("checked_total") or 0),
+        "matched_total": int(compare.last_search_matched_total or payload.get("matched_total") or 0),
+        "matches": matches if isinstance(matches, list) else [],
+    }
+
+
+def _serialize_search_state(session, compare: ActivityClimbCompare) -> dict[str, Any]:
+    total_ride_total = int(
+        session.scalar(
+            select(func.count(Activity.id))
+            .where(Activity.user_id == int(compare.user_id))
+            .where(Activity.started_at.is_not(None))
+        )
+        or 0
+    )
+    needs_full_rescan = int(compare.last_search_algorithm_version or 0) != CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION
+    if needs_full_rescan or compare.last_search_activity_created_at is None:
+        pending_ride_total = total_ride_total
+    else:
+        pending_ride_total = int(
+            session.scalar(
+                select(func.count(Activity.id))
+                .where(Activity.user_id == int(compare.user_id))
+                .where(Activity.started_at.is_not(None))
+                .where(Activity.created_at > compare.last_search_activity_created_at)
+            )
+            or 0
+        )
+    return {
+        "algorithm_version": CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION,
+        "last_search_algorithm_version": compare.last_search_algorithm_version,
+        "searched_ride_total": int(compare.last_search_checked_total or 0),
+        "matched_total": int(compare.last_search_matched_total or 0),
+        "pending_ride_total": pending_ride_total,
+        "total_ride_total": total_ride_total,
+        "last_checked_at": compare.last_search_completed_at.isoformat() if compare.last_search_completed_at else None,
+        "last_checked_started_at": compare.last_search_started_at.isoformat() if compare.last_search_started_at else None,
+        "last_checked_activity_created_at": compare.last_search_activity_created_at.isoformat() if compare.last_search_activity_created_at else None,
+        "needs_full_rescan": needs_full_rescan,
+    }
 
 
 def _get_map_center(session, user_id: int) -> dict[str, float]:
@@ -693,7 +677,7 @@ def _get_map_center(session, user_id: int) -> dict[str, float]:
     return {"latitude_deg": latitude_deg, "longitude_deg": longitude_deg}
 
 
-def _serialize_compare(row: ActivityClimbCompare) -> dict[str, Any]:
+def _serialize_compare(session, row: ActivityClimbCompare) -> dict[str, Any]:
     route_points = _safe_json_list(row.route_points_json)
     profile_points = _safe_json_list(row.profile_points_json)
     start_altitude_m = profile_points[0].get("altitude_m") if profile_points else None
@@ -710,18 +694,9 @@ def _serialize_compare(row: ActivityClimbCompare) -> dict[str, Any]:
         "notes": row.notes,
         "location_label": row.location_label,
         "search_tolerance_m": row.search_tolerance_m,
-        "start_point": {
-            "latitude_deg": row.start_latitude_deg,
-            "longitude_deg": row.start_longitude_deg,
-        },
-        "via_point": {
-            "latitude_deg": row.via_latitude_deg,
-            "longitude_deg": row.via_longitude_deg,
-        },
-        "end_point": {
-            "latitude_deg": row.end_latitude_deg,
-            "longitude_deg": row.end_longitude_deg,
-        },
+        "start_point": {"latitude_deg": row.start_latitude_deg, "longitude_deg": row.start_longitude_deg},
+        "via_point": {"latitude_deg": row.via_latitude_deg, "longitude_deg": row.via_longitude_deg},
+        "end_point": {"latitude_deg": row.end_latitude_deg, "longitude_deg": row.end_longitude_deg},
         "representative_activity": (
             {
                 "id": row.representative_activity_id,
@@ -742,6 +717,8 @@ def _serialize_compare(row: ActivityClimbCompare) -> dict[str, Any]:
         },
         "route_points": route_points,
         "profile_points": profile_points,
+        "search_state": _serialize_search_state(session, row),
+        "last_check_result": _serialize_cached_result(row),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -777,6 +754,8 @@ def _serialize_check_match(
         "moving_time_s": summary.get("moving_time_s"),
         "average_speed_kmh": summary.get("average_speed_kmh"),
         "average_power_w": summary.get("average_power_w"),
+        "max_power_w": summary.get("max_power_w"),
+        "avg_hr_bpm": summary.get("avg_hr_bpm"),
         "summary": {
             "distance_m": summary.get("distance_m"),
             "ascent_m": summary.get("ascent_m"),
@@ -786,19 +765,55 @@ def _serialize_check_match(
             "start_altitude_m": summary.get("start_altitude_m"),
             "end_altitude_m": summary.get("end_altitude_m"),
         },
-        "delta_to_reference": {
-            "distance_m": _round_float(distance_delta_m, 1),
-            "ascent_m": _round_float(ascent_delta_m, 1),
-        },
+        "delta_to_reference": {"distance_m": _round_float(distance_delta_m, 1), "ascent_m": _round_float(ascent_delta_m, 1)},
         "matched_points": {
             "start_point": matched_start_point,
             "via_point": matched_via_point,
             "end_point": matched_end_point,
         },
-        "is_reference_activity": (
-            compare.representative_activity_id is not None and int(compare.representative_activity_id) == int(activity.id)
-        ),
+        "is_reference_activity": compare.representative_activity_id is not None and int(compare.representative_activity_id) == int(activity.id),
     }
+
+
+def _merge_cached_matches(existing_matches: list[dict[str, Any]], new_matches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged_by_activity_id: dict[int, dict[str, Any]] = {}
+    for match in existing_matches + new_matches:
+        try:
+            activity_id = int(match.get("activity_id"))
+        except Exception:
+            continue
+        previous = merged_by_activity_id.get(activity_id)
+        if previous is None or float(match.get("score") or math.inf) < float(previous.get("score") or math.inf):
+            merged_by_activity_id[activity_id] = match
+    return sorted(merged_by_activity_id.values(), key=lambda item: str(item.get("started_at") or ""), reverse=True)
+
+
+def _write_search_cache(
+    compare: ActivityClimbCompare,
+    *,
+    checked_total: int,
+    matches: list[dict[str, Any]],
+    message: str,
+    started_at: datetime,
+    completed_at: datetime,
+    latest_activity_created_at: datetime | None,
+) -> None:
+    compare.search_matches_json = json.dumps(
+        {
+            "status": "completed",
+            "message": message,
+            "checked_total": checked_total,
+            "matched_total": len(matches),
+            "matches": matches,
+        }
+    )
+    compare.last_search_started_at = started_at
+    compare.last_search_completed_at = completed_at
+    compare.last_search_activity_created_at = latest_activity_created_at
+    compare.last_search_checked_total = checked_total
+    compare.last_search_matched_total = len(matches)
+    compare.last_search_algorithm_version = CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION
+    compare.updated_at = completed_at
 
 
 def list_climb_compares(user_id: int) -> dict[str, Any]:
@@ -810,12 +825,8 @@ def list_climb_compares(user_id: int) -> dict[str, Any]:
         ).all()
         for row in rows:
             _normalize_compare_tolerance(row)
-            _refresh_compare_reference(session, row)
         session.commit()
-        return {
-            "map_center": _get_map_center(session, user_id),
-            "compares": [_serialize_compare(row) for row in rows],
-        }
+        return {"map_center": _get_map_center(session, user_id), "compares": [_serialize_compare(session, row) for row in rows]}
 
 
 def get_climb_compare_brief(user_id: int, compare_id: int) -> dict[str, Any]:
@@ -827,6 +838,7 @@ def get_climb_compare_brief(user_id: int, compare_id: int) -> dict[str, Any]:
         return {
             "id": compare.id,
             "name": compare.name,
+            "needs_full_rescan": int(compare.last_search_algorithm_version or 0) != CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION,
         }
 
 
@@ -834,26 +846,14 @@ def create_climb_compare(user_id: int, payload: dict[str, Any]) -> dict[str, Any
     start_point = _normalize_point(payload.get("start_point"), "start_point")
     via_point = _normalize_point(payload.get("via_point"), "via_point")
     end_point = _normalize_point(payload.get("end_point"), "end_point")
-
-    start_end_distance_m = _haversine_m(
-        start_point["latitude_deg"],
-        start_point["longitude_deg"],
-        end_point["latitude_deg"],
-        end_point["longitude_deg"],
-    )
-    if start_end_distance_m < 50:
+    if _haversine_m(start_point["latitude_deg"], start_point["longitude_deg"], end_point["latitude_deg"], end_point["longitude_deg"]) < 50:
         raise ValueError("Start- und Endpunkt liegen zu nah beieinander.")
-
     raw_tolerance_m = payload.get("search_tolerance_m")
     tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
     if tolerance_m < 15 or tolerance_m > 500:
         raise ValueError("search_tolerance_m must be between 15 and 500.")
-
-    clean_name = str(payload.get("name") or "").strip()
+    clean_name = str(payload.get("name") or "").strip() or "Neuer Climb Compare"
     clean_notes = str(payload.get("notes") or "").strip() or None
-    if not clean_name:
-        clean_name = "Neuer Climb Compare"
-
     with SessionLocal() as session:
         representative = _find_representative_segment_with_preview_fallback(
             session,
@@ -864,12 +864,11 @@ def create_climb_compare(user_id: int, payload: dict[str, Any]) -> dict[str, Any
             tolerance_m=tolerance_m,
         )
         now = _now()
-        location_label = f"Mitte {via_point['latitude_deg']:.5f}, {via_point['longitude_deg']:.5f}"
         compare = ActivityClimbCompare(
             user_id=user_id,
             name=clean_name,
             notes=clean_notes,
-            location_label=location_label,
+            location_label=f"Mitte {via_point['latitude_deg']:.5f}, {via_point['longitude_deg']:.5f}",
             search_tolerance_m=tolerance_m,
             start_latitude_deg=start_point["latitude_deg"],
             start_longitude_deg=start_point["longitude_deg"],
@@ -880,60 +879,111 @@ def create_climb_compare(user_id: int, payload: dict[str, Any]) -> dict[str, Any
             created_at=now,
             updated_at=now,
         )
-
+        _reset_compare_search_cache(compare)
         if representative is not None:
-            activity = representative["activity"]
-            summary = representative["summary"]
-            compare.representative_activity_id = activity.id
-            compare.representative_activity_name = activity.name or "Unbenannte Aktivität"
-            compare.representative_started_at = activity.started_at
-            compare.representative_distance_m = summary["distance_m"]
-            compare.representative_ascent_m = summary["ascent_m"]
-            compare.representative_descent_m = summary["descent_m"]
-            compare.route_points_json = json.dumps(summary["route_points"])
-            compare.profile_points_json = json.dumps(summary["profile_points"])
-            matched_start_point = representative.get("matched_start_point")
-            matched_via_point = representative.get("matched_via_point")
-            matched_end_point = representative.get("matched_end_point")
-            if isinstance(matched_start_point, dict):
-                compare.start_latitude_deg = float(matched_start_point["latitude_deg"])
-                compare.start_longitude_deg = float(matched_start_point["longitude_deg"])
-            if isinstance(matched_via_point, dict):
-                compare.via_latitude_deg = float(matched_via_point["latitude_deg"])
-                compare.via_longitude_deg = float(matched_via_point["longitude_deg"])
-                compare.location_label = f"Mitte {compare.via_latitude_deg:.5f}, {compare.via_longitude_deg:.5f}"
-            if isinstance(matched_end_point, dict):
-                compare.end_latitude_deg = float(matched_end_point["latitude_deg"])
-                compare.end_longitude_deg = float(matched_end_point["longitude_deg"])
-
+            _apply_match_to_compare(compare, representative)
         session.add(compare)
         session.commit()
         session.refresh(compare)
         return {
-            "compare": _serialize_compare(compare),
-            "message": (
-                "Climb Compare gespeichert. Eine Referenzfahrt wurde bereits gefunden."
-                if compare.representative_activity_id is not None
-                else "Climb Compare gespeichert. Eine passende Referenzfahrt wurde noch nicht gefunden."
-            ),
+            "compare": _serialize_compare(session, compare),
+            "message": "Climb Compare gespeichert. Eine Referenzfahrt wurde bereits gefunden." if compare.representative_activity_id is not None else "Climb Compare gespeichert. Eine passende Referenzfahrt wurde noch nicht gefunden.",
         }
 
 
-def trigger_climb_compare_check(user_id: int, compare_id: int) -> dict[str, Any]:
+def update_climb_compare(user_id: int, compare_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    start_point = _normalize_point(payload.get("start_point"), "start_point")
+    via_point = _normalize_point(payload.get("via_point"), "via_point")
+    end_point = _normalize_point(payload.get("end_point"), "end_point")
+    raw_tolerance_m = payload.get("search_tolerance_m")
+    tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
+    if tolerance_m < 15 or tolerance_m > 500:
+        raise ValueError("search_tolerance_m must be between 15 and 500.")
     with SessionLocal() as session:
-        compare = session.scalar(
-            select(ActivityClimbCompare).where(
-                ActivityClimbCompare.user_id == user_id,
-                ActivityClimbCompare.id == compare_id,
-            )
-        )
+        compare = _load_compare(session, user_id=user_id, compare_id=compare_id)
         if compare is None:
             raise ValueError("Climb Compare not found.")
-        return {
-            "status": "pending_feature",
-            "message": "Ride-Prüfung ist vorbereitet, aber die automatische Suche folgt im nächsten Schritt.",
-            "compare": _serialize_compare(compare),
-        }
+        compare.name = str(payload.get("name") or "").strip() or compare.name
+        compare.notes = str(payload.get("notes") or "").strip() or None
+        compare.location_label = f"Mitte {via_point['latitude_deg']:.5f}, {via_point['longitude_deg']:.5f}"
+        compare.search_tolerance_m = tolerance_m
+        compare.start_latitude_deg = start_point["latitude_deg"]
+        compare.start_longitude_deg = start_point["longitude_deg"]
+        compare.via_latitude_deg = via_point["latitude_deg"]
+        compare.via_longitude_deg = via_point["longitude_deg"]
+        compare.end_latitude_deg = end_point["latitude_deg"]
+        compare.end_longitude_deg = end_point["longitude_deg"]
+        _reset_compare_search_cache(compare)
+        representative = _find_representative_segment_with_preview_fallback(
+            session,
+            user_id=user_id,
+            start_point=start_point,
+            via_point=via_point,
+            end_point=end_point,
+            tolerance_m=tolerance_m,
+        )
+        _apply_match_to_compare(compare, representative)
+        compare.updated_at = _now()
+        session.commit()
+        session.refresh(compare)
+        return {"compare": _serialize_compare(session, compare), "message": "Climb Compare aktualisiert. Gespeicherte Suchergebnisse wurden zur Sicherheit zurueckgesetzt."}
+
+
+def rename_climb_compare(user_id: int, compare_id: int, name: str) -> dict[str, Any]:
+    clean_name = str(name or "").strip()
+    if not clean_name:
+        raise ValueError("Name darf nicht leer sein.")
+    with SessionLocal() as session:
+        compare = _load_compare(session, user_id=user_id, compare_id=compare_id)
+        if compare is None:
+            raise ValueError("Climb Compare not found.")
+        compare.name = clean_name
+        compare.updated_at = _now()
+        session.commit()
+        session.refresh(compare)
+        return {"compare": _serialize_compare(session, compare), "message": "Name aktualisiert."}
+
+
+def duplicate_climb_compare(user_id: int, compare_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        source = _load_compare(session, user_id=user_id, compare_id=compare_id)
+        if source is None:
+            raise ValueError("Climb Compare not found.")
+        now = _now()
+        compare = ActivityClimbCompare(
+            user_id=int(source.user_id),
+            name=f"{source.name} Kopie",
+            notes=source.notes,
+            location_label=source.location_label,
+            search_tolerance_m=float(source.search_tolerance_m),
+            start_latitude_deg=float(source.start_latitude_deg),
+            start_longitude_deg=float(source.start_longitude_deg),
+            via_latitude_deg=float(source.via_latitude_deg),
+            via_longitude_deg=float(source.via_longitude_deg),
+            end_latitude_deg=float(source.end_latitude_deg),
+            end_longitude_deg=float(source.end_longitude_deg),
+            representative_activity_id=source.representative_activity_id,
+            representative_activity_name=source.representative_activity_name,
+            representative_started_at=source.representative_started_at,
+            representative_distance_m=source.representative_distance_m,
+            representative_ascent_m=source.representative_ascent_m,
+            representative_descent_m=source.representative_descent_m,
+            route_points_json=source.route_points_json,
+            profile_points_json=source.profile_points_json,
+            search_matches_json=source.search_matches_json,
+            last_search_started_at=source.last_search_started_at,
+            last_search_completed_at=source.last_search_completed_at,
+            last_search_activity_created_at=source.last_search_activity_created_at,
+            last_search_checked_total=source.last_search_checked_total,
+            last_search_matched_total=source.last_search_matched_total,
+            last_search_algorithm_version=source.last_search_algorithm_version,
+            created_at=now,
+            updated_at=now,
+        )
+        session.add(compare)
+        session.commit()
+        session.refresh(compare)
+        return {"compare": _serialize_compare(session, compare), "message": "Climb Compare kopiert."}
 
 
 def delete_climb_compare(user_id: int, compare_id: int) -> dict[str, Any]:
@@ -944,11 +994,7 @@ def delete_climb_compare(user_id: int, compare_id: int) -> dict[str, Any]:
         deleted_name = compare.name
         session.delete(compare)
         session.commit()
-        return {
-            "status": "deleted",
-            "id": compare_id,
-            "name": deleted_name,
-        }
+        return {"status": "deleted", "id": compare_id, "name": deleted_name}
 
 
 def trigger_climb_compare_check(
@@ -957,32 +1003,51 @@ def trigger_climb_compare_check(
     *,
     limit: int = DEFAULT_CHECK_RIDES_LIMIT,
     progress_callback: Callable[[int, int, str | None], None] | None = None,
+    full_refresh: bool = False,
 ) -> dict[str, Any]:
     with SessionLocal() as session:
         compare = _load_compare(session, user_id=user_id, compare_id=compare_id)
         if compare is None:
             raise ValueError("Climb Compare not found.")
         tolerance_m = _normalize_compare_tolerance(compare)
+        if int(compare.last_search_algorithm_version or 0) != CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION:
+            full_refresh = True
 
         start_point = {"latitude_deg": float(compare.start_latitude_deg), "longitude_deg": float(compare.start_longitude_deg)}
         via_point = {"latitude_deg": float(compare.via_latitude_deg), "longitude_deg": float(compare.via_longitude_deg)}
         end_point = {"latitude_deg": float(compare.end_latitude_deg), "longitude_deg": float(compare.end_longitude_deg)}
-        activities_query = (
-            select(Activity)
-            .where(Activity.user_id == user_id)
-            .where(Activity.started_at.is_not(None))
-            .order_by(Activity.started_at.desc(), Activity.id.desc())
-        )
+        activities_query = select(Activity).where(Activity.user_id == user_id).where(Activity.started_at.is_not(None))
+        if not full_refresh and compare.last_search_activity_created_at is not None:
+            activities_query = activities_query.where(Activity.created_at > compare.last_search_activity_created_at)
+        activities_query = activities_query.order_by(Activity.created_at.asc(), Activity.id.asc())
         if limit > 0:
             activities_query = activities_query.limit(limit)
         activities = session.scalars(activities_query).all()
 
+        cached_result = _serialize_cached_result(compare)
+        existing_matches = [] if full_refresh or cached_result is None else list(cached_result.get("matches") or [])
+        checked_before = 0 if full_refresh else int(compare.last_search_checked_total or 0)
+        latest_activity_created_at = compare.last_search_activity_created_at
         total = len(activities)
+        started_at = _now()
+
         if progress_callback is not None:
             progress_callback(0, total, None)
 
         matches: list[dict[str, Any]] = []
         best_result: dict[str, Any] | None = None
+        if not full_refresh and compare.representative_activity_id is not None:
+            representative_activity = session.scalar(select(Activity).where(Activity.id == compare.representative_activity_id))
+            if representative_activity is not None and int(representative_activity.user_id) == user_id:
+                best_result = _find_match_on_activity(
+                    session,
+                    activity=representative_activity,
+                    start_point=start_point,
+                    via_point=via_point,
+                    end_point=end_point,
+                    tolerance_m=tolerance_m,
+                )
+
         for index, activity in enumerate(activities, start=1):
             activity_name = _activity_label(activity)
             if progress_callback is not None:
@@ -1009,23 +1074,34 @@ def trigger_climb_compare_check(
                         matched_end_point=result.get("matched_end_point"),
                     )
                 )
+            latest_activity_created_at = activity.created_at if latest_activity_created_at is None else max(latest_activity_created_at, activity.created_at)
             if progress_callback is not None:
                 progress_callback(index, total, activity_name)
 
+        all_matches = matches if full_refresh else _merge_cached_matches(existing_matches, matches)
+        checked_total = total if full_refresh else checked_before + total
         if best_result is not None:
             _apply_match_to_compare(compare, best_result)
-            session.commit()
-            session.refresh(compare)
 
-        return {
-            "status": "completed",
-            "message": (
-                f"{total} Rides geprueft, {len(matches)} Treffer gefunden."
-                if total
-                else "Keine Rides mit GPS-Daten zum Pruefen gefunden."
-            ),
-            "compare": _serialize_compare(compare),
-            "checked_total": total,
-            "matched_total": len(matches),
-            "matches": matches,
-        }
+        completed_at = _now()
+        if total == 0 and not full_refresh:
+            message = "Keine neuen Rides gefunden."
+        elif total == 0:
+            message = "Keine Rides mit GPS-Daten zum Pruefen gefunden."
+        else:
+            message = f"{total} neue Rides geprueft, insgesamt {len(all_matches)} Treffer gespeichert." if not full_refresh else f"{total} Rides komplett neu geprueft, {len(all_matches)} Treffer gefunden."
+
+        _write_search_cache(
+            compare,
+            checked_total=checked_total,
+            matches=all_matches,
+            message=message,
+            started_at=started_at,
+            completed_at=completed_at,
+            latest_activity_created_at=latest_activity_created_at,
+        )
+        session.commit()
+        session.refresh(compare)
+        result_payload = _serialize_cached_result(compare) or {"status": "completed", "checked_total": checked_total, "matched_total": len(all_matches), "matches": all_matches}
+        result_payload["compare"] = _serialize_compare(session, compare)
+        return result_payload

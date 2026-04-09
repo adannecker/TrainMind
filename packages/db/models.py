@@ -517,6 +517,13 @@ class ActivityClimbCompare(Base):
     representative_descent_m: Mapped[float | None] = mapped_column(Float, nullable=True)
     route_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     profile_points_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_matches_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_search_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_search_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_search_activity_created_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_search_checked_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_search_matched_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_search_algorithm_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
