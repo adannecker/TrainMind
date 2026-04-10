@@ -83,6 +83,29 @@ def _extract_summary_metric(raw_json: str | None, *keys: str) -> float | None:
     return None
 
 
+def _extract_summary_text(raw_json: str | None, *keys: str) -> str | None:
+    if not raw_json:
+        return None
+    try:
+        payload = json.loads(raw_json)
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    summary = payload.get("summaryDTO") if isinstance(payload.get("summaryDTO"), dict) else {}
+    for key in keys:
+        value = payload.get(key)
+        if value is None:
+            value = summary.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            return text
+    return None
+
+
 def _get_metric_value_at(session, user_id: int, metric_type: str, reference_dt: datetime | None) -> float | None:
     stmt = (
         select(UserTrainingMetric.value)
@@ -281,6 +304,19 @@ def clear_activity_list_cache(user_id: int | None = None) -> None:
 
 def _to_week_start(target_day: date) -> date:
     return target_day - timedelta(days=target_day.weekday())
+
+
+def _to_month_start(target_day: date) -> date:
+    return target_day.replace(day=1)
+
+
+def _to_month_end(target_day: date) -> date:
+    month_start = _to_month_start(target_day)
+    if month_start.month == 12:
+        next_month_start = date(month_start.year + 1, 1, 1)
+    else:
+        next_month_start = date(month_start.year, month_start.month + 1, 1)
+    return next_month_start - timedelta(days=1)
 
 
 def _activity_sort_value(row: Activity, sort_by: str) -> Any:
@@ -760,6 +796,144 @@ def get_available_activity_weeks(user_id: int) -> dict[str, Any]:
     return {"weeks": weeks}
 
 
+def get_monthly_activities(user_id: int, reference_date: str | None = None) -> dict[str, Any]:
+    if reference_date:
+        ref_day = date.fromisoformat(reference_date)
+    else:
+        ref_day = datetime.utcnow().date()
+
+    month_start = _to_month_start(ref_day)
+    month_end = _to_month_end(ref_day)
+    range_start = datetime.combine(month_start, time.min)
+    range_end = datetime.combine(month_end + timedelta(days=1), time.min)
+
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(Activity)
+            .where(Activity.started_at.is_not(None))
+            .where(Activity.user_id == user_id)
+            .where(Activity.started_at >= range_start)
+            .where(Activity.started_at < range_end)
+            .order_by(Activity.started_at.asc())
+        ).all()
+
+        by_day: dict[date, list[dict[str, Any]]] = {month_start + timedelta(days=i): [] for i in range((month_end - month_start).days + 1)}
+        month_moving_s = 0
+        month_distance_m = 0.0
+        month_stress_total = 0.0
+        month_stress_count = 0
+
+        for row in rows:
+            start_time = row.started_at
+            if start_time is None:
+                continue
+
+            end_time = None
+            if row.duration_s is not None:
+                end_time = start_time + timedelta(seconds=row.duration_s)
+
+            avg_speed_kmh = None
+            if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
+                avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
+
+            stress_score = _resolve_activity_training_stress_score(session, activity=row)
+            payload = {
+                "id": row.id,
+                "name": row.name or "Unbenannte Aktivitaet",
+                "provider": row.provider,
+                "start_time": start_time.isoformat(),
+                "end_time": end_time.isoformat() if end_time else None,
+                "duration_s": row.duration_s,
+                "duration_label": _duration_label(row.duration_s),
+                "distance_m": row.distance_m,
+                "avg_power_w": row.avg_power_w,
+                "avg_speed_kmh": avg_speed_kmh,
+                "stress_score": stress_score,
+            }
+            by_day[start_time.date()].append(payload)
+
+            if row.duration_s:
+                month_moving_s += row.duration_s
+            if row.distance_m:
+                month_distance_m += float(row.distance_m)
+            if stress_score is not None:
+                month_stress_total += stress_score
+                month_stress_count += 1
+
+        weekday_labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+        days: list[dict[str, Any]] = []
+        cursor = month_start
+        while cursor <= month_end:
+            activities = by_day[cursor]
+            day_moving_s = sum(a["duration_s"] or 0 for a in activities)
+            day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
+            stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
+            days.append(
+                {
+                    "date": cursor.isoformat(),
+                    "day": cursor.day,
+                    "weekday_short": weekday_labels[cursor.weekday()],
+                    "activities": activities,
+                    "summary": {
+                        "activities_count": len(activities),
+                        "moving_time_s": day_moving_s,
+                        "moving_time_label": _duration_label(day_moving_s),
+                        "distance_m": day_distance_m,
+                        "stress_total": sum(stress_values) if stress_values else None,
+                        "stress_avg": (sum(stress_values) / len(stress_values)) if stress_values else None,
+                    },
+                }
+            )
+            cursor += timedelta(days=1)
+
+        return {
+            "month_start": month_start.isoformat(),
+            "month_end": month_end.isoformat(),
+            "month_label": month_start.strftime("%B %Y"),
+            "days": days,
+            "summary": {
+                "activities_count": len(rows),
+                "moving_time_s": month_moving_s,
+                "moving_time_label": _duration_label(month_moving_s),
+                "distance_m": month_distance_m,
+                "stress_total": month_stress_total if month_stress_count > 0 else None,
+                "stress_avg": (month_stress_total / month_stress_count) if month_stress_count > 0 else None,
+                "active_days": len([day for day in days if day["summary"]["activities_count"] > 0]),
+            },
+        }
+
+
+def get_available_activity_months(user_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(Activity.started_at)
+            .where(Activity.started_at.is_not(None))
+            .where(Activity.user_id == user_id)
+            .order_by(Activity.started_at.desc())
+        ).all()
+
+    month_counts: dict[date, int] = {}
+    for started_at in rows:
+        if started_at is None:
+            continue
+        month_start = _to_month_start(started_at.date())
+        month_counts[month_start] = month_counts.get(month_start, 0) + 1
+
+    months = []
+    for month_start, count in sorted(month_counts.items(), key=lambda item: item[0], reverse=True):
+        month_end = _to_month_end(month_start)
+        months.append(
+            {
+                "month_start": month_start.isoformat(),
+                "month_end": month_end.isoformat(),
+                "month_label": month_start.strftime("%B %Y"),
+                "activities_count": count,
+            }
+        )
+
+    return {"months": months}
+
+
 def list_activities(
     user_id: int,
     query: str | None = None,
@@ -1021,6 +1195,10 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
         training_stress_score = _extract_summary_metric(activity.raw_json, "tss", "trainingStressScore")
     if training_stress_score is None:
         training_stress_score = derived_power_metrics["training_stress_score"]
+    aerobic_training_effect = _extract_summary_metric(activity.raw_json, "aerobicTrainingEffect")
+    anaerobic_training_effect = _extract_summary_metric(activity.raw_json, "anaerobicTrainingEffect")
+    aerobic_training_effect_message = _extract_summary_text(activity.raw_json, "aerobicTrainingEffectMessage")
+    anaerobic_training_effect_message = _extract_summary_text(activity.raw_json, "anaerobicTrainingEffectMessage")
     if max_hr_reference_bpm is None and hr_values:
         max_hr_reference_bpm = float(max(hr_values))
     environment = _derive_activity_environment(
@@ -1057,6 +1235,10 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
             "intensity_factor": intensity_factor,
             "variability_index": variability_index,
             "training_stress_score": training_stress_score,
+            "aerobic_training_effect": aerobic_training_effect,
+            "anaerobic_training_effect": anaerobic_training_effect,
+            "aerobic_training_effect_message": aerobic_training_effect_message,
+            "anaerobic_training_effect_message": anaerobic_training_effect_message,
             "calories_kcal": calories_kcal,
             "ftp_reference_w": ftp_reference_w,
             "max_hr_reference_bpm": max_hr_reference_bpm,

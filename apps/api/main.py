@@ -20,9 +20,11 @@ from apps.api.activity_service import (
     MAX_HR_RECHECK_PASSES,
     delete_activity,
     derive_activity_llm_analysis,
+    get_available_activity_months,
     get_available_activity_weeks,
     get_activity_detail,
     get_activity_achievement_check_status,
+    get_monthly_activities,
     list_activities,
     get_weekly_activities,
     rebuild_activity_achievement_checks,
@@ -1367,6 +1369,27 @@ def activities_week(
 def activities_weeks_available(current_user: dict = Depends(get_current_user)) -> dict:
     try:
         return get_available_activity_weeks(user_id=int(current_user["id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.get("/activities/month")
+def activities_month(
+    reference_date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return get_monthly_activities(user_id=int(current_user["id"]), reference_date=reference_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid date format: {exc}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.get("/activities/months-available")
+def activities_months_available(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_available_activity_months(user_id=int(current_user["id"]))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
 
