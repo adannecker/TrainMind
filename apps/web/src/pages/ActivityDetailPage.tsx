@@ -30,6 +30,10 @@ type ActivitySummary = {
   intensity_factor: number | null;
   variability_index: number | null;
   training_stress_score: number | null;
+  aerobic_training_effect: number | null;
+  anaerobic_training_effect: number | null;
+  aerobic_training_effect_message: string | null;
+  anaerobic_training_effect_message: string | null;
   calories_kcal: number | null;
   ftp_reference_w: number | null;
   max_hr_reference_bpm: number | null;
@@ -194,6 +198,71 @@ type ActivityMetricSection = {
   cards: ActivityMetricCardData[];
 };
 
+type AnalysisSubTabKey = "training-effect" | "hf-drift" | "power-zones" | "hr-zones";
+
+type AnalysisSample = {
+  elapsed: number;
+  seconds: number;
+  power: number | null;
+  heartRate: number | null;
+};
+
+type TrainingEffectBarData = {
+  id: string;
+  title: string;
+  score: number | null;
+  label: string;
+  accentColor: string;
+  help: string;
+};
+
+type TrainingEffectFocus = {
+  label: string;
+  score: number;
+  description: string;
+};
+
+type TrainingEffectAnalysis = {
+  headline: string;
+  headlineReason: string;
+  bars: TrainingEffectBarData[];
+  zoneBars: TrainingEffectBarData[];
+};
+
+type ZoneDefinition = {
+  id: string;
+  label: string;
+  shortLabel: string;
+  min: number | null;
+  max: number | null;
+  color: string;
+  description: string;
+};
+
+type ZoneDurationRow = {
+  zone: ZoneDefinition;
+  seconds: number;
+  sharePercent: number;
+};
+
+type ZoneSegment = {
+  start: number;
+  end: number;
+  seconds: number;
+};
+
+type DriftSignal = {
+  key: string;
+  title: string;
+  direction: "positive" | "negative";
+  directionLabel: string;
+  timeLabel: string;
+  powerLabel: string;
+  heartRateLabel: string;
+  driftLabel: string;
+  summary: string;
+};
+
 type TabKey = "general" | "map" | "charts" | "laps" | "analysis" | "llm" | "achievements";
 type ZoomSelection = {
   chartKey: string;
@@ -315,6 +384,905 @@ function ActivityMetricHelp({ title, description }: { title: string; description
         <span>{description}</span>
       </span>
     </span>
+  );
+}
+
+function ActivityInfoDialog({
+  title,
+  description,
+  onClose,
+}: {
+  title: string;
+  description: string;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="activity-info-dialog-backdrop" role="dialog" aria-modal="true" aria-label={title} onClick={onClose}>
+      <div className="activity-info-dialog-card" onClick={(event) => event.stopPropagation()}>
+        <div className="section-title-row">
+          <h2>{title}</h2>
+          <button className="icon-button" type="button" onClick={onClose} aria-label="Info schließen">
+            x
+          </button>
+        </div>
+        <div className="activity-info-dialog-body">
+          {description.split("\n\n").map((block, index) => (
+            <div key={`${title}-block-${index}`} className="activity-info-dialog-section">
+              {block.split("\n").map((line, lineIndex) => (
+                <p key={`${title}-line-${index}-${lineIndex}`}>{line}</p>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const TRAINING_EFFECT_COLORS = ["#9aa7a2", "#b7c1bc", "#58a7ff", "#5fd07b", "#f1aa4a", "#ea5b52"] as const;
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function formatSignedNumber(value: number, digits = 1, suffix = ""): string {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(digits)}${suffix}`;
+}
+
+function buildAnalysisSamples(records: ChartRecord[]): AnalysisSample[] {
+  return records.map((row, index) => {
+    const next = records[index + 1];
+    const rawSeconds = next ? next.chart_elapsed_s - row.chart_elapsed_s : 1;
+    const seconds = Number.isFinite(rawSeconds) && rawSeconds > 0 ? clamp(Math.round(rawSeconds), 1, 10) : 1;
+    return {
+      elapsed: row.chart_elapsed_s,
+      seconds,
+      power: row.power_w,
+      heartRate: row.heart_rate_bpm,
+    };
+  });
+}
+
+function weightedAverage(values: Array<{ value: number; weight: number }>): number | null {
+  const usable = values.filter((item) => Number.isFinite(item.value) && Number.isFinite(item.weight) && item.weight > 0);
+  if (!usable.length) return null;
+  const weightSum = usable.reduce((sum, item) => sum + item.weight, 0);
+  if (weightSum <= 0) return null;
+  return usable.reduce((sum, item) => sum + item.value * item.weight, 0) / weightSum;
+}
+
+function weightedSecondsForRange(
+  samples: AnalysisSample[],
+  predicate: (sample: AnalysisSample) => boolean,
+): number {
+  return samples.reduce((sum, sample) => (predicate(sample) ? sum + sample.seconds : sum), 0);
+}
+
+function countBurstRepeats(samples: AnalysisSample[], predicate: (sample: AnalysisSample) => boolean, minSeconds = 12): number {
+  let repeats = 0;
+  let currentSeconds = 0;
+  let coolingDown = false;
+
+  for (const sample of samples) {
+    if (predicate(sample)) {
+      currentSeconds += sample.seconds;
+      coolingDown = false;
+      continue;
+    }
+    if (!coolingDown && currentSeconds >= minSeconds) {
+      repeats += 1;
+      coolingDown = true;
+    }
+    currentSeconds = 0;
+  }
+
+  if (currentSeconds >= minSeconds) {
+    repeats += 1;
+  }
+
+  return repeats;
+}
+
+function countRecoveryTransitions(samples: AnalysisSample[], ftpReferenceW: number | null): number {
+  if (!ftpReferenceW || ftpReferenceW <= 0) return 0;
+  let transitions = 0;
+  let hardSeconds = 0;
+  let easySeconds = 0;
+  let armed = false;
+
+  for (const sample of samples) {
+    const powerRatio = sample.power != null ? sample.power / ftpReferenceW : null;
+    if (powerRatio != null && powerRatio >= 1.05) {
+      hardSeconds += sample.seconds;
+      easySeconds = 0;
+      if (hardSeconds >= 45) {
+        armed = true;
+      }
+      continue;
+    }
+    if (armed && powerRatio != null && powerRatio <= 0.7) {
+      easySeconds += sample.seconds;
+      if (easySeconds >= 60) {
+        transitions += 1;
+        armed = false;
+        hardSeconds = 0;
+        easySeconds = 0;
+      }
+      continue;
+    }
+    if (powerRatio != null && powerRatio > 0.7) {
+      easySeconds = 0;
+    }
+    if (powerRatio == null || powerRatio < 0.95) {
+      hardSeconds = 0;
+    }
+  }
+
+  return transitions;
+}
+
+function effectLevelLabel(score: number | null): string {
+  if (score == null) return "Nicht verfügbar";
+  if (score < 1) return "Kaum Reiz";
+  if (score < 2) return "Erhaltend";
+  if (score < 3) return "Aufbauend";
+  if (score < 4) return "Deutlich";
+  if (score < 4.7) return "Stark";
+  return "Sehr hoch";
+}
+
+function buildEffectHelpText({
+  score,
+  formulaText,
+  meaningText,
+  sourceText,
+  nextTrainingText,
+}: {
+  score: number | null;
+  formulaText: string;
+  meaningText: string;
+  sourceText?: string;
+  nextTrainingText?: string;
+}): string {
+  const scoreText = score == null ? "Kein belastbarer Wert" : `Aktueller Wert ${score.toFixed(1)} von 5.0`;
+  return `Wert\n${scoreText}
+
+Quelle\n${sourceText ?? "Kein importierter Garmin-Wert vorhanden, daher aus unseren Regeln abgeleitet."}
+
+Herleitung\n${formulaText}
+
+Bedeutung\n${meaningText}
+
+Hinweis für spätere Trainings\n${nextTrainingText ?? "Der Wert ist als Einordnung dieses Rides gedacht. Für die weitere Trainingssteuerung sollte er immer zusammen mit Gesamtmüdigkeit, Wochenlast und geplantem Zielreiz gelesen werden."}
+
+Farben\nGrau = kaum oder nur erhaltender Reiz
+Blau = leichter Reiz
+Grün = klarer Aufbau
+Orange = starker Reiz
+Rot = sehr hohe Beanspruchung`;
+}
+
+function humanizeTrainingEffectMessage(message: string | null): string | null {
+  if (!message) return null;
+  const raw = message.trim();
+  if (!raw) return null;
+  const normalized = raw.replace(/_\d+$/, "");
+  const mapping: Record<string, string> = {
+    NO_AEROBIC_BENEFIT: "Kein nennenswerter aerober Nutzen",
+    NO_ANAEROBIC_BENEFIT: "Kein nennenswerter anaerober Nutzen",
+    RECOVERY: "Erholung",
+    MAINTAINING_AEROBIC_BASE: "Aerobe Grundlage erhalten",
+    IMPROVING_AEROBIC_BASE: "Aerobe Grundlage verbessert",
+    MAINTAINING_ANAEROBIC_BASE: "Anaerobe Grundlage erhalten",
+    IMPACTING_TEMPO: "Tempo-Bereich wirksam belastet",
+    IMPROVING_LACTATE_THRESHOLD: "Laktatschwelle verbessert",
+    HIGHLY_IMPROVING_LACTATE_THRESHOLD: "Laktatschwelle stark verbessert",
+    IMPROVING_VO2_MAX: "VO2max verbessert",
+    HIGHLY_IMPROVING_VO2_MAX: "VO2max stark verbessert",
+    OVERREACHING: "Sehr hohe Beanspruchung / Overreaching",
+  };
+  return mapping[normalized] ?? normalized.replace(/_/g, " ").toLowerCase().replace(/^\w/, (letter: string) => letter.toUpperCase());
+}
+
+function formatZoneRange(min: number | null, max: number | null, suffix: string): string {
+  if (min == null && max == null) return "-";
+  if (min == null) return `bis ${Math.round(max!)}${suffix}`;
+  if (max == null) return `ab ${Math.round(min)}${suffix}`;
+  return `${Math.round(min)}-${Math.round(max)}${suffix}`;
+}
+
+function buildPowerZones(ftpReferenceW: number | null): ZoneDefinition[] {
+  if (!ftpReferenceW || ftpReferenceW <= 0) return [];
+  const ftp = ftpReferenceW;
+  return [
+    { id: "z1", shortLabel: "Z1", label: "Active Recovery", min: null, max: ftp * 0.55, color: "#c5d1cb", description: "Sehr locker, Entlastung und aktive Erholung." },
+    { id: "z2", shortLabel: "Z2", label: "Endurance", min: ftp * 0.56, max: ftp * 0.75, color: "#6fcf97", description: "Ruhige bis solide Grundlage, lange kontrollierte Dauerarbeit." },
+    { id: "z3", shortLabel: "Z3", label: "Tempo", min: ftp * 0.76, max: ftp * 0.90, color: "#f2c94c", description: "Zügige Dauerarbeit, schon deutlich fordernder als reine Grundlage." },
+    { id: "z4", shortLabel: "Z4", label: "Lactate Threshold", min: ftp * 0.91, max: ftp * 1.05, color: "#f2994a", description: "Schwellenbereich rund um FTP." },
+    { id: "z5", shortLabel: "Z5", label: "VO2max", min: ftp * 1.06, max: ftp * 1.20, color: "#5aa9ff", description: "Sehr harte aerobe Spitzenarbeit oberhalb der Schwelle." },
+    { id: "z6", shortLabel: "Z6", label: "Anaerobic Capacity", min: ftp * 1.21, max: ftp * 1.50, color: "#2f80ed", description: "Kurze sehr harte Belastungen mit klar anaerobem Anteil." },
+    { id: "z7", shortLabel: "Z7", label: "Sprint Open End", min: ftp * 1.51, max: null, color: "#9b51e0", description: "Sprint- und Peakbereich ohne feste Obergrenze." },
+    { id: "sweetspot", shortLabel: "SS", label: "Sweetspot", min: ftp * 0.88, max: ftp * 0.94, color: "#d4a72c", description: "Knapp unter der Schwelle, ökonomisch hart und sehr trainingswirksam." },
+    { id: "kraftausdauer", shortLabel: "KA", label: "Kraftausdauer", min: ftp * 0.82, max: ftp * 0.98, color: "#8c6d3f", description: "Breiter Bereich für zähe, druckvolle Dauerarbeit, oft mit niedrigerer Kadenz gedacht." },
+  ];
+}
+
+function buildHeartRateZones(maxHrReferenceBpm: number | null): ZoneDefinition[] {
+  if (!maxHrReferenceBpm || maxHrReferenceBpm <= 0) return [];
+  const maxHr = maxHrReferenceBpm;
+  return [
+    { id: "z1", shortLabel: "Z1", label: "Recovery", min: 0.50 * maxHr, max: 0.60 * maxHr, color: "#c5d1cb", description: "Erholung und sehr geringe kardiovaskuläre Last." },
+    { id: "z2", shortLabel: "Z2", label: "Grundlage", min: 0.61 * maxHr, max: 0.72 * maxHr, color: "#6fcf97", description: "Ruhige aerobe Grundlage." },
+    { id: "z3", shortLabel: "Z3", label: "Tempo", min: 0.73 * maxHr, max: 0.82 * maxHr, color: "#f2c94c", description: "Zügiger Ausdauerbereich mit merklich höherer Beanspruchung." },
+    { id: "z4", shortLabel: "Z4", label: "Schwelle", min: 0.83 * maxHr, max: 0.90 * maxHr, color: "#f2994a", description: "Hoher Bereich rund um Schwellenarbeit." },
+    { id: "z5", shortLabel: "Z5", label: "Hoch", min: 0.91 * maxHr, max: 1.00 * maxHr, color: "#eb5757", description: "Sehr hohe Herzfrequenz, meist nur in harten Belastungen erreichbar." },
+  ];
+}
+
+function findZoneForValue(value: number | null, zones: ZoneDefinition[]): ZoneDefinition | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return zones.find((zone) => (zone.min == null || value >= zone.min) && (zone.max == null || value <= zone.max)) ?? null;
+}
+
+function summarizeZoneDurations(samples: AnalysisSample[], zones: ZoneDefinition[], pick: (sample: AnalysisSample) => number | null): ZoneDurationRow[] {
+  const totalSeconds = samples.reduce((sum, sample) => sum + sample.seconds, 0);
+  const secondsByZone = new Map<string, number>();
+  for (const zone of zones) {
+    secondsByZone.set(zone.id, 0);
+  }
+  for (const sample of samples) {
+    const zone = findZoneForValue(pick(sample), zones);
+    if (!zone) continue;
+    secondsByZone.set(zone.id, (secondsByZone.get(zone.id) ?? 0) + sample.seconds);
+  }
+  return zones.map((zone) => {
+    const seconds = secondsByZone.get(zone.id) ?? 0;
+    return {
+      zone,
+      seconds,
+      sharePercent: totalSeconds > 0 ? (seconds / totalSeconds) * 100 : 0,
+    };
+  });
+}
+
+function buildZoneSegments(samples: AnalysisSample[], zones: ZoneDefinition[], pick: (sample: AnalysisSample) => number | null, selectedZoneId: string | null): ZoneSegment[] {
+  if (!selectedZoneId) return [];
+  const perSecond: Array<{ second: number; value: number }> = [];
+  for (const sample of samples) {
+    const value = pick(sample);
+    if (value == null || !Number.isFinite(value)) continue;
+    for (let offset = 0; offset < sample.seconds; offset += 1) {
+      perSecond.push({ second: Math.round(sample.elapsed) + offset, value });
+    }
+  }
+  if (perSecond.length < 300) return [];
+
+  const matches: Array<{ second: number; inZone: boolean }> = [];
+  const windowSize = 300;
+  let rollingSum = 0;
+  for (let index = 0; index < perSecond.length; index += 1) {
+    rollingSum += perSecond[index].value;
+    if (index >= windowSize) {
+      rollingSum -= perSecond[index - windowSize].value;
+    }
+    if (index < windowSize - 1) continue;
+    const avg = rollingSum / windowSize;
+    const zone = findZoneForValue(avg, zones);
+    matches.push({
+      second: perSecond[index].second,
+      inZone: zone?.id === selectedZoneId,
+    });
+  }
+
+  const segments: ZoneSegment[] = [];
+  let currentStart: number | null = null;
+  let lastSecond: number | null = null;
+  for (const match of matches) {
+    if (match.inZone) {
+      if (currentStart == null) {
+        currentStart = match.second - windowSize + 1;
+      }
+      lastSecond = match.second;
+      continue;
+    }
+    if (currentStart != null && lastSecond != null) {
+      const seconds = lastSecond - currentStart + 1;
+      if (seconds >= windowSize) {
+        segments.push({ start: currentStart, end: lastSecond, seconds });
+      }
+    }
+    currentStart = null;
+    lastSecond = null;
+  }
+  if (currentStart != null && lastSecond != null) {
+    const seconds = lastSecond - currentStart + 1;
+    if (seconds >= windowSize) {
+      segments.push({ start: currentStart, end: lastSecond, seconds });
+    }
+  }
+  return segments;
+}
+
+function deriveTrainingEffectAnalysis({
+  activity,
+  samples,
+}: {
+  activity: ActivitySummary;
+  samples: AnalysisSample[];
+}): TrainingEffectAnalysis {
+  const ftpReferenceW = activity.ftp_reference_w;
+  const movingHours = (activity.moving_time_s ?? activity.duration_s ?? 0) / 3600;
+  const intensityFactor =
+    activity.intensity_factor ??
+    (activity.normalized_power_w != null && ftpReferenceW != null && ftpReferenceW > 0 ? activity.normalized_power_w / ftpReferenceW : null);
+  const stressScore =
+    activity.training_stress_score ??
+    (movingHours > 0 && intensityFactor != null ? movingHours * intensityFactor * intensityFactor * 100 : null);
+  const zoneSeconds = (minRatio: number | null, maxRatio: number | null) =>
+    weightedSecondsForRange(samples, (sample) => {
+      if (sample.power == null || ftpReferenceW == null || ftpReferenceW <= 0) return false;
+      const ratio = sample.power / ftpReferenceW;
+      if (minRatio != null && ratio < minRatio) return false;
+      if (maxRatio != null && ratio > maxRatio) return false;
+      return true;
+    });
+
+  const enduranceSeconds = zoneSeconds(0.56, 0.75);
+  const tempoSeconds = zoneSeconds(0.76, 0.9);
+  const thresholdSeconds = zoneSeconds(0.91, 1.05);
+  const vo2Seconds = zoneSeconds(1.06, 1.2);
+  const anaerobicSeconds = zoneSeconds(1.21, null);
+  const lateStart = Math.max(0, (activity.moving_time_s ?? activity.duration_s ?? 0) * (2 / 3));
+  const lateTempoSeconds = weightedSecondsForRange(samples, (sample) => {
+    if (sample.elapsed < lateStart || sample.power == null || ftpReferenceW == null || ftpReferenceW <= 0) return false;
+    const ratio = sample.power / ftpReferenceW;
+    return ratio >= 0.8 && ratio <= 1.05;
+  });
+  const burstCount = countBurstRepeats(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW >= 1.35, 15);
+  const recoveryTransitions = countRecoveryTransitions(samples, ftpReferenceW ?? null);
+  const maxPowerRatio = ftpReferenceW && ftpReferenceW > 0 && activity.max_power_w != null ? activity.max_power_w / ftpReferenceW : null;
+  const variability = activity.variability_index ?? 1;
+
+  const aerobicScore =
+    ftpReferenceW && ftpReferenceW > 0
+      ? clamp(
+          movingHours * 0.42 +
+            enduranceSeconds / 2400 +
+            tempoSeconds / 1800 +
+            thresholdSeconds / 1200 +
+            (stressScore ?? 0) / 65 +
+            Math.max(0, (intensityFactor ?? 0) - 0.65) * 1.3,
+          0,
+          5,
+        )
+      : stressScore != null
+        ? clamp(stressScore / 38, 0, 5)
+        : null;
+
+  const anaerobicScore =
+    ftpReferenceW && ftpReferenceW > 0
+      ? clamp(
+          vo2Seconds / 420 +
+            anaerobicSeconds / 180 +
+            burstCount * 0.28 +
+            Math.max(0, (maxPowerRatio ?? 0) - 1.25) * 0.8 +
+            Math.max(0, variability - 1.03) * 3.2,
+          0,
+          5,
+        )
+      : null;
+
+  const focusCandidates: TrainingEffectFocus[] = [
+    {
+      label: "Grundlage",
+      score: ftpReferenceW && ftpReferenceW > 0 ? movingHours * 0.7 + enduranceSeconds / 2400 + Math.max(0, 1.12 - variability) * 0.8 : movingHours * 0.75,
+      description: "Längerer Anteil in ruhiger bis zügiger Ausdauer. Das spricht für einen stabilen, aeroben Dauerreiz.",
+    },
+    {
+      label: "Tempo / Sweetspot",
+      score: tempoSeconds / 1500 + thresholdSeconds / 2400 + Math.max(0, (intensityFactor ?? 0) - 0.75) * 1.8,
+      description: "Viele Minuten knapp unter Schwelle. Typisch für zügige Dauerarbeit und ökonomische Belastung im mittleren bis oberen Dauerbereich.",
+    },
+    {
+      label: "Schwelle",
+      score: thresholdSeconds / 900 + Math.max(0, (intensityFactor ?? 0) - 0.88) * 2.4,
+      description: "Relevante Zeit an oder nahe FTP. Das setzt eher einen Schwellenreiz als reine Grundlage.",
+    },
+    {
+      label: "VO2max",
+      score: vo2Seconds / 300 + burstCount * 0.14,
+      description: "Mehrere Abschnitte deutlich über Schwelle. Das deutet auf Sauerstofftransport und hohe aerobe Spitzenleistung als Trainingsreiz hin.",
+    },
+    {
+      label: "Anaerob",
+      score: anaerobicSeconds / 150 + burstCount * 0.2 + Math.max(0, (maxPowerRatio ?? 0) - 1.35) * 0.9,
+      description: "Kurze sehr harte Belastungen und Spitzenleistung prägen den Ride. Das belastet anaerobe Kapazität und Laktatverträglichkeit stärker.",
+    },
+    {
+      label: "Ermüdungsresistenz",
+      score: movingHours * 0.8 + lateTempoSeconds / 1200 + Math.max(0, (stressScore ?? 0) - 85) / 55,
+      description: "Späte, noch saubere Dauerarbeit spricht dafür, dass Belastung auch unter Vorermüdung gehalten wurde.",
+    },
+    {
+      label: "Laktatabbau / Erholung",
+      score: recoveryTransitions * 0.55 + weightedSecondsForRange(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW <= 0.68) / 2400,
+      description: "Mehrere harte Phasen mit klaren Entlastungsfenstern. Das kann auf einen guten Wechsel zwischen Belastung und Abbau hindeuten.",
+    },
+  ]
+    .filter((item) => item.score > 0.35)
+    .sort((left, right) => right.score - left.score);
+
+  const topFocus = focusCandidates[0] ?? {
+    label: "Gemischter Reiz",
+    score: 0,
+    description: "Die Fahrt verteilt den Reiz recht breit, ohne dass ein einzelner Schwerpunkt klar dominiert.",
+  };
+
+  const aerobicFormula = ftpReferenceW && ftpReferenceW > 0
+    ? `Berechnet aus Dauer, TSS/IF und Zeit in den Bereichen Grundlage, Tempo und Schwelle relativ zur FTP ${Math.round(ftpReferenceW)} W.`
+    : "Berechnet aus verfügbarer Dauer- und Belastungsinformation. Für eine feinere Einordnung fehlt die FTP Referenz.";
+  const anaerobicFormula = ftpReferenceW && ftpReferenceW > 0
+    ? `Berechnet aus Zeit oberhalb der Schwelle, sehr harten Spitzen über FTP und der Häufigkeit kurzer Belastungs-Bursts.`
+    : "Für einen belastbaren anaeroben Wert fehlt die FTP Referenz oder ausreichende Power-Spitzendaten.";
+  const garminAerobic = activity.aerobic_training_effect;
+  const garminAnaerobic = activity.anaerobic_training_effect;
+  const aerobicDisplayScore = garminAerobic ?? aerobicScore;
+  const anaerobicDisplayScore = garminAnaerobic ?? anaerobicScore;
+  const aerobicMessage = humanizeTrainingEffectMessage(activity.aerobic_training_effect_message);
+  const anaerobicMessage = humanizeTrainingEffectMessage(activity.anaerobic_training_effect_message);
+
+  return {
+    headline: aerobicMessage ?? topFocus.label,
+    headlineReason: aerobicMessage
+      ? `Garmin ordnet den Hauptreiz hier als "${aerobicMessage}" ein. Die ergänzende eigene Heuristik sieht den stärksten Schwerpunkt bei ${topFocus.label.toLowerCase()}.`
+      : topFocus.description,
+    bars: [
+      {
+        id: "aerobic",
+        title: "Aerob",
+        score: aerobicDisplayScore == null ? null : Number(aerobicDisplayScore.toFixed(1)),
+        label: aerobicMessage ?? effectLevelLabel(aerobicDisplayScore),
+        accentColor: "#5fd07b",
+        help: buildEffectHelpText({
+          score: aerobicDisplayScore,
+          sourceText: garminAerobic != null ? `Der sichtbare Wert kommt direkt aus Garmin (${garminAerobic.toFixed(1)}). Unsere Heuristik dient hier nur zur Einordnung.` : undefined,
+          formulaText: `${aerobicFormula} Konkret schauen wir auf die Fahrtdauer, auf IF und TSS als Verdichtung der Gesamtlast und darauf, wie viel Zeit wirklich in ruhiger Grundlage, im Tempo-Bereich und rund um die Schwelle verbracht wurde. Längere zusammenhängende Phasen in diesen Bereichen heben den aeroben Wert stärker an als kurze zufällige Spitzen.`,
+          meaningText: "Ein höherer Wert bedeutet, dass dieser Ride eher die aerobe Ausdauer, nachhaltige Dauerleistung und Langzeitbelastbarkeit adressiert.",
+          nextTrainingText: "Ein hoher aerober Wert spricht eher dafür, dass der Ride eine solide Ausdauer- oder Schwellenbasis gesetzt hat. In den Folgetagen passen dann je nach Ermüdung entweder lockere Einheiten zur Aufnahme des Reizes oder ein gezielter Qualitätsreiz auf einer anderen Ebene, statt denselben Reiz direkt wieder zu stapeln.",
+        }),
+      },
+      {
+        id: "anaerobic",
+        title: "Anaerob",
+        score: anaerobicDisplayScore == null ? null : Number(anaerobicDisplayScore.toFixed(1)),
+        label: anaerobicMessage ?? effectLevelLabel(anaerobicDisplayScore),
+        accentColor: "#58a7ff",
+        help: buildEffectHelpText({
+          score: anaerobicDisplayScore,
+          sourceText: garminAnaerobic != null ? `Der sichtbare Wert kommt direkt aus Garmin (${garminAnaerobic.toFixed(1)}). Unsere Heuristik dient hier nur zur Einordnung.` : undefined,
+          formulaText: `${anaerobicFormula} Dafür zählen wir vor allem Minuten deutlich oberhalb der Schwelle, wiederholte harte Bursts und die maximale Peakleistung relativ zur FTP. Einzelne Sprints reichen allein nicht, mehrere klar harte Abschnitte oder stark wiederholte Spitzen treiben den Wert deutlich stärker.`,
+          meaningText: "Ein höherer Wert bedeutet mehr Reiz für Spitzenleistung, kurze harte Wiederholungen und die Fähigkeit, hohe Laktatlast zu tolerieren.",
+          nextTrainingText: "Ein hoher anaerober Wert belastet meist stärker als die reine Dauer vermuten lässt. Danach sind oft lockere oder technisch saubere Tage sinnvoll, bevor erneut sehr hohe Spitzen oder harte Intervallblöcke folgen.",
+        }),
+      },
+    ],
+    zoneBars: [
+      {
+        id: "ga1",
+        title: "GA1",
+        score: Number(clamp(movingHours * 0.35 + enduranceSeconds / 3000 + weightedSecondsForRange(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW <= 0.75) / 3600, 0, 5).toFixed(1)),
+        label: "Lockere bis ruhige Grundlage",
+        accentColor: "#6fcf97",
+        help: buildEffectHelpText({
+          score: clamp(movingHours * 0.35 + enduranceSeconds / 3000 + weightedSecondsForRange(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW <= 0.75) / 3600, 0, 5),
+          formulaText: ftpReferenceW && ftpReferenceW > 0 ? "Gewichtet aus Dauer und Zeit bis etwa 75 % FTP. Wir schauen dabei besonders darauf, wie viel echte zusammenhängende ruhige Dauerarbeit vorliegt und ob der Ride überwiegend kontrolliert statt sprunghaft war. Je länger und sauberer diese Anteile sind, desto höher fällt der GA1-Reiz aus." : "Für eine genaue GA1-Einordnung fehlt die FTP-Referenz; der Wert nutzt dann nur grobe Dauerinformation.",
+          meaningText: "GA1 steht für ruhige Grundlagenausdauer mit geringer bis moderater metabolischer Last.",
+          nextTrainingText: "Ein hoher GA1-Reiz ist meist gut verträglich und lässt sich oft mit weiteren lockeren oder moderaten Einheiten kombinieren. Für spätere harte Tage ist das häufig ein guter Basisreiz, ohne sofort viel Spitzenfrische zu kosten.",
+        }),
+      },
+      {
+        id: "ga2",
+        title: "GA2",
+        score: Number(clamp(tempoSeconds / 1800 + thresholdSeconds / 3000 + Math.max(0, (intensityFactor ?? 0) - 0.72) * 1.8, 0, 5).toFixed(1)),
+        label: "Zügige Ausdauer",
+        accentColor: "#34c759",
+        help: buildEffectHelpText({
+          score: clamp(tempoSeconds / 1800 + thresholdSeconds / 3000 + Math.max(0, (intensityFactor ?? 0) - 0.72) * 1.8, 0, 5),
+          formulaText: "Gewichtet aus Zeit im oberen Dauerbereich bis knapp unter Schwelle. Entscheidend ist hier nicht nur die reine Minutenanzahl, sondern ob längere stabile Blöcke im zügigen Bereich gefahren wurden. Solche Blöcke zählen stärker als unruhige Spitzen mit viel Leerlauf dazwischen.",
+          meaningText: "GA2 beschreibt zügige, aber noch kontrollierte Dauerarbeit mit klarer aerob-ökonomischer Belastung.",
+          nextTrainingText: "Nach starkem GA2-Reiz passen oft lockere Folgetage oder eine klare Trennung zum nächsten harten Schlüsselreiz. Mehrere GA2-Tage hintereinander können schnell in graue Müdigkeit kippen, wenn keine Frische mehr da ist.",
+        }),
+      },
+      {
+        id: "sweetspot",
+        title: "Sweetspot",
+        score: Number(clamp(weightedSecondsForRange(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW >= 0.84 && sample.power / ftpReferenceW <= 0.97) / 1200 + thresholdSeconds / 3600, 0, 5).toFixed(1)),
+        label: "Effizient knapp unter Schwelle",
+        accentColor: "#f7c948",
+        help: buildEffectHelpText({
+          score: clamp(weightedSecondsForRange(samples, (sample) => sample.power != null && ftpReferenceW != null && ftpReferenceW > 0 && sample.power / ftpReferenceW >= 0.84 && sample.power / ftpReferenceW <= 0.97) / 1200 + thresholdSeconds / 3600, 0, 5),
+          formulaText: "Gewichtet aus Zeit in einem Sweetspot-Fenster knapp unter FTP. Wir zählen vor allem stabile Minuten zwischen ungefähr 84 und 97 % FTP. Je länger diese Zeit ohne große Unterbrechungen gehalten wird, desto klarer ist der Sweetspot-Reiz.",
+          meaningText: "Sweetspot steht für ökonomisch harte Dauerarbeit knapp unter der Schwelle.",
+          nextTrainingText: "Ein hoher Sweetspot-Reiz ist oft effektiv, aber nicht kostenlos. Für spätere Trainings ist meist sinnvoll, danach entweder bewusst locker zu fahren oder den nächsten Qualitätsreiz deutlich anders zu setzen, statt sofort wieder knapp unter Schwelle zu arbeiten.",
+        }),
+      },
+      {
+        id: "threshold",
+        title: "Schwelle",
+        score: Number(clamp(thresholdSeconds / 900 + Math.max(0, (intensityFactor ?? 0) - 0.88) * 2.4, 0, 5).toFixed(1)),
+        label: "Arbeit an FTP / Laktatschwelle",
+        accentColor: "#ff9f43",
+        help: buildEffectHelpText({
+          score: clamp(thresholdSeconds / 900 + Math.max(0, (intensityFactor ?? 0) - 0.88) * 2.4, 0, 5),
+          formulaText: "Gewichtet aus Zeit nahe 100 % FTP und der gesamten Belastungsdichte im Schwellenbereich. Dabei zählen zusammenhängende Minuten um die Schwelle besonders stark, weil sie physiologisch deutlich anders wirken als kurze Überschreitungen oder ein nur hoher Durchschnitt über den gesamten Ride.",
+          meaningText: "Ein hoher Schwellenwert spricht für viel Arbeit an der Laktatschwelle und nahe FTP.",
+          nextTrainingText: "Nach einem starken Schwellenreiz lohnt sich meist ein Blick auf Frische und Beine, bevor erneut FTP-nahe Arbeit geplant wird. Häufig ist zuerst ein lockerer oder klar anders gelagerter Reiz sinnvoll.",
+        }),
+      },
+      {
+        id: "vo2max",
+        title: "VO2max",
+        score: Number(clamp(vo2Seconds / 300 + burstCount * 0.14, 0, 5).toFixed(1)),
+        label: "Hohe aerobe Spitzenarbeit",
+        accentColor: "#5aa9ff",
+        help: buildEffectHelpText({
+          score: clamp(vo2Seconds / 300 + burstCount * 0.14, 0, 5),
+          formulaText: "Gewichtet aus Minuten oberhalb der Schwelle bis etwa 120 % FTP und wiederholten harten Intervallen. Einzelne harte Momente zählen, aber besonders stark wirken mehrere wiederholte Intervalle oder Belastungen, die wirklich im VO2max-nahen Bereich lagen.",
+          meaningText: "VO2max steht für sehr harte Belastungen, die Sauerstoffaufnahme und aerobe Spitzenleistung reizen.",
+          nextTrainingText: "Ein starker VO2max-Reiz braucht meist mehr Erholung als ein normaler GA-Tag. In späteren Trainings ist dann oft sinnvoll, Qualität und Frische bewusst zu schützen und nicht zu früh erneut dieselbe Härte anzusetzen.",
+        }),
+      },
+      {
+        id: "anaerobic-peak",
+        title: "Anaerob+",
+        score: Number(clamp(anaerobicSeconds / 150 + burstCount * 0.2 + Math.max(0, (maxPowerRatio ?? 0) - 1.35) * 0.9, 0, 5).toFixed(1)),
+        label: "Sehr harte, kurze Spitzen",
+        accentColor: "#2f80ed",
+        help: buildEffectHelpText({
+          score: clamp(anaerobicSeconds / 150 + burstCount * 0.2 + Math.max(0, (maxPowerRatio ?? 0) - 1.35) * 0.9, 0, 5),
+          formulaText: "Gewichtet aus sehr harter Zeit deutlich über FTP, Wiederholungen und Peakleistung. Der Wert steigt besonders dann, wenn es nicht nur einzelne kurze Spitzen gab, sondern mehrere klare harte Belastungen mit echter anaerober Beanspruchung.",
+          meaningText: "Dieser Wert beschreibt den Reiz auf anaerobe Kapazität, Sprintnähe und hohe Laktatlast.",
+          nextTrainingText: "Ein hoher Anaerob+-Reiz spricht eher für vorsichtige Steuerung in den Folgetagen. Häufig lohnt es sich, erst wieder Frische aufzubauen, bevor neue Sprints, Attacken oder harte Kurzintervalle geplant werden.",
+        }),
+      },
+    ],
+  };
+}
+
+function buildMinuteBuckets(samples: AnalysisSample[]): Array<{ start: number; end: number; avgPower: number | null; avgHr: number | null; seconds: number }> {
+  const buckets = new Map<number, { power: number; hr: number; powerSeconds: number; hrSeconds: number; totalSeconds: number }>();
+
+  for (const sample of samples) {
+    const minute = Math.floor(sample.elapsed / 60);
+    const bucket = buckets.get(minute) ?? { power: 0, hr: 0, powerSeconds: 0, hrSeconds: 0, totalSeconds: 0 };
+    bucket.totalSeconds += sample.seconds;
+    if (sample.power != null) {
+      bucket.power += sample.power * sample.seconds;
+      bucket.powerSeconds += sample.seconds;
+    }
+    if (sample.heartRate != null) {
+      bucket.hr += sample.heartRate * sample.seconds;
+      bucket.hrSeconds += sample.seconds;
+    }
+    buckets.set(minute, bucket);
+  }
+
+  return Array.from(buckets.entries())
+    .sort((left, right) => left[0] - right[0])
+    .map(([minute, bucket]) => ({
+      start: minute * 60,
+      end: minute * 60 + 60,
+      avgPower: bucket.powerSeconds > 0 ? bucket.power / bucket.powerSeconds : null,
+      avgHr: bucket.hrSeconds > 0 ? bucket.hr / bucket.hrSeconds : null,
+      seconds: bucket.totalSeconds,
+    }))
+    .filter((bucket) => bucket.seconds >= 30);
+}
+
+function deriveDriftSignals(samples: AnalysisSample[]): DriftSignal[] {
+  const buckets = buildMinuteBuckets(samples);
+  if (buckets.length < 6) return [];
+
+  const candidates: Array<DriftSignal & { start: number; end: number; magnitude: number }> = [];
+
+  for (let index = 0; index <= buckets.length - 6; index += 1) {
+    const segment = buckets.slice(index, index + 6);
+    const startBlock = segment.slice(0, 3);
+    const endBlock = segment.slice(3);
+    const startPower = weightedAverage(startBlock.map((item) => ({ value: item.avgPower ?? NaN, weight: item.seconds })));
+    const endPower = weightedAverage(endBlock.map((item) => ({ value: item.avgPower ?? NaN, weight: item.seconds })));
+    const startHr = weightedAverage(startBlock.map((item) => ({ value: item.avgHr ?? NaN, weight: item.seconds })));
+    const endHr = weightedAverage(endBlock.map((item) => ({ value: item.avgHr ?? NaN, weight: item.seconds })));
+
+    if (startPower == null || endPower == null || startHr == null || endHr == null || startPower <= 0 || endPower <= 0) {
+      continue;
+    }
+
+    const powerDeltaPct = ((endPower / startPower) - 1) * 100;
+    const hrDelta = endHr - startHr;
+    const driftPct = (((endHr / endPower) / (startHr / startPower)) - 1) * 100;
+    const absDrift = Math.abs(driftPct);
+    if (absDrift < 3.5) continue;
+
+    let direction: "positive" | "negative" | null = null;
+    let title = "";
+    let summary = "";
+
+    if (Math.abs(powerDeltaPct) <= 6 && hrDelta >= 4 && driftPct > 0) {
+      direction = "positive";
+      title = "Stetiger Anstieg bei stabiler Leistung";
+      summary = `Die Herzfrequenz stieg trotz nahezu gleicher Leistung um ${Math.round(hrDelta)} bpm. Das ist ein klassisches positives Drift-Signal und kann auf thermische Last, Ermüdung oder sinkende Effizienz hindeuten.`;
+    } else if (Math.abs(powerDeltaPct) <= 6 && hrDelta <= -4 && driftPct < 0) {
+      direction = "negative";
+      title = "Beruhigung bei ähnlicher Leistung";
+      summary = `Die Herzfrequenz fiel bei fast gleicher Leistung um ${Math.round(Math.abs(hrDelta))} bpm. Das spricht eher für Stabilisierung, gutes Einrollen oder Erholung innerhalb des Blocks.`;
+    } else if (powerDeltaPct >= 8 && hrDelta >= 5 && driftPct > 0) {
+      direction = "positive";
+      title = "HF zieht nach Power-Peak nach";
+      summary = `Die Leistung wurde deutlich angehoben und die Herzfrequenz zog spürbar nach. Das ist eine interessante Drift-Stelle, weil die metabolische Last noch anstieg, während der Block härter wurde.`;
+    } else if (powerDeltaPct <= -8 && hrDelta <= -5 && driftPct < 0) {
+      direction = "negative";
+      title = "Erholung nach Peak";
+      summary = `Nach einem härteren Abschnitt fielen Leistung und Herzfrequenz wieder gemeinsam ab. Die negative Drift zeigt hier vor allem das Runterkommen nach einem Peak.`;
+    }
+
+    if (!direction) continue;
+
+    candidates.push({
+      key: `${direction}-${segment[0].start}-${segment[segment.length - 1].end}`,
+      direction,
+      directionLabel: direction === "positive" ? "Positiver Drift" : "Negativer Drift",
+      title,
+      timeLabel: `${formatSeconds(segment[0].start)} - ${formatSeconds(segment[segment.length - 1].end)}`,
+      powerLabel: `${Math.round(startPower)} -> ${Math.round(endPower)} W (${formatSignedNumber(powerDeltaPct, 1, " %")})`,
+      heartRateLabel: `${Math.round(startHr)} -> ${Math.round(endHr)} bpm (${formatSignedNumber(hrDelta, 0, " bpm")})`,
+      driftLabel: `${formatSignedNumber(driftPct, 1, " %")}`,
+      summary,
+      start: segment[0].start,
+      end: segment[segment.length - 1].end,
+      magnitude: absDrift,
+    });
+  }
+
+  const selected: Array<DriftSignal & { start: number; end: number; magnitude: number }> = [];
+  for (const candidate of candidates.sort((left, right) => right.magnitude - left.magnitude)) {
+    const overlaps = selected.some((item) => candidate.start < item.end - 120 && candidate.end > item.start + 120);
+    if (overlaps) continue;
+    selected.push(candidate);
+    if (selected.length >= 4) break;
+  }
+
+  return selected
+    .sort((left, right) => left.start - right.start)
+    .map(({ start: _start, end: _end, magnitude: _magnitude, ...signal }) => signal);
+}
+
+function ActivityEffectGauge({
+  title,
+  score,
+  label,
+  accentColor,
+  help,
+  onOpenHelp,
+}: TrainingEffectBarData & { onOpenHelp: (title: string, description: string) => void }) {
+  const markerLeft = score == null ? 0 : clamp((score / 5) * 100, 0, 100);
+
+  return (
+    <article className="activity-effect-card">
+      <div className="activity-effect-head">
+        <div>
+          <span className="activity-effect-value">{score == null ? "-" : score.toFixed(1)}</span>
+          <div className="activity-effect-label-row">
+            <strong>{title}</strong>
+            <button className="activity-effect-help-button" type="button" onClick={() => onOpenHelp(`${title} Analyse`, help)} aria-label={`${title} Erklärung öffnen`}>
+              ?
+            </button>
+          </div>
+          <small>{label}</small>
+        </div>
+      </div>
+      <div className="activity-effect-bar" aria-hidden="true">
+        {TRAINING_EFFECT_COLORS.map((segmentColor, index) => (
+          <span key={`${title}-segment-${index}`} style={{ background: segmentColor }} />
+        ))}
+        {score != null ? <i style={{ left: `calc(${markerLeft}% - 0.5rem)`, borderColor: accentColor }} /> : null}
+      </div>
+    </article>
+  );
+}
+
+function ZoneDurationChart({
+  title,
+  rows,
+  suffix,
+}: {
+  title: string;
+  rows: ZoneDurationRow[];
+  suffix: string;
+}) {
+  return (
+    <div className="activity-zone-duration-list" aria-label={title}>
+      {rows.map((row) => (
+        <div key={`${title}-${row.zone.id}`} className="activity-zone-duration-row">
+          <div className="activity-zone-duration-meta">
+            <strong>{row.zone.shortLabel} {row.zone.label}</strong>
+            <span>{formatZoneRange(row.zone.min, row.zone.max, suffix)}</span>
+          </div>
+          <div className="activity-zone-duration-bar">
+            <div style={{ width: `${row.sharePercent}%`, background: row.zone.color }} />
+          </div>
+          <div className="activity-zone-duration-value">
+            <strong>{formatSeconds(row.seconds)}</strong>
+            <span>{row.sharePercent.toFixed(1)} %</span>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function buildRollingAverageChartPoints(samples: AnalysisSample[], pick: (sample: AnalysisSample) => number | null, windowSeconds = 300): ChartPoint[] {
+  const perSecond: Array<{ elapsed: number; value: number }> = [];
+  for (const sample of samples) {
+    const value = pick(sample);
+    if (value == null || !Number.isFinite(value)) continue;
+    for (let offset = 0; offset < sample.seconds; offset += 1) {
+      perSecond.push({ elapsed: Math.round(sample.elapsed) + offset, value });
+    }
+  }
+  if (perSecond.length < 2) return [];
+
+  const points: ChartPoint[] = [];
+  let rollingSum = 0;
+  for (let index = 0; index < perSecond.length; index += 1) {
+    rollingSum += perSecond[index].value;
+    if (index >= windowSeconds) {
+      rollingSum -= perSecond[index - windowSeconds].value;
+    }
+    const divisor = Math.min(index + 1, windowSeconds);
+    points.push({
+      elapsed: perSecond[index].elapsed,
+      value: rollingSum / divisor,
+    });
+  }
+  return points;
+}
+
+function ZoneTimelineChart({
+  title,
+  samples,
+  pick,
+  zones,
+  segments,
+  totalDuration,
+  zone,
+  selectedZoneId,
+  onSelectZone,
+  suffix,
+  digits,
+}: {
+  title: string;
+  samples: AnalysisSample[];
+  pick: (sample: AnalysisSample) => number | null;
+  zones: ZoneDefinition[];
+  segments: ZoneSegment[];
+  totalDuration: number;
+  zone: ZoneDefinition | null;
+  selectedZoneId: string | null;
+  onSelectZone: (zoneId: string | null) => void;
+  suffix: string;
+  digits: number;
+}) {
+  const chartPoints = useMemo(() => buildRollingAverageChartPoints(samples, pick, 300), [pick, samples]);
+  const values = chartPoints.map((point) => point.value);
+  const bounds = useMemo(() => computeAxisBounds(values), [values]);
+  const [chartContainerRef, svgWidth] = useResponsiveChartWidth();
+  const chartLeft = 64;
+  const chartRight = 36;
+  const chartTop = 56;
+  const chartHeight = 220;
+  const chartWidth = Math.max(240, svgWidth - chartLeft - chartRight);
+  const ticks = Array.from({ length: 5 }, (_, index) => (totalDuration / 4) * index);
+  const yTicks =
+    bounds != null
+      ? Array.from({ length: 5 }, (_, index) => bounds.min + ((bounds.max - bounds.min) / 4) * index)
+      : [];
+  const linePoints = useMemo(() => buildPolyline(chartPoints, totalDuration, chartWidth, chartHeight), [chartPoints, chartHeight, chartWidth, totalDuration]);
+  const areaPath = useMemo(() => buildAreaPath(chartPoints, totalDuration, chartWidth, chartHeight), [chartPoints, chartHeight, chartWidth, totalDuration]);
+
+  return (
+    <div className="card">
+      <div className="section-title-row">
+        <h2>{title}</h2>
+        <span className="training-note">
+          {zone ? `${zone.shortLabel} ${zone.label} | 5-Minuten-Schnitt | ${segments.length} Segment${segments.length === 1 ? "" : "e"}` : "Bitte eine Zone auswählen"}
+        </span>
+      </div>
+      <p className="training-note">
+        Angezeigt werden nur zusammenhängende Zeitblöcke, in denen der gleitende 5-Minuten-Schnitt vollständig in der gewählten Zone lag. Sobald dieser Schnitt in eine andere Zone kippt, wird der Block beendet.
+      </p>
+      <div ref={chartContainerRef}>
+        <svg viewBox={`0 0 ${svgWidth} 360`} style={{ width: "100%", height: "360px", display: "block" }} aria-label={title}>
+          <rect x="0" y="0" width={svgWidth} height="360" rx="18" fill="#f7fcfa" />
+          <foreignObject x={chartLeft} y="10" width={chartWidth} height="34">
+            <div className="activity-zone-inline-selector">
+              {zones.map((item) => (
+                <button
+                  key={`${title}-${item.id}`}
+                  className={`activity-zone-inline-chip ${selectedZoneId === item.id ? "selected" : ""}`}
+                  type="button"
+                  onClick={() => onSelectZone(selectedZoneId === item.id ? null : item.id)}
+                >
+                  {item.shortLabel}
+                </button>
+              ))}
+            </div>
+          </foreignObject>
+          {yTicks.map((tick, index) => {
+            const y = chartTop + chartHeight - ((tick - (bounds?.axisMin ?? 0)) / Math.max(1, bounds?.span ?? 1)) * chartHeight;
+            return (
+              <g key={`${title}-y-${index}`}>
+                <line x1={chartLeft} y1={y} x2={chartLeft + chartWidth} y2={y} stroke="#d9e8e2" strokeWidth="1" />
+                <text x={chartLeft - 10} y={y + 4} textAnchor="end" fontSize="12" fill="#5d756f">
+                  {formatNumber(tick, digits, suffix)}
+                </text>
+              </g>
+            );
+          })}
+          <line x1={chartLeft} y1={chartTop + chartHeight} x2={chartLeft + chartWidth} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+          <line x1={chartLeft} y1={chartTop} x2={chartLeft} y2={chartTop + chartHeight} stroke="#8fb7ab" strokeWidth="1.4" />
+          {ticks.map((tick, index) => {
+            const x = chartLeft + (tick / Math.max(1, totalDuration)) * chartWidth;
+            return (
+              <g key={`${title}-tick-${index}`}>
+                <line x1={x} y1={chartTop} x2={x} y2={chartTop + chartHeight} stroke="#e2efe9" strokeWidth="1" />
+                <text x={x} y={chartTop + chartHeight + 28} textAnchor="middle" fontSize="12" fill="#5d756f">
+                  {formatAxisTime(tick)}
+                </text>
+              </g>
+            );
+          })}
+          <g transform={`translate(${chartLeft}, ${chartTop})`}>
+            {areaPath ? <path d={areaPath} fill={zone?.color ?? "#8fc7b8"} opacity="0.12" /> : null}
+            {linePoints ? <polyline fill="none" stroke={zone?.color ?? "#1f8b6f"} strokeOpacity="0.86" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" points={linePoints} /> : null}
+          </g>
+          {segments.map((segment, index) => {
+            const x = chartLeft + (segment.start / Math.max(1, totalDuration)) * chartWidth;
+            const width = Math.max(4, (segment.seconds / Math.max(1, totalDuration)) * chartWidth);
+            return <rect key={`${title}-segment-${index}`} x={x} y={chartTop} width={width} height={chartHeight} rx="10" fill={zone?.color ?? "#1f8b6f"} opacity="0.16" />;
+          })}
+          {segments.map((segment, index) => {
+            const x = chartLeft + (segment.start / Math.max(1, totalDuration)) * chartWidth;
+            const width = Math.max(60, (segment.seconds / Math.max(1, totalDuration)) * chartWidth);
+            const labelX = Math.min(chartLeft + chartWidth - 32, x + width / 2);
+            return (
+              <text key={`${title}-label-${index}`} x={labelX} y={chartTop + 18} textAnchor="middle" fontSize="12" fill="#20463f">
+                {formatAxisTime(segment.start)} - {formatAxisTime(segment.end)} | {formatSeconds(segment.seconds)}
+              </text>
+            );
+          })}
+          {!segments.length ? (
+            <text x={chartLeft + chartWidth / 2} y={chartTop + 110} textAnchor="middle" fontSize="14" fill="#58716b">
+              Keine zusammenhängenden 5-Minuten-Blöcke in dieser Zone gefunden.
+            </text>
+          ) : null}
+          <text x={chartLeft + chartWidth / 2} y={chartTop + chartHeight + 56} textAnchor="middle" fontSize="13" fill="#3f5d57">
+            Zeitachse
+          </text>
+        </svg>
+      </div>
+    </div>
   );
 }
 
@@ -1418,6 +2386,10 @@ export function ActivityDetailPage() {
   const [mapDistanceRange, setMapDistanceRange] = useState<DistanceRange | null>(null);
   const [mapDragSelection, setMapDragSelection] = useState<DistanceSelection | null>(null);
   const [hoverSecond, setHoverSecond] = useState<number | null>(null);
+  const [activeAnalysisSubTab, setActiveAnalysisSubTab] = useState<AnalysisSubTabKey>("training-effect");
+  const [analysisInfoDialog, setAnalysisInfoDialog] = useState<{ title: string; description: string } | null>(null);
+  const [selectedPowerZoneId, setSelectedPowerZoneId] = useState<string | null>(null);
+  const [selectedHrZoneId, setSelectedHrZoneId] = useState<string | null>(null);
   const [activeAchievementCategory, setActiveAchievementCategory] = useState<string>("all");
   const [llmAnalysis, setLlmAnalysis] = useState<ActivityLlmResponse | null>(null);
   const [llmLoading, setLlmLoading] = useState(false);
@@ -1461,6 +2433,20 @@ export function ActivityDetailPage() {
       : llmStatus?.available
         ? "Gespeicherte Analyse laden"
         : "Ausführliche Analyse starten";
+  const analysisSamples = useMemo(() => buildAnalysisSamples(normalizedRecords), [normalizedRecords]);
+  const powerZones = useMemo(() => buildPowerZones(data?.activity.ftp_reference_w ?? null), [data?.activity.ftp_reference_w]);
+  const heartRateZones = useMemo(() => buildHeartRateZones(data?.activity.max_hr_reference_bpm ?? data?.activity.max_hr_bpm ?? null), [data?.activity.max_hr_bpm, data?.activity.max_hr_reference_bpm]);
+  const powerZoneDurations = useMemo(() => summarizeZoneDurations(analysisSamples, powerZones, (sample) => sample.power), [analysisSamples, powerZones]);
+  const heartRateZoneDurations = useMemo(() => summarizeZoneDurations(analysisSamples, heartRateZones, (sample) => sample.heartRate), [analysisSamples, heartRateZones]);
+  const powerZoneSegments = useMemo(() => buildZoneSegments(analysisSamples, powerZones, (sample) => sample.power, selectedPowerZoneId), [analysisSamples, powerZones, selectedPowerZoneId]);
+  const heartRateZoneSegments = useMemo(() => buildZoneSegments(analysisSamples, heartRateZones, (sample) => sample.heartRate, selectedHrZoneId), [analysisSamples, heartRateZones, selectedHrZoneId]);
+  const selectedPowerZone = useMemo(() => powerZones.find((zone) => zone.id === selectedPowerZoneId) ?? null, [powerZones, selectedPowerZoneId]);
+  const selectedHeartRateZone = useMemo(() => heartRateZones.find((zone) => zone.id === selectedHrZoneId) ?? null, [heartRateZones, selectedHrZoneId]);
+  const trainingEffectAnalysis = useMemo(
+    () => (data ? deriveTrainingEffectAnalysis({ activity: data.activity, samples: analysisSamples }) : null),
+    [analysisSamples, data],
+  );
+  const driftSignals = useMemo(() => deriveDriftSignals(analysisSamples), [analysisSamples]);
   const generalInfoSections: ActivityMetricSection[] = data
     ? [
         {
@@ -1590,6 +2576,14 @@ export function ActivityDetailPage() {
   }, [activityId, totalDuration]);
 
   useEffect(() => {
+    setSelectedPowerZoneId((current) => (current && powerZones.some((zone) => zone.id === current) ? current : powerZones[0]?.id ?? null));
+  }, [powerZones]);
+
+  useEffect(() => {
+    setSelectedHrZoneId((current) => (current && heartRateZones.some((zone) => zone.id === current) ? current : heartRateZones[0]?.id ?? null));
+  }, [heartRateZones]);
+
+  useEffect(() => {
     setLlmAnalysis(null);
     setLlmError(null);
     setLlmLoading(false);
@@ -1702,6 +2696,10 @@ export function ActivityDetailPage() {
     } finally {
       setLlmLoading(false);
     }
+  }
+
+  function openAnalysisInfo(title: string, description: string) {
+    setAnalysisInfoDialog({ title, description });
   }
 
   return (
@@ -1896,18 +2894,194 @@ export function ActivityDetailPage() {
             ) : null}
 
             {activeTab === "analysis" ? (
-              <div className="card">
-                <div className="section-title-row">
-                  <h2>Trainingsanalyse</h2>
+              <div className="activity-analysis-layout">
+                <div className="card">
+                  <div className="section-title-row">
+                    <h2>Trainingsanalyse</h2>
+                  </div>
+                  <p className="training-note">
+                    Dieser Bereich ist bewusst deterministisch und regelbasiert. Wenn im importierten Ride originale Garmin-Werte vorhanden sind, zeigen wir sie direkt an. Eigene Regeln und Heuristiken erklären dann nur noch, wie sich der Reiz fachlich einordnen lässt.
+                  </p>
                 </div>
-                <p className="training-note">
-                  Hier kommt die deterministische Analyse hinein. Dieser Bereich ist für regelbasierte Auswertungen wie Pacing, Zonenzeit, Drift, Effizienz, Intervall-Erkennung und Belastungsstruktur ohne LLM vorgesehen.
-                </p>
-                <div className="training-info-stack">
-                  <div className="training-info-point">Deterministische Analyse: nachvollziehbar, reproduzierbar und ohne Modellinterpretation.</div>
-                  <div className="training-info-point">LLM Analyse: textuelle Tiefenanalyse, Einordnung und Coaching-Hinweise auf Basis derselben Daten.</div>
-                  <div className="training-info-point">Beide Bereiche sollen später zusammenarbeiten, bleiben aber bewusst getrennt.</div>
+
+                <div className="activity-analysis-toggle" role="tablist" aria-label="Analyse-Bereiche">
+                  <button
+                    className={`settings-tab-button ${activeAnalysisSubTab === "training-effect" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveAnalysisSubTab("training-effect")}
+                  >
+                    <strong>Trainingseffekt</strong>
+                    <span>Aerob, anaerob und Hauptnutzen</span>
+                  </button>
+                  <button
+                    className={`settings-tab-button ${activeAnalysisSubTab === "hf-drift" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveAnalysisSubTab("hf-drift")}
+                  >
+                    <strong>HF Drift</strong>
+                    <span>Positive und negative Drift-Stellen</span>
+                  </button>
+                  <button
+                    className={`settings-tab-button ${activeAnalysisSubTab === "power-zones" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveAnalysisSubTab("power-zones")}
+                  >
+                    <strong>Wattzonen</strong>
+                    <span>Zonenzeit und stabile Leistungsblöcke</span>
+                  </button>
+                  <button
+                    className={`settings-tab-button ${activeAnalysisSubTab === "hr-zones" ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setActiveAnalysisSubTab("hr-zones")}
+                  >
+                    <strong>HF Zonen</strong>
+                    <span>Zonenzeit und stabile HF-Blöcke</span>
+                  </button>
                 </div>
+
+                {activeAnalysisSubTab === "training-effect" ? (
+                  <div className="card">
+                    <div className="section-title-row">
+                      <h2>Trainingseffekt</h2>
+                    </div>
+                    <p className="training-note">
+                      Jede Analyse sitzt in einer eigenen Box mit Wert und Balken. Über das Fragezeichen bekommst du die Herleitung, die Bedeutung des Wertes und die Farbskala ausführlich erklärt.
+                    </p>
+
+                    <div className="training-mini-grid">
+                      <div className="training-mini-card">
+                        <span>Hauptnutzen</span>
+                        <strong>{trainingEffectAnalysis?.headline ?? "-"}</strong>
+                        <small>{trainingEffectAnalysis?.headlineReason ?? "Noch keine belastbare Einordnung möglich."}</small>
+                      </div>
+                    </div>
+
+                    <div className="activity-effect-grid">
+                      {(trainingEffectAnalysis?.bars ?? []).map((bar) => (
+                        <ActivityEffectGauge key={bar.id} {...bar} onOpenHelp={openAnalysisInfo} />
+                      ))}
+                    </div>
+
+                    <div className="section-title-row" style={{ marginTop: "1rem" }}>
+                      <h2>Trainingszonen-Reize</h2>
+                    </div>
+                    <p className="training-note">
+                      Zusätzlich zum Garmin-Trainingseffekt schätzen wir hier die Reizstärke in typischen Bereichen wie GA1, GA2, Sweetspot, Schwelle und VO2max aus der tatsächlichen Leistungsverteilung.
+                    </p>
+
+                    <div className="activity-effect-grid">
+                      {(trainingEffectAnalysis?.zoneBars ?? []).map((bar) => (
+                        <ActivityEffectGauge key={bar.id} {...bar} onOpenHelp={openAnalysisInfo} />
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {activeAnalysisSubTab === "hf-drift" ? (
+                  <div className="card">
+                    <div className="section-title-row">
+                      <h2>HF Drift</h2>
+                    </div>
+                    <p className="training-note">
+                      Hier werden auffällige Stellen aus dem Verhältnis von Herzfrequenz und Leistung markiert. Interessant sind sowohl positiver Drift bei gleicher oder steigender Leistung als auch negative Drift beim Runterkommen nach Peaks oder bei einer klaren Stabilisierung.
+                    </p>
+
+                    {driftSignals.length ? (
+                      <div className="activity-drift-list">
+                        {driftSignals.map((signal) => (
+                          <article key={signal.key} className="activity-drift-card">
+                            <div className="activity-drift-head">
+                              <div>
+                                <h3>{signal.title}</h3>
+                                <small>{signal.timeLabel}</small>
+                              </div>
+                              <span className={`activity-drift-badge ${signal.direction}`}>
+                                {signal.directionLabel} {signal.driftLabel}
+                              </span>
+                            </div>
+                            <div className="activity-drift-metrics">
+                              <div>
+                                <span>Leistung</span>
+                                <strong>{signal.powerLabel}</strong>
+                              </div>
+                              <div>
+                                <span>Herzfrequenz</span>
+                                <strong>{signal.heartRateLabel}</strong>
+                              </div>
+                            </div>
+                            <p>{signal.summary}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="training-note">
+                        Noch keine markanten Drift-Stellen gefunden. Dafür brauchen wir genug zusammenhängende Herzfrequenz- und Power-Daten über mehrere Minuten.
+                      </p>
+                    )}
+                  </div>
+                ) : null}
+
+                {activeAnalysisSubTab === "power-zones" ? (
+                  <div className="card">
+                    <div className="section-title-row">
+                      <h2>Wattzonen</h2>
+                    </div>
+                    <p className="training-note">
+                      Hier siehst du alle Wattzonen auf Basis der aktuellen FTP-Referenz, wie lange du darin unterwegs warst und welche zusammenhängenden Zeitblöcke in der gewählten Zone wirklich stabil waren.
+                    </p>
+                    {powerZones.length ? (
+                      <>
+                        <ZoneDurationChart title="Wattzonen Dauer" rows={powerZoneDurations} suffix=" W" />
+                        <ZoneTimelineChart
+                          title="Wattzonen Grafik"
+                          samples={analysisSamples}
+                          pick={(sample) => sample.power}
+                          zones={powerZones}
+                          segments={powerZoneSegments}
+                          totalDuration={totalDuration}
+                          zone={selectedPowerZone}
+                          selectedZoneId={selectedPowerZoneId}
+                          onSelectZone={setSelectedPowerZoneId}
+                          suffix=" W"
+                          digits={0}
+                        />
+                      </>
+                    ) : (
+                      <p className="training-note">Für Wattzonen fehlt aktuell eine FTP-Referenz oder ausreichende Leistungsdaten.</p>
+                    )}
+                  </div>
+                ) : null}
+
+                {activeAnalysisSubTab === "hr-zones" ? (
+                  <div className="card">
+                    <div className="section-title-row">
+                      <h2>HF Zonen</h2>
+                    </div>
+                    <p className="training-note">
+                      Herzfrequenzzonen zeigen die interne Belastung. Die Grafik markiert nur längere, stabile Aufenthalte einer Zone auf Basis eines gleitenden 5-Minuten-Schnitts.
+                    </p>
+                    {heartRateZones.length ? (
+                      <>
+                        <ZoneDurationChart title="HF Zonen Dauer" rows={heartRateZoneDurations} suffix=" bpm" />
+                        <ZoneTimelineChart
+                          title="HF Zonen Grafik"
+                          samples={analysisSamples}
+                          pick={(sample) => sample.heartRate}
+                          zones={heartRateZones}
+                          segments={heartRateZoneSegments}
+                          totalDuration={totalDuration}
+                          zone={selectedHeartRateZone}
+                          selectedZoneId={selectedHrZoneId}
+                          onSelectZone={setSelectedHrZoneId}
+                          suffix=" bpm"
+                          digits={0}
+                        />
+                      </>
+                    ) : (
+                      <p className="training-note">Für HF-Zonen fehlt aktuell eine MaxHF-Referenz oder ausreichende Herzfrequenzdaten.</p>
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -2160,6 +3334,8 @@ export function ActivityDetailPage() {
           </div>
         </div>
       ) : null}
+
+      {analysisInfoDialog ? <ActivityInfoDialog title={analysisInfoDialog.title} description={analysisInfoDialog.description} onClose={() => setAnalysisInfoDialog(null)} /> : null}
     </section>
   );
 }
