@@ -453,6 +453,14 @@ def _find_match_on_activity(
     ).all()
     geo_records = _extract_geo_records(records)
     if len(geo_records) < 3:
+        try:
+            from apps.api.activity_service import _hydrate_activity_streams_from_fit
+
+            _, _, hydrated_records = _hydrate_activity_streams_from_fit(session, activity)
+            geo_records = _extract_geo_records(hydrated_records)
+        except Exception:
+            geo_records = _extract_geo_records(records)
+    if len(geo_records) < 3:
         return None
     match = _find_best_segment_indices(
         geo_records,

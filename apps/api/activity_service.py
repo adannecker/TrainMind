@@ -263,6 +263,8 @@ def _resolve_activity_training_stress_score(
         resolved_records = session.scalars(
             select(ActivityRecord).where(ActivityRecord.activity_id == activity.id).order_by(ActivityRecord.record_index.asc())
         ).all()
+    if not resolved_records and activity.source_fit_file_id is not None:
+        _sessions, _laps, resolved_records = _hydrate_activity_streams_from_fit(session, activity)
 
     derived_power_metrics = _compute_power_metrics(
         avg_power_w=activity.avg_power_w,
@@ -644,6 +646,7 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
         records = session.scalars(
             select(ActivityRecord).where(ActivityRecord.activity_id == activity.id).order_by(ActivityRecord.record_index.asc())
         ).all()
+        clear_activity_list_cache(user_id=int(activity.user_id))
 
     return sessions, laps, records
 
