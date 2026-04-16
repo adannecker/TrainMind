@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import type { LatLngBoundsExpression, LatLngTuple } from "leaflet";
 import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 import { Link, useNavigate } from "react-router-dom";
@@ -94,6 +94,29 @@ type ClimbCompareResponse = {
   compares: ClimbCompareItem[];
 };
 
+type ClimbCompareExportItem = {
+  name: string | null;
+  notes: string | null;
+  search_tolerance_m: number | null;
+  start_point: GeoPoint;
+  via_point: GeoPoint;
+  end_point: GeoPoint;
+};
+
+type ClimbCompareExportPayload = {
+  kind?: string;
+  schema_version?: number;
+  exported_at?: string | null;
+  compare_count?: number;
+  compares: ClimbCompareExportItem[];
+};
+
+type ClimbCompareImportResponse = {
+  imported: number;
+  compares: ClimbCompareItem[];
+  message?: string;
+};
+
 type MatchSortKey = "started_at" | "name" | "duration" | "avg_power" | "max_power" | "avg_hr" | "distance" | "ascent";
 type SortDirection = "asc" | "desc";
 type MatchAward = { label: string; tone: "time" | "power" | "hr" };
@@ -176,6 +199,22 @@ function formatDateTime(value: string | null): string {
 
 function pointLabel(index: number): string {
   return index === 0 ? "Start" : index === 1 ? "Zwischenpunkt" : "Ende";
+}
+
+function sanitizeFilenamePart(value: string): string {
+  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+}
+
+function downloadJsonFile(fileName: string, value: unknown) {
+  const blob = new Blob([JSON.stringify(value, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function compareNullableNumbers(left: number | null, right: number | null, direction: SortDirection): number {
@@ -265,6 +304,8 @@ export function ClimbComparePage() {
   const [renameValue, setRenameValue] = useState("");
   const [deleteCandidate, setDeleteCandidate] = useState<ClimbCompareItem | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   async function loadCompares() {
     setLoading(true);
@@ -528,15 +569,71 @@ export function ClimbComparePage() {
     try {
       const response = await apiFetch(`${API_BASE_URL}/activities/climb-compare/${deleteCandidate.id}`, { method: "DELETE" });
       const payload = await parseJsonSafely<{ name?: string; detail?: string }>(response);
-      if (!response.ok) throw new Error(payload?.detail || "Climb Compare konnte nicht geloescht werden.");
+      if (!response.ok) throw new Error(payload?.detail || "Climb Compare konnte nicht gelöscht werden.");
       setData((current) => current ? { ...current, compares: current.compares.filter((compare) => compare.id !== deleteCandidate.id) } : current);
       setSelectedCompareId((current) => (current === deleteCandidate.id ? (data?.compares.find((compare) => compare.id !== deleteCandidate.id)?.id ?? null) : current));
       setDeleteCandidate(null);
-      setSaveMessage(`Climb Compare geloescht: ${payload?.name || deleteCandidate.name}`);
+      setSaveMessage(`Climb Compare gelöscht: ${payload?.name || deleteCandidate.name}`);
     } catch (nextError) {
       setSaveError(nextError instanceof Error ? nextError.message : "Unbekannter Fehler");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function exportCompare(compare: ClimbCompareItem) {
+    setSaveError(null);
+    setSaveMessage(null);
+    try {
+      const payload: ClimbCompareExportPayload = {
+        kind: "trainmind.climb_compare_export",
+        schema_version: 1,
+        exported_at: new Date().toISOString(),
+        compare_count: 1,
+        compares: [
+          {
+            name: compare.name,
+            notes: compare.notes,
+            search_tolerance_m: compare.search_tolerance_m,
+            start_point: compare.start_point,
+            via_point: compare.via_point,
+            end_point: compare.end_point,
+          },
+        ],
+      };
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+      downloadJsonFile(`trainmind-climb-compare-${sanitizeFilenamePart(compare.name || stamp)}-${sanitizeFilenamePart(stamp)}.json`, payload);
+      setSaveMessage(`Climb Compare exportiert: ${compare.name}`);
+    } catch (nextError) {
+      setSaveError(nextError instanceof Error ? nextError.message : "Unbekannter Fehler");
+    }
+  }
+
+  async function handleImportFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    setSaveError(null);
+    setSaveMessage(null);
+    try {
+      const rawText = await file.text();
+      const parsed = JSON.parse(rawText) as ClimbCompareExportPayload;
+      const response = await apiFetch(`${API_BASE_URL}/activities/climb-compare/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const payload = await parseJsonSafely<ClimbCompareImportResponse | { detail?: string }>(response);
+      if (!response.ok) throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Climb Compare konnte nicht importiert werden.");
+      if (!payload || !("compares" in payload)) throw new Error("Leere Antwort beim Import.");
+      await loadCompares();
+      setSelectedCompareId(payload.compares[0]?.id ?? null);
+      setSaveMessage(payload.message ?? `${payload.imported} Climb Compare importiert.`);
+    } catch (nextError) {
+      setSaveError(nextError instanceof Error ? nextError.message : "Unbekannter Fehler");
+    } finally {
+      setImporting(false);
     }
   }
 
@@ -582,10 +679,14 @@ export function ClimbComparePage() {
           {saveMessage ? <p className="info-text">{saveMessage}</p> : null}
           {saveError ? <p className="error-text">{saveError}</p> : null}
           <div className="settings-actions">
-            <button className="primary-button" type="button" onClick={() => void saveCompare()} disabled={saving || draftPoints.length !== 3}>{saving ? "Speichere..." : editorMode === "edit" ? "Aenderungen speichern" : "Climb Compare speichern"}</button>
+            <button className="primary-button" type="button" onClick={() => void saveCompare()} disabled={saving || draftPoints.length !== 3}>{saving ? "Speichere..." : editorMode === "edit" ? "Änderungen speichern" : "Climb Compare speichern"}</button>
             <button className="secondary-button" type="button" onClick={removeLastDraftPoint} disabled={!draftPoints.length || saving}>Letzten Punkt entfernen</button>
-            <button className="secondary-button" type="button" onClick={resetDraft} disabled={!draftPoints.length || saving}>Punkte zuruecksetzen</button>
+            <button className="secondary-button" type="button" onClick={resetDraft} disabled={!draftPoints.length || saving}>Punkte zurücksetzen</button>
             {editorMode === "edit" ? <button className="secondary-button" type="button" onClick={startCreate}>Bearbeiten abbrechen</button> : null}
+          </div>
+          <div className="settings-actions">
+            <button className="secondary-button" type="button" onClick={() => importInputRef.current?.click()} disabled={importing}>{importing ? "Importiere..." : "Climbs importieren"}</button>
+            <input ref={importInputRef} type="file" accept=".json,application/json" onChange={(event) => void handleImportFileChange(event)} style={{ display: "none" }} />
           </div>
         </div>
         <div className="card climb-compare-map-card">
@@ -688,6 +789,7 @@ export function ClimbComparePage() {
 
         <div className="card">
           <div className="section-title-row"><h2>Gespeicherte Climb Compares</h2></div>
+          <p className="training-note">Import legt aus der JSON-Datei neue Einträge an und berechnet die Referenzfahrt frisch.</p>
           {loading ? <p>Lade Climb Compares...</p> : null}
           {error ? <p className="error-text">{error}</p> : null}
           <div className="climb-compare-list">
@@ -756,6 +858,17 @@ export function ClimbComparePage() {
             if (!compare) return null;
             return (
               <>
+                <button
+                  type="button"
+                  className="recipe-card-menu-item"
+                  onClick={() => {
+                    setOpenMenuId(null);
+                    setMenuPosition(null);
+                    void exportCompare(compare);
+                  }}
+                >
+                  Exportieren
+                </button>
                 <button
                   type="button"
                   className="recipe-card-menu-item"

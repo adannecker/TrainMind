@@ -37,7 +37,9 @@ from apps.api.climb_compare_service import (
     create_climb_compare,
     delete_climb_compare,
     duplicate_climb_compare,
+    export_climb_compares,
     get_climb_compare_brief,
+    import_climb_compares,
     list_climb_compares,
     rename_climb_compare,
     trigger_climb_compare_check,
@@ -1462,6 +1464,24 @@ def activities_climb_compare_create(payload: ClimbCompareCreateRequest, current_
         raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
 
 
+@app.get("/activities/climb-compare/export")
+def activities_climb_compare_export(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return export_climb_compares(user_id=int(current_user["id"]))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare/import")
+def activities_climb_compare_import(payload: dict, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return import_climb_compares(user_id=int(current_user["id"]), payload=payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
 @app.put("/activities/climb-compare/{compare_id}")
 def activities_climb_compare_update(compare_id: int, payload: ClimbCompareCreateRequest, current_user: dict = Depends(get_current_user)) -> dict:
     try:
@@ -1522,11 +1542,11 @@ def activities_climb_compare_check(
                 "result": None,
                 "error": None,
                 "message": (
-                    "Climb Compare wird komplett neu geprueft."
+                    "Climb Compare wird komplett neu geprüft."
                     if scope == "all"
-                    else f"Die letzten {DEFAULT_CHECK_RIDES_LIMIT} neuen Rides werden jetzt geprueft."
+                    else f"Die letzten {DEFAULT_CHECK_RIDES_LIMIT} neuen Rides werden jetzt geprüft."
                     if DEFAULT_CHECK_RIDES_LIMIT > 0
-                    else "Neue Rides werden jetzt geprueft."
+                    else "Neue Rides werden jetzt geprüft."
                 ),
             },
         )

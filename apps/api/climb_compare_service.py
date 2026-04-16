@@ -22,6 +22,7 @@ DEFAULT_CHECK_RIDES_LIMIT = 0
 MIN_MOVING_SPEED_MPS = 0.6
 MIN_MOVING_DISTANCE_M = 1.0
 CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION = 3
+CLIMB_COMPARE_EXPORT_SCHEMA_VERSION = 1
 
 
 def _now() -> datetime:
@@ -583,7 +584,7 @@ def _apply_match_to_compare(compare: ActivityClimbCompare, result: dict[str, Any
     activity = result["activity"]
     summary = result["summary"]
     compare.representative_activity_id = activity.id
-    compare.representative_activity_name = activity.name or "Unbenannte Aktivitaet"
+    compare.representative_activity_name = activity.name or "Unbenannte Aktivität"
     compare.representative_started_at = activity.started_at
     compare.representative_distance_m = summary["distance_m"]
     compare.representative_ascent_m = summary["ascent_m"]
@@ -732,8 +733,39 @@ def _serialize_compare(session, row: ActivityClimbCompare) -> dict[str, Any]:
     }
 
 
+def _serialize_compare_export(row: ActivityClimbCompare) -> dict[str, Any]:
+    return {
+        "name": row.name,
+        "notes": row.notes,
+        "search_tolerance_m": row.search_tolerance_m,
+        "start_point": {"latitude_deg": row.start_latitude_deg, "longitude_deg": row.start_longitude_deg},
+        "via_point": {"latitude_deg": row.via_latitude_deg, "longitude_deg": row.via_longitude_deg},
+        "end_point": {"latitude_deg": row.end_latitude_deg, "longitude_deg": row.end_longitude_deg},
+    }
+
+
+def _normalize_compare_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    start_point = _normalize_point(payload.get("start_point"), "start_point")
+    via_point = _normalize_point(payload.get("via_point"), "via_point")
+    end_point = _normalize_point(payload.get("end_point"), "end_point")
+    if _haversine_m(start_point["latitude_deg"], start_point["longitude_deg"], end_point["latitude_deg"], end_point["longitude_deg"]) < 50:
+        raise ValueError("Start- und Endpunkt liegen zu nah beieinander.")
+    raw_tolerance_m = payload.get("search_tolerance_m")
+    tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
+    if tolerance_m < 15 or tolerance_m > 500:
+        raise ValueError("search_tolerance_m must be between 15 and 500.")
+    return {
+        "name": str(payload.get("name") or "").strip() or "Neuer Climb Compare",
+        "notes": str(payload.get("notes") or "").strip() or None,
+        "search_tolerance_m": tolerance_m,
+        "start_point": start_point,
+        "via_point": via_point,
+        "end_point": end_point,
+    }
+
+
 def _activity_label(activity: Activity) -> str:
-    return str(activity.name or f"Aktivitaet {activity.id}")
+    return str(activity.name or f"Aktivität {activity.id}")
 
 
 def _serialize_check_match(
@@ -851,17 +883,13 @@ def get_climb_compare_brief(user_id: int, compare_id: int) -> dict[str, Any]:
 
 
 def create_climb_compare(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    start_point = _normalize_point(payload.get("start_point"), "start_point")
-    via_point = _normalize_point(payload.get("via_point"), "via_point")
-    end_point = _normalize_point(payload.get("end_point"), "end_point")
-    if _haversine_m(start_point["latitude_deg"], start_point["longitude_deg"], end_point["latitude_deg"], end_point["longitude_deg"]) < 50:
-        raise ValueError("Start- und Endpunkt liegen zu nah beieinander.")
-    raw_tolerance_m = payload.get("search_tolerance_m")
-    tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
-    if tolerance_m < 15 or tolerance_m > 500:
-        raise ValueError("search_tolerance_m must be between 15 and 500.")
-    clean_name = str(payload.get("name") or "").strip() or "Neuer Climb Compare"
-    clean_notes = str(payload.get("notes") or "").strip() or None
+    normalized = _normalize_compare_payload(payload)
+    start_point = normalized["start_point"]
+    via_point = normalized["via_point"]
+    end_point = normalized["end_point"]
+    tolerance_m = float(normalized["search_tolerance_m"])
+    clean_name = normalized["name"]
+    clean_notes = normalized["notes"]
     with SessionLocal() as session:
         representative = _find_representative_segment_with_preview_fallback(
             session,
@@ -900,19 +928,17 @@ def create_climb_compare(user_id: int, payload: dict[str, Any]) -> dict[str, Any
 
 
 def update_climb_compare(user_id: int, compare_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    start_point = _normalize_point(payload.get("start_point"), "start_point")
-    via_point = _normalize_point(payload.get("via_point"), "via_point")
-    end_point = _normalize_point(payload.get("end_point"), "end_point")
-    raw_tolerance_m = payload.get("search_tolerance_m")
-    tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
-    if tolerance_m < 15 or tolerance_m > 500:
-        raise ValueError("search_tolerance_m must be between 15 and 500.")
+    normalized = _normalize_compare_payload(payload)
+    start_point = normalized["start_point"]
+    via_point = normalized["via_point"]
+    end_point = normalized["end_point"]
+    tolerance_m = float(normalized["search_tolerance_m"])
     with SessionLocal() as session:
         compare = _load_compare(session, user_id=user_id, compare_id=compare_id)
         if compare is None:
             raise ValueError("Climb Compare not found.")
-        compare.name = str(payload.get("name") or "").strip() or compare.name
-        compare.notes = str(payload.get("notes") or "").strip() or None
+        compare.name = normalized["name"]
+        compare.notes = normalized["notes"]
         compare.location_label = f"Mitte {via_point['latitude_deg']:.5f}, {via_point['longitude_deg']:.5f}"
         compare.search_tolerance_m = tolerance_m
         compare.start_latitude_deg = start_point["latitude_deg"]
@@ -934,7 +960,7 @@ def update_climb_compare(user_id: int, compare_id: int, payload: dict[str, Any])
         compare.updated_at = _now()
         session.commit()
         session.refresh(compare)
-        return {"compare": _serialize_compare(session, compare), "message": "Climb Compare aktualisiert. Gespeicherte Suchergebnisse wurden zur Sicherheit zurueckgesetzt."}
+        return {"compare": _serialize_compare(session, compare), "message": "Climb Compare aktualisiert. Gespeicherte Suchergebnisse wurden zur Sicherheit zurückgesetzt."}
 
 
 def rename_climb_compare(user_id: int, compare_id: int, name: str) -> dict[str, Any]:
@@ -992,6 +1018,84 @@ def duplicate_climb_compare(user_id: int, compare_id: int) -> dict[str, Any]:
         session.commit()
         session.refresh(compare)
         return {"compare": _serialize_compare(session, compare), "message": "Climb Compare kopiert."}
+
+
+def export_climb_compares(user_id: int) -> dict[str, Any]:
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(ActivityClimbCompare)
+            .where(ActivityClimbCompare.user_id == user_id)
+            .order_by(ActivityClimbCompare.created_at.desc(), ActivityClimbCompare.id.desc())
+        ).all()
+        for row in rows:
+            _normalize_compare_tolerance(row)
+        session.commit()
+        return {
+            "kind": "trainmind.climb_compare_export",
+            "schema_version": CLIMB_COMPARE_EXPORT_SCHEMA_VERSION,
+            "exported_at": _now().isoformat(),
+            "compare_count": len(rows),
+            "compares": [_serialize_compare_export(row) for row in rows],
+        }
+
+
+def import_climb_compares(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    raw_compares = payload.get("compares")
+    if not isinstance(raw_compares, list) or not raw_compares:
+        raise ValueError("Die Importdatei enthält keine Climb Compares.")
+    normalized_compares: list[dict[str, Any]] = []
+    for index, raw_compare in enumerate(raw_compares, start=1):
+        if not isinstance(raw_compare, dict):
+            raise ValueError(f"Importfehler in Eintrag {index}: Ungültiges Objekt.")
+        try:
+            normalized_compares.append(_normalize_compare_payload(raw_compare))
+        except ValueError as exc:
+            raise ValueError(f"Importfehler in Eintrag {index}: {exc}") from exc
+
+    with SessionLocal() as session:
+        created: list[ActivityClimbCompare] = []
+        for compare_payload in normalized_compares:
+            start_point = compare_payload["start_point"]
+            via_point = compare_payload["via_point"]
+            end_point = compare_payload["end_point"]
+            tolerance_m = float(compare_payload["search_tolerance_m"])
+            representative = _find_representative_segment_with_preview_fallback(
+                session,
+                user_id=user_id,
+                start_point=start_point,
+                via_point=via_point,
+                end_point=end_point,
+                tolerance_m=tolerance_m,
+            )
+            now = _now()
+            compare = ActivityClimbCompare(
+                user_id=user_id,
+                name=compare_payload["name"],
+                notes=compare_payload["notes"],
+                location_label=f"Mitte {via_point['latitude_deg']:.5f}, {via_point['longitude_deg']:.5f}",
+                search_tolerance_m=tolerance_m,
+                start_latitude_deg=start_point["latitude_deg"],
+                start_longitude_deg=start_point["longitude_deg"],
+                via_latitude_deg=via_point["latitude_deg"],
+                via_longitude_deg=via_point["longitude_deg"],
+                end_latitude_deg=end_point["latitude_deg"],
+                end_longitude_deg=end_point["longitude_deg"],
+                created_at=now,
+                updated_at=now,
+            )
+            _reset_compare_search_cache(compare)
+            if representative is not None:
+                _apply_match_to_compare(compare, representative)
+            session.add(compare)
+            created.append(compare)
+        session.commit()
+        for compare in created:
+            session.refresh(compare)
+        return {
+            "imported": len(created),
+            "compares": [_serialize_compare(session, compare) for compare in created],
+            "message": f"{len(created)} Climb Compare{'s' if len(created) != 1 else ''} importiert.",
+        }
 
 
 def delete_climb_compare(user_id: int, compare_id: int) -> dict[str, Any]:
@@ -1095,9 +1199,9 @@ def trigger_climb_compare_check(
         if total == 0 and not full_refresh:
             message = "Keine neuen Rides gefunden."
         elif total == 0:
-            message = "Keine Rides mit GPS-Daten zum Pruefen gefunden."
+            message = "Keine Rides mit GPS-Daten zum Prüfen gefunden."
         else:
-            message = f"{total} neue Rides geprueft, insgesamt {len(all_matches)} Treffer gespeichert." if not full_refresh else f"{total} Rides komplett neu geprueft, {len(all_matches)} Treffer gefunden."
+            message = f"{total} neue Rides geprüft, insgesamt {len(all_matches)} Treffer gespeichert." if not full_refresh else f"{total} Rides komplett neu geprüft, {len(all_matches)} Treffer gefunden."
 
         _write_search_cache(
             compare,
