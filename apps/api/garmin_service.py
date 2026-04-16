@@ -699,7 +699,6 @@ def _import_selected_garmin_rides_with_client(
                     )
                 )
                 if created_activity is not None:
-                    _upsert_laps_for_activity(session, created_activity.id, summary)
                     _hydrate_activity_streams_from_fit(session, created_activity)
 
                 session.commit()

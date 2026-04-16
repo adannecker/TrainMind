@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import gzip
 import io
@@ -626,17 +626,27 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
         )
 
     if parsed_sessions or parsed_laps or parsed_records:
-        session.execute(delete(ActivitySession).where(ActivitySession.activity_id == activity.id))
-        session.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
-        session.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
-        session.commit()
-        if parsed_sessions:
-            session.add_all(parsed_sessions)
-        if parsed_laps:
-            session.add_all(parsed_laps)
-        if parsed_records:
-            session.add_all(parsed_records)
-        session.commit()
+        try:
+            # SessionLocal runs with autoflush=False.
+            # If callers have queued lap/session/record inserts for this activity,
+            # we must flush first so the bulk deletes below can remove them before
+            # re-inserting parsed FIT rows with identical unique keys.
+            session.flush()
+            session.execute(delete(ActivitySession).where(ActivitySession.activity_id == activity.id))
+            session.execute(delete(ActivityLap).where(ActivityLap.activity_id == activity.id))
+            session.execute(delete(ActivityRecord).where(ActivityRecord.activity_id == activity.id))
+            session.flush()
+            if parsed_sessions:
+                session.add_all(parsed_sessions)
+            if parsed_laps:
+                session.add_all(parsed_laps)
+            if parsed_records:
+                session.add_all(parsed_records)
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+
         sessions = session.scalars(
             select(ActivitySession).where(ActivitySession.activity_id == activity.id).order_by(ActivitySession.session_index.asc())
         ).all()
@@ -649,6 +659,36 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
         clear_activity_list_cache(user_id=int(activity.user_id))
 
     return sessions, laps, records
+
+
+def _resolve_activity_total_ascent_m(session, activity: Activity) -> float:
+    summary_altitude_gain_m = _extract_summary_metric(
+        activity.raw_json,
+        "elevationGain",
+        "totalAscent",
+        "totalAscentInMeters",
+        "elevationGainInMeters",
+    )
+    if summary_altitude_gain_m is not None:
+        return max(0.0, float(summary_altitude_gain_m))
+
+    altitude_rows = session.scalars(
+        select(ActivityRecord.altitude_m)
+        .where(ActivityRecord.activity_id == activity.id)
+        .where(ActivityRecord.altitude_m.is_not(None))
+        .order_by(ActivityRecord.record_index.asc())
+    ).all()
+    altitude_values = [float(value) for value in altitude_rows if value is not None]
+    if not altitude_values and activity.source_fit_file_id is not None:
+        try:
+            _sessions, _laps, hydrated_records = _hydrate_activity_streams_from_fit(session, activity)
+            altitude_values = [float(row.altitude_m) for row in hydrated_records if row.altitude_m is not None]
+        except Exception:
+            session.rollback()
+            altitude_values = []
+    if not altitude_values:
+        return 0.0
+    return round(max(0.0, float(_sum_positive_deltas(altitude_values))), 1)
 
 
 def get_weekly_activities(user_id: int, reference_date: str | None = None) -> dict[str, Any]:
@@ -681,6 +721,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
 
         week_moving_s = 0
         week_distance_m = 0.0
+        week_total_ascent_m = 0.0
         week_stress_total = 0.0
         week_stress_count = 0
 
@@ -698,6 +739,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                 avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
 
             stress_score = _resolve_activity_training_stress_score(session, activity=row)
+            total_ascent_m = round(_resolve_activity_total_ascent_m(session, row), 1)
 
             by_day[start_time.date()].append(
                 {
@@ -709,6 +751,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                     "duration_s": row.duration_s,
                     "duration_label": _duration_label(row.duration_s),
                     "distance_m": row.distance_m,
+                    "total_ascent_m": total_ascent_m,
                     "avg_power_w": row.avg_power_w,
                     "avg_speed_kmh": avg_speed_kmh,
                     "stress_score": stress_score,
@@ -719,6 +762,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                 week_moving_s += row.duration_s
             if row.distance_m:
                 week_distance_m += float(row.distance_m)
+            week_total_ascent_m += float(total_ascent_m)
             if stress_score is not None:
                 week_stress_total += stress_score
                 week_stress_count += 1
@@ -731,6 +775,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
 
             day_moving_s = sum(a["duration_s"] or 0 for a in activities)
             day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
+            day_total_ascent_m = round(sum(float(a["total_ascent_m"] or 0) for a in activities), 1)
             stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
 
             days.append(
@@ -743,6 +788,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                         "moving_time_s": day_moving_s,
                         "moving_time_label": _duration_label(day_moving_s),
                         "distance_m": day_distance_m,
+                        "total_ascent_m": day_total_ascent_m,
                         "stress_total": sum(stress_values) if stress_values else None,
                         "stress_avg": (sum(stress_values) / len(stress_values)) if stress_values else None,
                     },
@@ -758,6 +804,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                 "moving_time_s": week_moving_s,
                 "moving_time_label": _duration_label(week_moving_s),
                 "distance_m": week_distance_m,
+                "total_ascent_m": round(week_total_ascent_m, 1),
                 "stress_total": week_stress_total if week_stress_count > 0 else None,
                 "stress_avg": (week_stress_total / week_stress_count) if week_stress_count > 0 else None,
                 "goal": {
@@ -823,6 +870,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
         by_day: dict[date, list[dict[str, Any]]] = {month_start + timedelta(days=i): [] for i in range((month_end - month_start).days + 1)}
         month_moving_s = 0
         month_distance_m = 0.0
+        month_total_ascent_m = 0.0
         month_stress_total = 0.0
         month_stress_count = 0
 
@@ -840,15 +888,17 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
                 avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
 
             stress_score = _resolve_activity_training_stress_score(session, activity=row)
+            total_ascent_m = round(_resolve_activity_total_ascent_m(session, row), 1)
             payload = {
                 "id": row.id,
-                "name": row.name or "Unbenannte Aktivitaet",
+                "name": row.name or "Unbenannte Aktivität",
                 "provider": row.provider,
                 "start_time": start_time.isoformat(),
                 "end_time": end_time.isoformat() if end_time else None,
                 "duration_s": row.duration_s,
                 "duration_label": _duration_label(row.duration_s),
                 "distance_m": row.distance_m,
+                "total_ascent_m": total_ascent_m,
                 "avg_power_w": row.avg_power_w,
                 "avg_speed_kmh": avg_speed_kmh,
                 "stress_score": stress_score,
@@ -859,6 +909,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
                 month_moving_s += row.duration_s
             if row.distance_m:
                 month_distance_m += float(row.distance_m)
+            month_total_ascent_m += float(total_ascent_m)
             if stress_score is not None:
                 month_stress_total += stress_score
                 month_stress_count += 1
@@ -870,6 +921,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
             activities = by_day[cursor]
             day_moving_s = sum(a["duration_s"] or 0 for a in activities)
             day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
+            day_total_ascent_m = round(sum(float(a["total_ascent_m"] or 0) for a in activities), 1)
             stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
             days.append(
                 {
@@ -882,6 +934,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
                         "moving_time_s": day_moving_s,
                         "moving_time_label": _duration_label(day_moving_s),
                         "distance_m": day_distance_m,
+                        "total_ascent_m": day_total_ascent_m,
                         "stress_total": sum(stress_values) if stress_values else None,
                         "stress_avg": (sum(stress_values) / len(stress_values)) if stress_values else None,
                     },
@@ -899,6 +952,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
                 "moving_time_s": month_moving_s,
                 "moving_time_label": _duration_label(month_moving_s),
                 "distance_m": month_distance_m,
+                "total_ascent_m": round(month_total_ascent_m, 1),
                 "stress_total": month_stress_total if month_stress_count > 0 else None,
                 "stress_avg": (month_stress_total / month_stress_count) if month_stress_count > 0 else None,
                 "active_days": len([day for day in days if day["summary"]["activities_count"] > 0]),
@@ -1114,7 +1168,7 @@ def delete_activity(user_id: int, activity_id: int) -> dict[str, Any]:
         row = session.scalar(select(Activity).where(Activity.user_id == user_id, Activity.id == activity_id))
         if row is None:
             raise ValueError("Activity not found.")
-        deleted_name = row.name or "Unbenannte Aktivität"
+        deleted_name = row.name or "Unbenannte AktivitÃ¤t"
         session.delete(row)
         session.commit()
     clear_activity_list_cache(user_id=user_id)
@@ -1919,24 +1973,24 @@ def _legacy_derive_activity_llm_analysis(user_id: int, activity_id: int) -> dict
 
     context = _build_activity_llm_context(detail, max_hr_reference_bpm)
     prompt = (
-        "Analysiere die folgende Ausdauer-Aktivität tiefgehend auf Deutsch.\n"
+        "Analysiere die folgende Ausdauer-AktivitÃ¤t tiefgehend auf Deutsch.\n"
         "Nutze nur die bereitgestellten Daten und erfinde keine fehlenden Werte.\n"
-        "Bewerte Belastungsprofil, Pacing, Herzfrequenzverhalten, Effizienz, Steuerbarkeit, Ermüdungssignale und den wahrscheinlichen Trainingsreiz.\n"
+        "Bewerte Belastungsprofil, Pacing, Herzfrequenzverhalten, Effizienz, Steuerbarkeit, ErmÃ¼dungssignale und den wahrscheinlichen Trainingsreiz.\n"
         "Formuliere konkret, coachend und datenbasiert statt generisch.\n"
-        "Wenn Daten fehlen, benenne die Lücke klar.\n"
-        "Berücksichtige die Ride-Umgebung ausdrücklich. Bei virtuellen oder trainergesteuerten Einheiten kann eine sehr gleichmäßige Leistung durch die Plattform oder Erg-Steuerung mitverursacht sein.\n"
-        "Der Abgleich mit einem Trainingsziel aus dem Trainingsplan ist noch NICHT umgesetzt und muss als TODO erwähnt werden.\n\n"
+        "Wenn Daten fehlen, benenne die LÃ¼cke klar.\n"
+        "BerÃ¼cksichtige die Ride-Umgebung ausdrÃ¼cklich. Bei virtuellen oder trainergesteuerten Einheiten kann eine sehr gleichmÃ¤ÃŸige Leistung durch die Plattform oder Erg-Steuerung mitverursacht sein.\n"
+        "Der Abgleich mit einem Trainingsziel aus dem Trainingsplan ist noch NICHT umgesetzt und muss als TODO erwÃ¤hnt werden.\n\n"
         "Return valid JSON only with this schema:\n"
         "{\n"
-        '  "headline": "kurze Überschrift",\n'
-        '  "summary": "4-6 Sätze auf Deutsch",\n'
-        '  "deep_analysis": ["mindestens 4 präzise Beobachtungen"],\n'
+        '  "headline": "kurze Ãœberschrift",\n'
+        '  "summary": "4-6 SÃ¤tze auf Deutsch",\n'
+        '  "deep_analysis": ["mindestens 4 prÃ¤zise Beobachtungen"],\n'
         '  "numbers_and_facts": [\n'
         '    {"label": "kurzes Label", "value": "konkreter Wert", "fact": "kurze Einordnung"}\n'
         "  ],\n"
         '  "performance_signals": ["mindestens 4 Punkte"],\n'
         '  "coaching_recommendations": ["mindestens 4 konkrete Empfehlungen"],\n'
-        '  "todo": ["TODO: Diese Analyse muss künftig zusätzlich auf das Trainingsziel aus dem Trainingsplan angepasst werden."]\n'
+        '  "todo": ["TODO: Diese Analyse muss kÃ¼nftig zusÃ¤tzlich auf das Trainingsziel aus dem Trainingsplan angepasst werden."]\n'
         "}\n"
         "Use short labels in numbers_and_facts and prioritize the most relevant numbers.\n\n"
         "Kontext:\n"
@@ -1967,7 +2021,7 @@ def _legacy_derive_activity_llm_analysis(user_id: int, activity_id: int) -> dict
 
     return {
         "activity_id": activity_id,
-        "activity_name": str(detail.get("activity", {}).get("name") or "Aktivität"),
+        "activity_name": str(detail.get("activity", {}).get("name") or "AktivitÃ¤t"),
         "generated_at": datetime.utcnow().isoformat() + "Z",
         "model": model,
         "analysis_version": _ACTIVITY_LLM_ANALYSIS_VERSION,
@@ -2195,7 +2249,7 @@ def rebuild_historical_max_hr_from_activities(
             delete(UserTrainingMetric).where(
                 UserTrainingMetric.user_id == user_id,
                 UserTrainingMetric.metric_type == "max_hr",
-                UserTrainingMetric.source == "Automatisch aus Aktivitäten",
+                UserTrainingMetric.source == "Automatisch aus AktivitÃ¤ten",
             )
         ).rowcount or 0
         if progress_callback is not None:
@@ -2277,8 +2331,8 @@ def rebuild_historical_max_hr_from_activities(
                 metric_type="max_hr",
                 recorded_at=recorded_at,
                 value=round(float(max_hr_value), 2),
-                source="Automatisch aus Aktivitäten",
-                notes=f"Historischer Recheck: {activity.name or 'Aktivität'}",
+                source="Automatisch aus AktivitÃ¤ten",
+                notes=f"Historischer Recheck: {activity.name or 'AktivitÃ¤t'}",
                 created_at=datetime.utcnow(),
                 updated_at=datetime.utcnow(),
             )
@@ -2290,7 +2344,7 @@ def rebuild_historical_max_hr_from_activities(
                     "value": metric.value,
                     "recorded_at": metric.recorded_at.isoformat(),
                     "activity_id": activity.id,
-                    "activity_name": activity.name or "Aktivität",
+                    "activity_name": activity.name or "AktivitÃ¤t",
                 }
             )
             if progress_callback is not None:
@@ -2306,3 +2360,4 @@ def rebuild_historical_max_hr_from_activities(
         "created_max_hr_metrics": len(created_metrics),
         "max_hr_history": created_metrics,
     }
+

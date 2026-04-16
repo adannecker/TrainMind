@@ -12,6 +12,7 @@ type MonthActivity = {
   duration_s: number | null;
   duration_label: string | null;
   distance_m: number | null;
+  total_ascent_m: number;
   avg_power_w: number | null;
   avg_speed_kmh: number | null;
   stress_score: number | null;
@@ -27,6 +28,7 @@ type MonthDayBundle = {
     moving_time_s: number;
     moving_time_label: string | null;
     distance_m: number;
+    total_ascent_m: number;
     stress_total: number | null;
     stress_avg: number | null;
   };
@@ -42,6 +44,7 @@ type MonthResponse = {
     moving_time_s: number;
     moving_time_label: string | null;
     distance_m: number;
+    total_ascent_m: number;
     stress_total: number | null;
     stress_avg: number | null;
     active_days: number;
@@ -54,6 +57,9 @@ type AvailableMonth = {
   month_label: string;
   activities_count: number;
 };
+
+const MONTHLY_ASCENT_TARGET_M = 8000;
+const MONTHLY_ASCENT_MILESTONES_M = [2000, 4000, 6000, MONTHLY_ASCENT_TARGET_M];
 
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
@@ -99,6 +105,12 @@ function formatNumber(value: number | null, digits = 0): string {
   return value.toFixed(digits);
 }
 
+function formatDayLabel(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return dt.toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit" });
+}
+
 export function ActivitiesMonthPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<MonthResponse | null>(null);
@@ -126,10 +138,10 @@ export function ActivitiesMonthPage() {
       const response = await apiFetch(`${API_BASE_URL}/activities/month?reference_date=${referenceDate}`);
       const payload = await parseJsonSafely<MonthResponse | { detail?: string }>(response);
       if (!response.ok) {
-        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Monatsansicht konnte nicht geladen werden.");
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Monatsüberblick konnte nicht geladen werden.");
       }
       if (!payload) {
-        throw new Error("Monatsansicht konnte nicht geladen werden: leere Antwort von der API.");
+        throw new Error("Monatsüberblick konnte nicht geladen werden: leere Antwort von der API.");
       }
       setData(payload as MonthResponse);
     } catch (err) {
@@ -149,6 +161,10 @@ export function ActivitiesMonthPage() {
 
   const monthDistanceKm = useMemo(() => ((data?.summary.distance_m ?? 0) / 1000), [data]);
   const monthHours = useMemo(() => ((data?.summary.moving_time_s ?? 0) / 3600), [data]);
+  const monthAscentM = useMemo(() => (data?.summary.total_ascent_m ?? 0), [data]);
+  const ascentProgress = Math.max(0, Math.min(100, (monthAscentM / MONTHLY_ASCENT_TARGET_M) * 100));
+  const ascentRemainingM = Math.max(0, MONTHLY_ASCENT_TARGET_M - monthAscentM);
+  const climbQuestCompleted = ascentProgress >= 100;
 
   function goToPreviousMonth() {
     const base = data?.month_start ?? selectedDate;
@@ -165,7 +181,7 @@ export function ActivitiesMonthPage() {
       <div className="hero week-hero-layout">
         <div className="week-hero-main">
           <p className="eyebrow">Aktivitäten</p>
-          <h1>Monatsansicht</h1>
+          <h1>Monatsüberblick</h1>
           <p className="week-title-line">
             <span className={`week-data-indicator ${data ? "has-data" : "no-data"}`} />
             <span>{data?.month_label ?? "Monat -"}</span>
@@ -194,7 +210,7 @@ export function ActivitiesMonthPage() {
         <div className="week-hero-right">
           <div className="week-hero-summary card">
             <h2>Monatsüberblick</h2>
-            {loading ? <p>Lade Monatsansicht...</p> : null}
+            {loading ? <p>Lade Monatsüberblick...</p> : null}
             {error ? <p className="error-text">{error}</p> : null}
             {!loading && !error && data ? (
               <div className="stats-line">
@@ -213,7 +229,46 @@ export function ActivitiesMonthPage() {
             <div className="stats-line">
               <span>Stunden: {formatNumber(monthHours, 1)} h</span>
               <span>Kilometer: {formatNumber(monthDistanceKm, 1)} km</span>
+              <span>HM gesamt: {formatNumber(monthAscentM, 0)} m</span>
               <span>Ø TSS pro Einheit: {formatNumber(data?.summary.stress_avg ?? null, 1)}</span>
+            </div>
+
+            <div className="week-elevation-quest">
+              <div className="week-elevation-quest-head">
+                <strong>Climb Quest (Monat)</strong>
+                <span>
+                  {formatNumber(monthAscentM, 0)} / {MONTHLY_ASCENT_TARGET_M} m
+                </span>
+              </div>
+              <div
+                className="week-elevation-track"
+                role="progressbar"
+                aria-label="Monatsziel Höhenmeter"
+                aria-valuemin={0}
+                aria-valuemax={MONTHLY_ASCENT_TARGET_M}
+                aria-valuenow={Math.round(monthAscentM)}
+              >
+                <div className={`week-elevation-fill ${climbQuestCompleted ? "complete" : ""}`} style={{ width: `${ascentProgress}%` }}>
+                  {ascentProgress >= 18 ? `${Math.round(ascentProgress)}%` : ""}
+                </div>
+              </div>
+              <div className="week-elevation-badges">
+                {MONTHLY_ASCENT_MILESTONES_M.map((milestone) => (
+                  <span key={milestone} className={`week-elevation-badge ${monthAscentM >= milestone ? "unlocked" : ""}`}>
+                    {milestone} m
+                  </span>
+                ))}
+              </div>
+              <p className="week-elevation-note">
+                {ascentRemainingM > 0
+                  ? `Noch ${formatNumber(ascentRemainingM, 0)} m bis zum Monatsziel.`
+                  : "Monatsziel erreicht. Starkes Kletter-Volumen."}
+              </p>
+              {climbQuestCompleted ? (
+                <div className="week-elevation-trophy" aria-label="Monats-Climb-Quest abgeschlossen">
+                  {"🏆"}
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -222,7 +277,11 @@ export function ActivitiesMonthPage() {
       {!loading && !error && data ? (
         <div className="month-grid">
           {data.days.map((day) => (
-            <article className={`month-day-card ${day.activities.length ? "has-activities" : ""}`} key={day.date}>
+            <article
+              className={`month-day-card ${day.activities.length ? "has-activities" : ""}`}
+              key={day.date}
+              tabIndex={day.activities.length ? 0 : undefined}
+            >
               <header className="month-day-header">
                 <h3>{day.day}</h3>
                 <span>{day.weekday_short}</span>
@@ -236,16 +295,29 @@ export function ActivitiesMonthPage() {
                     <strong>{day.summary.activities_count} Ride{day.summary.activities_count === 1 ? "" : "s"}</strong>
                     <span>{day.summary.moving_time_label ?? "-"}</span>
                     <span>{formatDistanceMeters(day.summary.distance_m)}</span>
+                    <span>HM {formatNumber(day.summary.total_ascent_m, 0)} m</span>
                     <span>TSS {formatNumber(day.summary.stress_total, 1)}</span>
                   </div>
-                  <div className="month-activities-list">
-                    {day.activities.map((activity) => (
-                      <button key={activity.id} className="month-activity-item" type="button" onClick={() => navigate(`/activities/${activity.id}`)}>
-                        <strong>{activity.name}</strong>
-                        <span>{formatTime(activity.start_time)} | {activity.duration_label ?? "-"}</span>
-                        <span>{formatDistanceMeters(activity.distance_m)} | Ø {formatNumber(activity.avg_power_w)} W | TSS {formatNumber(activity.stress_score, 1)}</span>
-                      </button>
-                    ))}
+                  <p className="month-day-hover-hint">Hover oder Fokus: einzelne Fahrten</p>
+
+                  <div className="month-day-overlay" aria-label={`Fahrten am ${formatDayLabel(day.date)}`}>
+                    <div className="month-day-overlay-head">
+                      <strong>Fahrten</strong>
+                      <span>{day.summary.activities_count}</span>
+                    </div>
+                    <div className="month-activities-list">
+                      {day.activities.map((activity) => (
+                        <button key={activity.id} className="month-activity-item" type="button" onClick={() => navigate(`/activities/${activity.id}`)}>
+                          <strong>{activity.name}</strong>
+                          <span>
+                            {formatTime(activity.start_time)} | {activity.duration_label ?? "-"}
+                          </span>
+                          <span>
+                            {formatDistanceMeters(activity.distance_m)} | HM {formatNumber(activity.total_ascent_m, 0)} m | Ø {formatNumber(activity.avg_power_w)} W | TSS {formatNumber(activity.stress_score, 1)}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </>
               )}

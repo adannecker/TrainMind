@@ -12,6 +12,7 @@ type WeekActivity = {
   duration_s: number | null;
   duration_label: string | null;
   distance_m: number | null;
+  total_ascent_m: number | null;
   avg_power_w: number | null;
   avg_speed_kmh: number | null;
   stress_score: number | null;
@@ -26,6 +27,7 @@ type DayBundle = {
     moving_time_s: number;
     moving_time_label: string | null;
     distance_m: number;
+    total_ascent_m: number;
     stress_total: number | null;
     stress_avg: number | null;
   };
@@ -46,6 +48,7 @@ type WeekResponse = {
     moving_time_s: number;
     moving_time_label: string | null;
     distance_m: number;
+    total_ascent_m: number;
     stress_total: number | null;
     stress_avg: number | null;
     goal: WeekGoal;
@@ -57,6 +60,9 @@ type AvailableWeek = {
   week_end: string;
   activities_count: number;
 };
+
+const WEEKLY_ASCENT_TARGET_M = 2500;
+const ASCENT_MILESTONES_M = [500, 1000, 1500, 2000, WEEKLY_ASCENT_TARGET_M];
 
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
@@ -199,11 +205,15 @@ export function ActivitiesWeekPage() {
   const weekDistanceKm = useMemo(() => ((data?.summary.distance_m ?? 0) / 1000), [data]);
   const weekHours = useMemo(() => ((data?.summary.moving_time_s ?? 0) / 3600), [data]);
   const weekStress = useMemo(() => (data?.summary.stress_total ?? 0), [data]);
+  const weekAscentM = useMemo(() => (data?.summary.total_ascent_m ?? 0), [data]);
   const targetHours = data?.summary.goal?.target_hours ?? 10;
   const targetStress = data?.summary.goal?.target_stress ?? 300;
   const timeProgress = Math.max(0, Math.min(100, (weekHours / Math.max(0.1, targetHours)) * 100));
   const stressProgress = Math.max(0, Math.min(100, (weekStress / Math.max(1, targetStress)) * 100));
   const loadScore = Math.round((timeProgress + stressProgress) / 2);
+  const ascentProgress = Math.max(0, Math.min(100, (weekAscentM / WEEKLY_ASCENT_TARGET_M) * 100));
+  const ascentRemainingM = Math.max(0, WEEKLY_ASCENT_TARGET_M - weekAscentM);
+  const climbQuestCompleted = ascentProgress >= 100;
 
   function goToPreviousWeek() {
     const base = data?.week_start ?? selectedDate;
@@ -283,12 +293,57 @@ export function ActivitiesWeekPage() {
             {loading ? <p>Lade Wochenansicht...</p> : null}
             {error ? <p className="error-text">{error}</p> : null}
             {!loading && !error && data ? (
-              <div className="stats-line">
-                <span>Aktivitäten: {data.summary.activities_count}</span>
-                <span>Zeit in Bewegung: {data.summary.moving_time_label ?? "-"}</span>
-                <span>Distanz: {formatDistanceMeters(data.summary.distance_m)}</span>
-                <span>TSS gesamt: {formatNumber(data.summary.stress_total, 1)}</span>
-              </div>
+              <>
+                <div className="stats-line">
+                  <span>Aktivitäten: {data.summary.activities_count}</span>
+                  <span>Zeit in Bewegung: {data.summary.moving_time_label ?? "-"}</span>
+                  <span>Distanz: {formatDistanceMeters(data.summary.distance_m)}</span>
+                  <span>TSS gesamt: {formatNumber(data.summary.stress_total, 1)}</span>
+                </div>
+                <div className="week-elevation-quest">
+                  <div className="week-elevation-quest-head">
+                    <strong>Climb Quest</strong>
+                    <span>
+                      {formatNumber(weekAscentM, 0)} / {WEEKLY_ASCENT_TARGET_M} m
+                    </span>
+                  </div>
+                  <div
+                    className="week-elevation-track"
+                    role="progressbar"
+                    aria-label="Wochenziel Höhenmeter"
+                    aria-valuemin={0}
+                    aria-valuemax={WEEKLY_ASCENT_TARGET_M}
+                    aria-valuenow={Math.round(weekAscentM)}
+                  >
+                    <div
+                      className={`week-elevation-fill ${climbQuestCompleted ? "complete" : ""}`}
+                      style={{ width: `${ascentProgress}%` }}
+                    >
+                      {ascentProgress >= 18 ? `${Math.round(ascentProgress)}%` : ""}
+                    </div>
+                  </div>
+                  <div className="week-elevation-badges">
+                    {ASCENT_MILESTONES_M.map((milestone) => (
+                      <span
+                        key={milestone}
+                        className={`week-elevation-badge ${weekAscentM >= milestone ? "unlocked" : ""}`}
+                      >
+                        {milestone} m
+                      </span>
+                    ))}
+                  </div>
+                  <p className="week-elevation-note">
+                    {ascentRemainingM > 0
+                      ? `Noch ${formatNumber(ascentRemainingM, 0)} m bis zum Wochenziel.`
+                      : "Wochenziel erreicht. Starkes Kletter-Volumen diese Woche."}
+                  </p>
+                  {climbQuestCompleted ? (
+                    <div className="week-elevation-trophy" aria-label="Climb Quest abgeschlossen">
+                      🏆
+                    </div>
+                  ) : null}
+                </div>
+              </>
             ) : null}
           </div>
 
@@ -351,7 +406,7 @@ export function ActivitiesWeekPage() {
                         {formatTime(activity.start_time)} - {formatTime(activity.end_time)} | {activity.duration_label ?? "-"}
                       </p>
                       <p className="week-activity-metrics">
-                        Ø Watt: {formatNumber(activity.avg_power_w)} W | Ø Speed: {formatNumber(activity.avg_speed_kmh, 1)} km/h | TSS: {formatNumber(activity.stress_score, 1)}
+                        Ø Watt: {formatNumber(activity.avg_power_w)} W | Ø Speed: {formatNumber(activity.avg_speed_kmh, 1)} km/h | HM: {formatNumber(activity.total_ascent_m, 0)} m | TSS: {formatNumber(activity.stress_score, 1)}
                       </p>
                     </div>
                   ))}
@@ -361,6 +416,7 @@ export function ActivitiesWeekPage() {
               <footer className="week-day-summary">
                 <span>Zeit: {day.summary.moving_time_label ?? "-"}</span>
                 <span>Distanz: {formatDistanceMeters(day.summary.distance_m)}</span>
+                <span>HM: {formatNumber(day.summary.total_ascent_m, 0)} m</span>
                 <span>TSS: {formatNumber(day.summary.stress_total, 1)}</span>
               </footer>
             </article>

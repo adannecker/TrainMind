@@ -4790,6 +4790,107 @@ h1 {
   background: linear-gradient(90deg, #f39f5a, #f7bf87);
 }
 
+.week-elevation-quest {
+  margin-top: 0.8rem;
+  border: 1px solid #ecd7b6;
+  border-radius: 0.9rem;
+  padding: 0.75rem 0.8rem 0.7rem;
+  background: linear-gradient(155deg, #fff4df 0%, #fffdf8 68%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  position: relative;
+}
+
+.week-elevation-quest-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.week-elevation-quest-head strong {
+  color: #7a4414;
+  letter-spacing: 0.01em;
+}
+
+.week-elevation-quest-head span {
+  color: #a55e1d;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.week-elevation-track {
+  margin-top: 0.52rem;
+  height: 0.82rem;
+  border-radius: 999px;
+  background: #efd9bd;
+  overflow: hidden;
+}
+
+.week-elevation-fill {
+  height: 100%;
+  min-width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d96d1b 0%, #f6a541 44%, #ffd173 100%);
+  color: #fffaf2;
+  font-size: 0.66rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 0.44rem;
+  transition: width 260ms ease;
+}
+
+.week-elevation-fill.complete {
+  background: linear-gradient(90deg, #2a8b66 0%, #35bc8f 100%);
+}
+
+.week-elevation-badges {
+  margin-top: 0.55rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.36rem;
+}
+
+.week-elevation-badge {
+  border: 1px solid #d8be99;
+  border-radius: 999px;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #9a7a52;
+  background: rgba(255, 250, 241, 0.7);
+}
+
+.week-elevation-badge.unlocked {
+  border-color: #2b8f69;
+  color: #145944;
+  background: #e6f8f0;
+}
+
+.week-elevation-note {
+  margin: 0.48rem 0 0;
+  color: #765737;
+  font-size: 0.8rem;
+  padding-right: 2.4rem;
+}
+
+.week-elevation-trophy {
+  position: absolute;
+  right: 0.62rem;
+  bottom: 0.5rem;
+  width: 1.95rem;
+  height: 1.95rem;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 1.08rem;
+  line-height: 1;
+  background: radial-gradient(circle at 30% 30%, #fff8d7 0%, #ffe082 48%, #f7c948 100%);
+  border: 1px solid #d89f1f;
+  box-shadow: 0 3px 10px rgba(142, 92, 17, 0.28);
+}
+
 .week-day-card {
   border: 1px solid var(--line);
   border-radius: 1rem;
@@ -5295,10 +5396,17 @@ h1 {
   display: grid;
   gap: 0.75rem;
   min-height: 12rem;
+  position: relative;
+  overflow: hidden;
 }
 
 .month-day-card.has-activities {
   background: linear-gradient(180deg, #fcfffe 0%, #f6fbf9 100%);
+}
+
+.month-day-card.has-activities:focus-visible {
+  outline: 2px solid #2b8f69;
+  outline-offset: 2px;
 }
 
 .month-day-header {
@@ -5342,9 +5450,60 @@ h1 {
   font-size: 0.86rem;
 }
 
+.month-day-hover-hint {
+  margin: 0;
+  color: #6c8b80;
+  font-size: 0.78rem;
+}
+
+.month-day-overlay {
+  position: absolute;
+  inset: 0.5rem;
+  border: 1px solid #cfe5db;
+  border-radius: 0.9rem;
+  background: linear-gradient(180deg, rgba(253, 255, 254, 0.98) 0%, rgba(245, 251, 248, 0.98) 100%);
+  box-shadow: 0 10px 24px rgba(20, 54, 45, 0.17);
+  padding: 0.7rem 0.72rem;
+  display: grid;
+  gap: 0.55rem;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition: opacity 170ms ease, transform 170ms ease, visibility 170ms linear;
+}
+
+.month-day-card.has-activities:hover .month-day-overlay,
+.month-day-card.has-activities:focus-within .month-day-overlay {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.month-day-overlay-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.6rem;
+}
+
+.month-day-overlay-head strong {
+  color: #153a32;
+}
+
+.month-day-overlay-head span {
+  color: #5d7f73;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .month-activities-list {
   display: grid;
   gap: 0.55rem;
+  max-height: 8.7rem;
+  overflow: auto;
+  padding-right: 0.2rem;
 }
 
 .month-activity-item {
