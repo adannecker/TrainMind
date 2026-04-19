@@ -38,6 +38,7 @@ from apps.api.climb_compare_service import (
     delete_climb_compare,
     duplicate_climb_compare,
     export_climb_compares,
+    find_rides_on_map_point,
     get_climb_compare_brief,
     import_climb_compares,
     list_climb_compares,
@@ -52,6 +53,7 @@ from apps.api.garmin_service import (
     get_missing_garmin_rides_for_period,
     get_garmin_session_status,
     import_selected_garmin_rides,
+    postprocess_imported_garmin_rides,
     reset_imported_garmin_data,
 )
 from apps.api.garmin_file_import_service import analyze_fit_dump_zip, analyze_saved_fit_dump_zip, import_fit_dump_zip, list_saved_fit_dump_archives
@@ -116,6 +118,10 @@ _recheck_jobs_lock = threading.Lock()
 _recheck_jobs: dict[int, dict[str, object]] = {}
 _recheck_job_conditions: dict[int, threading.Condition] = {}
 _recheck_job_queues: dict[int, deque[dict[str, object]]] = {}
+_garmin_import_jobs_lock = threading.Lock()
+_garmin_import_jobs: dict[int, dict[str, object]] = {}
+_garmin_postprocess_jobs_lock = threading.Lock()
+_garmin_postprocess_jobs: dict[int, dict[str, object]] = {}
 _climb_compare_jobs_lock = threading.Lock()
 _climb_compare_jobs: dict[tuple[int, int], dict[str, object]] = {}
 
@@ -176,6 +182,9 @@ def _get_recheck_job_queue(user_id: int) -> deque[dict[str, object]]:
 
 
 def _compute_recheck_progress(job: dict[str, object]) -> int:
+    status = str(job.get("status") or "")
+    if status == "completed":
+        return 100
     pass_current = int(job.get("pass_current") or job.get("phase_current") or 0)
     pass_total = int(job.get("pass_total") or job.get("phase_total") or 0)
     pass_progress = 0.0 if pass_total <= 0 else min(max(pass_current / pass_total, 0.0), 1.0)
@@ -183,8 +192,10 @@ def _compute_recheck_progress(job: dict[str, object]) -> int:
     pass_count = int(job.get("pass_count") or 0)
     if pass_count <= 0:
         return 0
-    completed_passes = pass_count if str(job.get("status") or "") == "completed" else max(0, pass_index - 1)
+    completed_passes = max(0, pass_index - 1)
     overall = ((completed_passes + pass_progress) / pass_count) * 100.0
+    if status == "running" and overall >= 100.0:
+        return 99
     return max(0, min(100, int(round(overall))))
 
 
@@ -226,6 +237,182 @@ def _store_recheck_job(user_id: int, updates: dict[str, object]) -> dict[str, ob
     with condition:
         condition.notify_all()
     return snapshot
+
+
+def _snapshot_garmin_import_job(user_id: int) -> dict[str, object]:
+    with _garmin_import_jobs_lock:
+        job = dict(_garmin_import_jobs.get(user_id) or {})
+    if not job:
+        return {
+            "status": "idle",
+            "progress_percent": 0,
+            "phase": None,
+            "phase_label": None,
+            "phase_current": 0,
+            "phase_total": 0,
+            "pass_index": 0,
+            "pass_count": 0,
+            "pass_label": None,
+            "pass_current": 0,
+            "pass_total": 0,
+            "version": 0,
+            "result": None,
+            "error": None,
+            "activity_ids": [],
+            "current_activity_name": None,
+        }
+    job["progress_percent"] = _compute_recheck_progress(job)
+    return job
+
+
+def _store_garmin_import_job(user_id: int, updates: dict[str, object]) -> dict[str, object]:
+    with _garmin_import_jobs_lock:
+        current = dict(_garmin_import_jobs.get(user_id) or {})
+        current.update(updates)
+        current["version"] = int(current.get("version") or 0) + 1
+        current["progress_percent"] = _compute_recheck_progress(current)
+        _garmin_import_jobs[user_id] = current
+        return dict(current)
+
+
+def _run_garmin_import_job(user_id: int, activity_ids: list[str], run_postprocessing: bool) -> None:
+    try:
+        result = import_selected_garmin_rides(
+            user_id=user_id,
+            activity_ids=activity_ids,
+            run_postprocessing=run_postprocessing,
+            progress_callback=lambda current, total, activity_label, step_status: _store_garmin_import_job(
+                user_id,
+                {
+                    "status": "running",
+                    "phase": "import",
+                    "phase_label": "Rides einlesen",
+                    "phase_current": int(current),
+                    "phase_total": int(total),
+                    "pass_index": 1,
+                    "pass_count": 1,
+                    "pass_label": f"Einlesen ({step_status})",
+                    "pass_current": int(current),
+                    "pass_total": int(total),
+                    "current_activity_name": activity_label,
+                    "updated_at": _job_timestamp(),
+                },
+            ),
+        )
+        snapshot = _snapshot_garmin_import_job(user_id)
+        _store_garmin_import_job(
+            user_id,
+            {
+                "status": "completed",
+                "phase_current": int(snapshot.get("phase_total") or 0),
+                "pass_index": 1,
+                "pass_count": 1,
+                "pass_current": int(snapshot.get("pass_total") or 0),
+                "pass_total": int(snapshot.get("pass_total") or 0),
+                "current_activity_name": None,
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "result": result,
+                "message": "Garmin-Import erfolgreich abgeschlossen.",
+                "error": None,
+            },
+        )
+    except Exception as exc:
+        _store_garmin_import_job(
+            user_id,
+            {
+                "status": "error",
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "error": str(exc),
+            },
+        )
+
+
+def _snapshot_garmin_postprocess_job(user_id: int) -> dict[str, object]:
+    with _garmin_postprocess_jobs_lock:
+        job = dict(_garmin_postprocess_jobs.get(user_id) or {})
+    if not job:
+        return {
+            "status": "idle",
+            "progress_percent": 0,
+            "phase": None,
+            "phase_label": None,
+            "phase_current": 0,
+            "phase_total": 0,
+            "pass_index": 0,
+            "pass_count": 0,
+            "pass_label": None,
+            "pass_current": 0,
+            "pass_total": 0,
+            "version": 0,
+            "result": None,
+            "error": None,
+            "activity_ids": [],
+        }
+    job["progress_percent"] = _compute_recheck_progress(job)
+    return job
+
+
+def _store_garmin_postprocess_job(user_id: int, updates: dict[str, object]) -> dict[str, object]:
+    with _garmin_postprocess_jobs_lock:
+        current = dict(_garmin_postprocess_jobs.get(user_id) or {})
+        current.update(updates)
+        current["version"] = int(current.get("version") or 0) + 1
+        current["progress_percent"] = _compute_recheck_progress(current)
+        _garmin_postprocess_jobs[user_id] = current
+        return dict(current)
+
+
+def _run_garmin_postprocess_job(user_id: int, activity_ids: list[str]) -> None:
+    try:
+        result = postprocess_imported_garmin_rides(
+            user_id=user_id,
+            activity_ids=activity_ids,
+            progress_callback=lambda pass_label, pass_index, pass_count, current, total, phase, phase_label: _store_garmin_postprocess_job(
+                user_id,
+                {
+                    "status": "running",
+                    "phase": phase,
+                    "phase_label": phase_label,
+                    "phase_current": int(current),
+                    "phase_total": int(total),
+                    "pass_index": int(pass_index),
+                    "pass_count": int(pass_count),
+                    "pass_label": pass_label,
+                    "pass_current": int(current),
+                    "pass_total": int(total),
+                    "updated_at": _job_timestamp(),
+                },
+            ),
+        )
+        snapshot = _snapshot_garmin_postprocess_job(user_id)
+        _store_garmin_postprocess_job(
+            user_id,
+            {
+                "status": "completed",
+                "phase_current": int(snapshot.get("phase_total") or 0),
+                "pass_index": int(snapshot.get("pass_count") or 0),
+                "pass_count": int(snapshot.get("pass_count") or 0),
+                "pass_current": int(snapshot.get("pass_total") or 0),
+                "pass_total": int(snapshot.get("pass_total") or 0),
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "result": result,
+                "message": "Garmin-Nachbereitung erfolgreich abgeschlossen.",
+                "error": None,
+            },
+        )
+    except Exception as exc:
+        _store_garmin_postprocess_job(
+            user_id,
+            {
+                "status": "error",
+                "updated_at": _job_timestamp(),
+                "finished_at": _job_timestamp(),
+                "error": str(exc),
+            },
+        )
 
 
 def _climb_compare_job_key(user_id: int, compare_id: int) -> tuple[int, int]:
@@ -448,6 +635,12 @@ class ClimbCompareRenameRequest(BaseModel):
     name: str
 
 
+class ClimbCompareFindRidesRequest(BaseModel):
+    point: GeoPointRequest
+    tolerance_m: float = Field(default=50.0, ge=15.0, le=500.0)
+    limit: int = Field(default=300, ge=1, le=1000)
+
+
 class WeightLogCreateRequest(BaseModel):
     recorded_at: str | None = None
     weight_kg: float
@@ -632,6 +825,11 @@ def garmin_imported_summary(current_user: dict = Depends(get_current_user)) -> d
 
 
 class GarminImportRequest(BaseModel):
+    activity_ids: list[str]
+    run_postprocessing: bool = True
+
+
+class GarminImportPostprocessRequest(BaseModel):
     activity_ids: list[str]
 
 
@@ -1077,13 +1275,127 @@ def garmin_credentials_save(current_user: dict = Depends(get_current_user)) -> d
 @app.post("/garmin/import-rides")
 def garmin_import_rides(payload: GarminImportRequest, current_user: dict = Depends(get_current_user)) -> dict:
     try:
-        return import_selected_garmin_rides(user_id=int(current_user["id"]), activity_ids=payload.activity_ids)
+        return import_selected_garmin_rides(
+            user_id=int(current_user["id"]),
+            activity_ids=payload.activity_ids,
+            run_postprocessing=payload.run_postprocessing,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+@app.post("/garmin/import-rides/start")
+def garmin_import_rides_start(payload: GarminImportRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    user_id = int(current_user["id"])
+    current_job = _snapshot_garmin_import_job(user_id)
+    if current_job.get("status") == "running":
+        return current_job
+
+    cleaned_ids = [str(item).strip() for item in payload.activity_ids if str(item).strip()]
+    deduped_ids = list(dict.fromkeys(cleaned_ids))
+    _store_garmin_import_job(
+        user_id,
+        {
+            "status": "running",
+            "phase": "queued",
+            "phase_label": "Vorbereitung",
+            "phase_current": 0,
+            "phase_total": max(1, len(deduped_ids)),
+            "pass_index": 0,
+            "pass_count": 1,
+            "pass_label": "Wartet auf Start",
+            "pass_current": 0,
+            "pass_total": max(1, len(deduped_ids)),
+            "activity_ids": deduped_ids,
+            "current_activity_name": None,
+            "started_at": _job_timestamp(),
+            "updated_at": _job_timestamp(),
+            "finished_at": None,
+            "result": None,
+            "error": None,
+            "message": None,
+        },
+    )
+    worker = threading.Thread(
+        target=_run_garmin_import_job,
+        kwargs={
+            "user_id": user_id,
+            "activity_ids": deduped_ids,
+            "run_postprocessing": payload.run_postprocessing,
+        },
+        daemon=True,
+    )
+    worker.start()
+    return _snapshot_garmin_import_job(user_id)
+
+
+@app.get("/garmin/import-rides/status")
+def garmin_import_rides_status(current_user: dict = Depends(get_current_user)) -> dict:
+    return _snapshot_garmin_import_job(int(current_user["id"]))
+
+
+@app.post("/garmin/import-rides/postprocess")
+def garmin_import_rides_postprocess(payload: GarminImportPostprocessRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return postprocess_imported_garmin_rides(
+            user_id=int(current_user["id"]),
+            activity_ids=payload.activity_ids,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin postprocessing error: {exc}") from exc
+
+
+@app.post("/garmin/import-rides/postprocess/start")
+def garmin_import_rides_postprocess_start(payload: GarminImportPostprocessRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    user_id = int(current_user["id"])
+    current_job = _snapshot_garmin_postprocess_job(user_id)
+    if current_job.get("status") == "running":
+        return current_job
+
+    cleaned_ids = [str(item).strip() for item in payload.activity_ids if str(item).strip()]
+    deduped_ids = list(dict.fromkeys(cleaned_ids))
+    _store_garmin_postprocess_job(
+        user_id,
+        {
+            "status": "running",
+            "phase": "queued",
+            "phase_label": "Vorbereitung",
+            "phase_current": 0,
+            "phase_total": max(1, len(deduped_ids)),
+            "pass_index": 0,
+            "pass_count": 1 + ACHIEVEMENT_RECHECK_PASSES,
+            "pass_label": "Wartet auf Start",
+            "pass_current": 0,
+            "pass_total": max(1, len(deduped_ids)),
+            "activity_ids": deduped_ids,
+            "started_at": _job_timestamp(),
+            "updated_at": _job_timestamp(),
+            "finished_at": None,
+            "result": None,
+            "error": None,
+            "message": None,
+        },
+    )
+    worker = threading.Thread(
+        target=_run_garmin_postprocess_job,
+        kwargs={"user_id": user_id, "activity_ids": deduped_ids},
+        daemon=True,
+    )
+    worker.start()
+    return _snapshot_garmin_postprocess_job(user_id)
+
+
+@app.get("/garmin/import-rides/postprocess/status")
+def garmin_import_rides_postprocess_status(current_user: dict = Depends(get_current_user)) -> dict:
+    return _snapshot_garmin_postprocess_job(int(current_user["id"]))
 
 
 @app.post("/garmin/ingest-recent")
@@ -1571,6 +1883,19 @@ def activities_climb_compare_check(
 def activities_climb_compare_check_status(compare_id: int, current_user: dict = Depends(get_current_user)) -> dict:
     try:
         return _snapshot_climb_compare_job(int(current_user["id"]), compare_id)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
+
+
+@app.post("/activities/climb-compare/find-rides-on-map")
+def activities_climb_compare_find_rides_on_map(payload: ClimbCompareFindRidesRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return find_rides_on_map_point(
+            user_id=int(current_user["id"]),
+            payload=payload.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected climb compare error: {exc}") from exc
 

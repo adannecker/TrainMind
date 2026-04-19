@@ -11,6 +11,7 @@ import { ActivitiesMonthPage } from "./pages/ActivitiesMonthPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { ClimbComparePage } from "./pages/ClimbComparePage";
+import { FindRidesOnMapPage } from "./pages/FindRidesOnMapPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { HomePage } from "./pages/HomePage";
 import { ImportFilesPage } from "./pages/ImportFilesPage";
@@ -81,6 +82,7 @@ const navGroups: NavGroup[] = [
       { label: "Wochenansicht", to: "/activities/week" },
       { label: "Monatsansicht", to: "/activities/month" },
       { label: "Climb Compare", to: "/activities/climb-compare" },
+      { label: "Find Rides on Map", to: "/activities/find-rides-on-map" },
       { label: "Alle Aktivitäten", to: "/activities/all" },
     ],
   },
@@ -621,6 +623,7 @@ function Layout() {
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
               <Route path="/activities/month" element={<ActivitiesMonthPage />} />
               <Route path="/activities/climb-compare" element={<ClimbComparePage />} />
+              <Route path="/activities/find-rides-on-map" element={<FindRidesOnMapPage />} />
               <Route path="/activities/:activityId" element={<ActivityDetailPage />} />
               <Route path="/nutrition/entries" element={<NutritionPage />} />
               <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />

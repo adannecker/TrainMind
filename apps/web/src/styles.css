@@ -4977,6 +4977,32 @@ h1 {
   resize: vertical;
 }
 
+.climb-compare-find-card {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.climb-compare-find-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 240px);
+  gap: 0.9rem;
+  align-items: end;
+}
+
+.climb-compare-find-results {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.climb-compare-find-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  color: #204840;
+  font-size: 0.9rem;
+}
+
 .climb-compare-map {
   height: 520px;
   border-radius: 1rem;
@@ -5329,6 +5355,10 @@ h1 {
   .climb-compare-form-grid,
   .climb-compare-summary-grid,
   .climb-compare-status-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .climb-compare-find-grid {
     grid-template-columns: 1fr;
   }
 

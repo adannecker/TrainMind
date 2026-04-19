@@ -10,13 +10,13 @@ import base64
 from datetime import datetime, timedelta
 from hashlib import sha256
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from dotenv import load_dotenv
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
-from apps.api.achievement_service import rebuild_activity_achievement_checks, reset_achievement_data
+from apps.api.achievement_service import ACHIEVEMENT_RECHECK_PASSES, rebuild_activity_achievement_checks, reset_achievement_data
 from apps.api.activity_service import _hydrate_activity_streams_from_fit, clear_activity_list_cache
 from apps.api.training_service import create_imported_max_hr_metric_if_new_peak, rebuild_hf_development_cache
 from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, UserTrainingMetric
@@ -592,6 +592,8 @@ def _import_selected_garmin_rides_with_client(
     user_id: int,
     activity_ids: list[str],
     sleep_seconds: float = 0.0,
+    run_postprocessing: bool = True,
+    progress_callback: Callable[[int, int, str | None, str], None] | None = None,
 ) -> dict[str, Any]:
     cleaned_ids = [str(x).strip() for x in activity_ids if str(x).strip()]
     deduped_ids = list(dict.fromkeys(cleaned_ids))
@@ -604,12 +606,26 @@ def _import_selected_garmin_rides_with_client(
     errors: list[dict[str, str]] = []
     interesting_updates: list[dict[str, Any]] = []
     safe_sleep_seconds = max(0.0, float(sleep_seconds))
+    total_items = len(deduped_ids)
+    processed_items = 0
+
+    if progress_callback is not None:
+        progress_callback(processed_items, total_items, None, "queued")
+
+    def _advance_progress(activity_label: str | None, status: str) -> None:
+        nonlocal processed_items
+        processed_items += 1
+        if progress_callback is not None:
+            progress_callback(processed_items, total_items, activity_label, status)
 
     for activity_id in deduped_ids:
+        if progress_callback is not None:
+            progress_callback(processed_items, total_items, activity_id, "running")
         try:
             numeric_id = int(activity_id)
         except ValueError:
             errors.append({"activity_id": activity_id, "reason": "Invalid activity id"})
+            _advance_progress(activity_id, "invalid")
             continue
 
         with SessionLocal() as session:
@@ -622,6 +638,7 @@ def _import_selected_garmin_rides_with_client(
             )
             if existing:
                 skipped_ids.append(activity_id)
+                _advance_progress(activity_id, "skipped_existing")
                 continue
 
             try:
@@ -630,6 +647,7 @@ def _import_selected_garmin_rides_with_client(
             except Exception as exc:
                 errors.append({"activity_id": activity_id, "reason": f"Garmin download failed: {exc}"})
                 session.rollback()
+                _advance_progress(activity_id, "download_error")
                 continue
 
             started_local = _to_datetime(_pick_value(summary, "startTimeLocal", "activityStartTimeLocal"))
@@ -729,12 +747,15 @@ def _import_selected_garmin_rides_with_client(
                     except Exception:
                         pass
                 loaded_ids.append(activity_id)
+                _advance_progress(name, "loaded")
             except IntegrityError:
                 session.rollback()
                 skipped_ids.append(activity_id)
+                _advance_progress(activity_id, "skipped_integrity")
             except Exception as exc:
                 session.rollback()
                 errors.append({"activity_id": activity_id, "reason": f"DB save failed: {exc}"})
+                _advance_progress(activity_id, "db_error")
 
         if safe_sleep_seconds > 0:
             time.sleep(safe_sleep_seconds)
@@ -744,9 +765,10 @@ def _import_selected_garmin_rides_with_client(
         "skipped": len(skipped_ids),
         "errors": errors,
         "imported_ids": loaded_ids,
+        "imported_db_ids": loaded_db_ids,
         "interesting_updates": interesting_updates,
     }
-    if loaded_ids:
+    if loaded_ids and run_postprocessing:
         try:
             result["hf_analysis"] = rebuild_hf_development_cache(user_id=user_id, activity_ids=loaded_db_ids)
         except Exception as exc:
@@ -756,12 +778,121 @@ def _import_selected_garmin_rides_with_client(
         except Exception as exc:
             result["achievement_rebuild_error"] = str(exc)
         clear_activity_list_cache(user_id=user_id)
+    elif loaded_ids and not run_postprocessing:
+        result["postprocessing"] = {
+            "status": "pending",
+            "reason": "run_postprocessing_disabled",
+            "pending_activity_ids": loaded_ids,
+            "pending_activity_db_ids": loaded_db_ids,
+        }
     return result
 
 
-def import_selected_garmin_rides(user_id: int, activity_ids: list[str]) -> dict[str, Any]:
+def import_selected_garmin_rides(
+    user_id: int,
+    activity_ids: list[str],
+    *,
+    run_postprocessing: bool = True,
+    progress_callback: Callable[[int, int, str | None, str], None] | None = None,
+) -> dict[str, Any]:
     client = _build_client(user_id=user_id)
-    return _import_selected_garmin_rides_with_client(client=client, user_id=user_id, activity_ids=activity_ids)
+    return _import_selected_garmin_rides_with_client(
+        client=client,
+        user_id=user_id,
+        activity_ids=activity_ids,
+        run_postprocessing=run_postprocessing,
+        progress_callback=progress_callback,
+    )
+
+
+def postprocess_imported_garmin_rides(
+    user_id: int,
+    activity_ids: list[str],
+    *,
+    progress_callback: Callable[[str, int, int, int, int, str, str], None] | None = None,
+) -> dict[str, Any]:
+    cleaned_ids = [str(x).strip() for x in activity_ids if str(x).strip()]
+    deduped_ids = list(dict.fromkeys(cleaned_ids))
+    if not deduped_ids:
+        return {
+            "status": "ok",
+            "requested_activity_ids": [],
+            "imported_activity_ids": [],
+            "imported_activity_db_ids": [],
+            "postprocessing": {"status": "skipped", "reason": "no_activity_ids"},
+        }
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(Activity.id, Activity.external_id).where(
+                Activity.user_id == user_id,
+                Activity.provider == "garmin",
+                Activity.external_id.in_(deduped_ids),
+            )
+        ).all()
+
+    imported_activity_db_ids = sorted({int(row[0]) for row in rows if row[0] is not None})
+    imported_activity_ids = sorted({str(row[1]) for row in rows if row[1] is not None})
+
+    result: dict[str, Any] = {
+        "status": "ok",
+        "requested_activity_ids": deduped_ids,
+        "imported_activity_ids": imported_activity_ids,
+        "imported_activity_db_ids": imported_activity_db_ids,
+        "postprocessing": {
+            "status": "ok" if imported_activity_db_ids else "skipped",
+            "reason": None if imported_activity_db_ids else "no_matching_imported_activities",
+        },
+    }
+    if not imported_activity_db_ids:
+        return result
+
+    total_passes = 1 + ACHIEVEMENT_RECHECK_PASSES
+    hf_total = max(1, len(imported_activity_db_ids))
+    if progress_callback is not None:
+        progress_callback("HF-Analyse", 1, total_passes, 0, hf_total, "hf_analysis", "HF-Analyse")
+
+    try:
+        result["hf_analysis"] = rebuild_hf_development_cache(user_id=user_id, activity_ids=imported_activity_db_ids)
+    except Exception as exc:
+        result["hf_analysis_rebuild_error"] = str(exc)
+        result["postprocessing"] = {"status": "partial_error", "reason": "hf_analysis_failed"}
+    if progress_callback is not None:
+        progress_callback("HF-Analyse", 1, total_passes, hf_total, hf_total, "hf_analysis", "HF-Analyse")
+        progress_callback(
+            "Achievements vorbereiten",
+            2,
+            total_passes,
+            0,
+            max(1, len(imported_activity_db_ids)),
+            "achievements",
+            "Achievement-Checks",
+        )
+    try:
+        result["achievements"] = rebuild_activity_achievement_checks(
+            user_id=user_id,
+            progress_callback=(
+                None
+                if progress_callback is None
+                else (
+                    lambda pass_label, pass_index, _pass_count, current, total: progress_callback(
+                        pass_label,
+                        1 + int(pass_index),
+                        total_passes,
+                        int(current),
+                        int(total),
+                        "achievements",
+                        "Achievement-Checks",
+                    )
+                )
+            ),
+        )
+    except Exception as exc:
+        result["achievement_rebuild_error"] = str(exc)
+        result["postprocessing"] = {"status": "partial_error", "reason": "achievement_rebuild_failed"}
+
+    clear_activity_list_cache(user_id=user_id)
+    return result
 
 
 def ingest_recent_garmin_rides(

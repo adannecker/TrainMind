@@ -47,7 +47,64 @@ type ImportResponse = {
   loaded: number;
   skipped: number;
   errors: Array<{ activity_id: string; reason: string }>;
+  imported_ids?: string[];
+  postprocessing?: {
+    status?: string;
+    reason?: string | null;
+  };
+  hf_analysis?: {
+    activities_considered: number;
+    rows_written: number;
+  };
+  achievements?: {
+    checked_now_activities: number;
+  };
+  hf_analysis_rebuild_error?: string;
+  achievement_rebuild_error?: string;
   interesting_updates?: InterestingUpdate[];
+};
+
+type ImportPostprocessResponse = {
+  status: string;
+  imported_activity_ids?: string[];
+  imported_activity_db_ids?: number[];
+  hf_analysis?: {
+    activities_considered: number;
+    rows_written: number;
+  };
+  achievements?: {
+    checked_now_activities: number;
+  };
+  hf_analysis_rebuild_error?: string;
+  achievement_rebuild_error?: string;
+};
+
+type ImportPostprocessJobStatus = {
+  status: "idle" | "running" | "completed" | "error";
+  progress_percent?: number;
+  phase?: string | null;
+  phase_label?: string | null;
+  phase_current?: number;
+  phase_total?: number;
+  pass_index?: number;
+  pass_count?: number;
+  pass_label?: string | null;
+  pass_current?: number;
+  pass_total?: number;
+  result?: ImportPostprocessResponse;
+  error?: string | null;
+};
+
+type ImportJobStatus = {
+  status: "idle" | "running" | "completed" | "error";
+  progress_percent?: number;
+  phase_current?: number;
+  phase_total?: number;
+  pass_current?: number;
+  pass_total?: number;
+  current_activity_name?: string | null;
+  result?: ImportResponse;
+  error?: string | null;
 };
 
 type ImportedSummary = {
@@ -108,7 +165,9 @@ export function CheckRidesPage() {
   const [loadingLabel, setLoadingLabel] = useState("Rides werden geprüft");
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [nameFilter, setNameFilter] = useState("");
   const [importing, setImporting] = useState(false);
+  const [importPhase, setImportPhase] = useState<"idle" | "reading" | "postprocessing">("idle");
   const [importMessage, setImportMessage] = useState<string | null>(null);
   const [importCurrent, setImportCurrent] = useState(0);
   const [importTotal, setImportTotal] = useState(0);
@@ -179,6 +238,7 @@ export function CheckRidesPage() {
   async function importSelected() {
     if (selectedIds.size === 0 || importing || !data) return;
     setImporting(true);
+    setImportPhase("reading");
     setImportMessage(null);
     setImportCurrent(0);
     setImportCurrentName("");
@@ -186,37 +246,206 @@ export function CheckRidesPage() {
     try {
       const selectedList = data.rides.filter((ride) => selectedIds.has(ride.activity_id));
       setImportTotal(selectedList.length);
+      if (selectedList.length === 0) {
+        setImportMessage("Keine Rides zum Import ausgewählt.");
+        return;
+      }
+      setImportCurrentName(`Schritt 1/2: Rides werden eingelesen (0/${selectedList.length})`);
 
-      let loaded = 0;
-      let skipped = 0;
-      let errors = 0;
-      const interestingUpdates: InterestingUpdate[] = [];
-
-      for (let i = 0; i < selectedList.length; i += 1) {
-        const ride = selectedList[i];
-        setImportCurrentName(ride.name);
-
-        const response = await apiFetch(`${API_BASE_URL}/garmin/import-rides`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ activity_ids: [ride.activity_id] }),
-        });
-        const payload = await parseJsonSafely<ImportResponse | { detail?: string }>(response);
-        if (!response.ok) {
-          throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Import fehlgeschlagen.");
-        }
-        if (!payload || !("loaded" in payload)) {
-          throw new Error("Import fehlgeschlagen: leere Antwort.");
-        }
-
-        loaded += payload.loaded;
-        skipped += payload.skipped;
-        errors += payload.errors.length;
-        interestingUpdates.push(...(payload.interesting_updates ?? []));
-        setImportCurrent(i + 1);
+      const startResponse = await apiFetch(`${API_BASE_URL}/garmin/import-rides/start`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          activity_ids: selectedList.map((ride) => ride.activity_id),
+          run_postprocessing: false,
+        }),
+      });
+      const startPayload = await parseJsonSafely<ImportJobStatus | { detail?: string }>(startResponse);
+      if (!startResponse.ok) {
+        throw new Error(
+          typeof startPayload === "object" && startPayload && "detail" in startPayload && startPayload.detail
+            ? startPayload.detail
+            : "Import konnte nicht gestartet werden.",
+        );
       }
 
-      setImportMessage(`Import fertig: geladen ${loaded}, übersprungen ${skipped}, Fehler ${errors}.`);
+      let finalImportJob: ImportJobStatus | null = null;
+      let importPollCount = 0;
+      while (importPollCount < 900) {
+        const statusResponse = await apiFetch(`${API_BASE_URL}/garmin/import-rides/status`);
+        const statusPayload = await parseJsonSafely<ImportJobStatus | { detail?: string }>(statusResponse);
+        if (!statusResponse.ok) {
+          throw new Error(
+            typeof statusPayload === "object" && statusPayload && "detail" in statusPayload && statusPayload.detail
+              ? statusPayload.detail
+              : "Import-Status konnte nicht geladen werden.",
+          );
+        }
+        if (!statusPayload || !("status" in statusPayload)) {
+          throw new Error("Import-Status ungültig.");
+        }
+
+        const status = statusPayload as ImportJobStatus;
+        finalImportJob = status;
+        if (status.status === "running") {
+          const phaseTotal = Math.max(1, Number(status.phase_total ?? status.pass_total ?? selectedList.length));
+          const phaseCurrent = Math.max(0, Math.min(phaseTotal, Number(status.phase_current ?? status.pass_current ?? 0)));
+          setImportTotal(phaseTotal);
+          setImportCurrent(phaseCurrent);
+          const currentName = (status.current_activity_name || "").trim();
+          setImportCurrentName(
+            `Schritt 1/2: Rides werden eingelesen (${phaseCurrent}/${phaseTotal})${currentName ? ` | ${currentName}` : ""}`,
+          );
+          importPollCount += 1;
+          await new Promise((resolve) => setTimeout(resolve, 700));
+          continue;
+        }
+        if (status.status === "completed" || status.status === "error") {
+          break;
+        }
+        importPollCount += 1;
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+
+      if (finalImportJob?.status === "error") {
+        throw new Error(finalImportJob.error || "Import ist mit einem Fehler beendet worden.");
+      }
+      if (finalImportJob?.status !== "completed") {
+        throw new Error("Import dauert ungewöhnlich lange (Timeout).");
+      }
+      const payload = finalImportJob.result;
+      if (!payload || !("loaded" in payload)) {
+        throw new Error("Import fehlgeschlagen: leere Antwort.");
+      }
+
+      setImportCurrent(selectedList.length);
+      const loaded = payload.loaded;
+      const skipped = payload.skipped;
+      const errors = payload.errors.length;
+      const interestingUpdates = payload.interesting_updates ?? [];
+      const importedIdsForPostprocess = payload.imported_ids ?? [];
+
+      const importedSet = new Set(importedIdsForPostprocess);
+      const loadedRideNames = selectedList.filter((ride) => importedSet.has(ride.activity_id)).map((ride) => ride.name);
+      const loadedRidePreview =
+        loadedRideNames.length > 0
+          ? `${loadedRideNames.slice(0, 3).join(", ")}${loadedRideNames.length > 3 ? ` (+${loadedRideNames.length - 3} weitere)` : ""}`
+          : null;
+
+      const postprocessNotes: string[] = [];
+      let postprocessSummary = "Danach: keine Nachbereitung nötig.";
+      const backendSignalsPendingPostprocess = payload.postprocessing?.status === "pending";
+
+      if (backendSignalsPendingPostprocess && importedIdsForPostprocess.length > 0) {
+        setImportPhase("postprocessing");
+        setImportTotal(100);
+        setImportCurrent(0);
+        setImportCurrentName("Schritt 2/2: Nachbereitung wird gestartet...");
+
+        try {
+          const startResponse = await apiFetch(`${API_BASE_URL}/garmin/import-rides/postprocess/start`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ activity_ids: importedIdsForPostprocess }),
+          });
+          const startPayload = await parseJsonSafely<ImportPostprocessJobStatus | { detail?: string }>(startResponse);
+          if (!startResponse.ok) {
+            throw new Error(
+              typeof startPayload === "object" && startPayload && "detail" in startPayload && startPayload.detail
+                ? startPayload.detail
+                : "Nachbereitung konnte nicht gestartet werden.",
+            );
+          }
+
+          let pollCount = 0;
+          let finalJob: ImportPostprocessJobStatus | null = null;
+          while (pollCount < 900) {
+            const statusResponse = await apiFetch(`${API_BASE_URL}/garmin/import-rides/postprocess/status`);
+            const statusPayload = await parseJsonSafely<ImportPostprocessJobStatus | { detail?: string }>(statusResponse);
+            if (!statusResponse.ok) {
+              throw new Error(
+                typeof statusPayload === "object" && statusPayload && "detail" in statusPayload && statusPayload.detail
+                  ? statusPayload.detail
+                  : "Nachbereitung-Status konnte nicht geladen werden.",
+              );
+            }
+            if (!statusPayload || !("status" in statusPayload)) {
+              throw new Error("Nachbereitung-Status ungültig.");
+            }
+            const status = statusPayload as ImportPostprocessJobStatus;
+            finalJob = status;
+
+            if (status.status === "running") {
+              const progress = Math.max(0, Math.min(100, Math.round(Number(status.progress_percent ?? 0))));
+              setImportCurrent(progress);
+              const phaseLabel = status.pass_label || status.phase_label || "Nachbereitung";
+              const phaseCurrent = Number(status.phase_current ?? status.pass_current ?? 0);
+              const phaseTotal = Number(status.phase_total ?? status.pass_total ?? 0);
+              const detail = phaseTotal > 0 ? `${phaseCurrent}/${phaseTotal}` : `${progress}%`;
+              setImportCurrentName(`Schritt 2/2: ${phaseLabel} (${detail})`);
+              pollCount += 1;
+              await new Promise((resolve) => setTimeout(resolve, 1000));
+              continue;
+            }
+
+            if (status.status === "completed" || status.status === "error") {
+              break;
+            }
+
+            pollCount += 1;
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
+
+          if (finalJob?.status === "error") {
+            throw new Error(finalJob.error || "Nachbereitung ist mit einem Fehler beendet worden.");
+          }
+          if (finalJob?.status !== "completed") {
+            throw new Error("Nachbereitung dauert ungewöhnlich lange (Timeout).");
+          }
+
+          setImportCurrent(100);
+          const postprocessPayload = finalJob.result;
+          if (postprocessPayload?.hf_analysis_rebuild_error) {
+            postprocessNotes.push(`HF-Analyse Fehler: ${postprocessPayload.hf_analysis_rebuild_error}`);
+          } else if (postprocessPayload?.hf_analysis) {
+            postprocessNotes.push(`HF aktualisiert (${postprocessPayload.hf_analysis.activities_considered} Aktivität(en)).`);
+          }
+
+          if (postprocessPayload?.achievement_rebuild_error) {
+            postprocessNotes.push(`Achievements Fehler: ${postprocessPayload.achievement_rebuild_error}`);
+          } else if (postprocessPayload?.achievements) {
+            postprocessNotes.push(`Achievements neu geprüft (${postprocessPayload.achievements.checked_now_activities} Aktivitäten).`);
+          }
+        } catch (postprocessError) {
+          postprocessNotes.push(`Nachbereitung nicht abgeschlossen: ${postprocessError instanceof Error ? postprocessError.message : "Unbekannter Fehler"}`);
+        }
+      } else {
+        if (payload.hf_analysis_rebuild_error) {
+          postprocessNotes.push(`HF-Analyse Fehler: ${payload.hf_analysis_rebuild_error}`);
+        } else if (payload.hf_analysis) {
+          postprocessNotes.push(`HF aktualisiert (${payload.hf_analysis.activities_considered} Aktivität(en)).`);
+        }
+
+        if (payload.achievement_rebuild_error) {
+          postprocessNotes.push(`Achievements Fehler: ${payload.achievement_rebuild_error}`);
+        } else if (payload.achievements) {
+          postprocessNotes.push(`Achievements neu geprüft (${payload.achievements.checked_now_activities} Aktivitäten).`);
+        }
+
+        if (postprocessNotes.length === 0 && importedIdsForPostprocess.length > 0) {
+          postprocessNotes.push("Nachbereitung wurde bereits zusammen mit dem Import ausgeführt.");
+        }
+      }
+
+      if (postprocessNotes.length > 0) {
+        postprocessSummary = `Danach: ${postprocessNotes.join(" ")}`;
+      }
+
+      setImportMessage(
+        `Import fertig: geladen ${loaded}, übersprungen ${skipped}, Fehler ${errors}. ${
+          loadedRidePreview ? `Eingelesene Rides: ${loadedRidePreview}. ` : ""
+        }${postprocessSummary} Hinweis: Diese Ansicht zeigt nur noch nicht importierte Rides.`,
+      );
       if (viewMode === "recent" || viewMode === "month") {
         await loadRides(viewMode);
       }
@@ -227,6 +456,7 @@ export function CheckRidesPage() {
     } catch (err) {
       setImportMessage(err instanceof Error ? err.message : "Import fehlgeschlagen");
     } finally {
+      setImportPhase("idle");
       setImporting(false);
       setImportCurrentName("");
     }
@@ -257,15 +487,24 @@ export function CheckRidesPage() {
     }
   }
 
-  const allIds = useMemo(() => data?.rides.map((ride) => ride.activity_id) ?? [], [data]);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selectedIds.has(id));
+  const normalizedNameFilter = nameFilter.trim().toLowerCase();
+  const filteredRides = useMemo(() => {
+    const rides = data?.rides ?? [];
+    if (!normalizedNameFilter) return rides;
+    return rides.filter((ride) => ride.name.toLowerCase().includes(normalizedNameFilter));
+  }, [data, normalizedNameFilter]);
+  const filteredIds = useMemo(() => filteredRides.map((ride) => ride.activity_id), [filteredRides]);
+  const allSelected = filteredIds.length > 0 && filteredIds.every((id) => selectedIds.has(id));
 
   function toggleAll(checked: boolean) {
-    if (checked) {
-      setSelectedIds(new Set(allIds));
-      return;
-    }
-    setSelectedIds(new Set());
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of filteredIds) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
   }
 
   function toggleSingle(activityId: string, checked: boolean) {
@@ -277,10 +516,15 @@ export function CheckRidesPage() {
     });
   }
 
+  function toggleFilteredSelection(checked: boolean) {
+    toggleAll(checked);
+  }
+
   const progressPercent = importTotal > 0 ? Math.round((importCurrent / importTotal) * 100) : 0;
   const ringRadius = 42;
   const ringCircumference = 2 * Math.PI * ringRadius;
   const ringOffset = ringCircumference - (progressPercent / 100) * ringCircumference;
+  const importOverlayLabel = `${importCurrent}/${importTotal}`;
 
   return (
     <section className="page">
@@ -410,14 +654,43 @@ export function CheckRidesPage() {
               </button>
             </div>
 
+            <div className="training-history-actions" style={{ marginBottom: "1rem", gap: "0.75rem", flexWrap: "wrap" }}>
+              <label className="settings-label" style={{ marginBottom: 0, minWidth: "16rem" }}>
+                <span>Nach Name filtern</span>
+                <input
+                  className="settings-input"
+                  type="text"
+                  value={nameFilter}
+                  onChange={(event) => setNameFilter(event.target.value)}
+                  placeholder="z.B. Zwift, Long Ride, Intervalle"
+                  disabled={importing}
+                />
+              </label>
+              <button className="secondary-button" type="button" disabled={importing || filteredIds.length === 0} onClick={() => toggleFilteredSelection(true)}>
+                Gefilterte aktivieren
+              </button>
+              <button className="secondary-button" type="button" disabled={importing || filteredIds.length === 0} onClick={() => toggleFilteredSelection(false)}>
+                Gefilterte deaktivieren
+              </button>
+              <span className="training-note" style={{ margin: 0 }}>
+                Treffer: {filteredRides.length} von {data?.rides.length ?? 0}
+              </span>
+            </div>
+
             <div className="table-scroll">
               <table className="rides-table">
                 <thead>
                   <tr>
                     <th>
                       <label className="checkbox-header">
-                        <input type="checkbox" checked={allSelected} disabled={importing} onChange={(event) => toggleAll(event.target.checked)} aria-label="Alle auswählen" />
-                        <span>Select all</span>
+                        <input
+                          type="checkbox"
+                          checked={allSelected}
+                          disabled={importing || filteredIds.length === 0}
+                          onChange={(event) => toggleAll(event.target.checked)}
+                          aria-label="Alle gefilterten auswählen"
+                        />
+                        <span>Alle gefilterten</span>
                       </label>
                     </th>
                     <th>Datum/Zeit Start</th>
@@ -433,8 +706,12 @@ export function CheckRidesPage() {
                     <tr>
                       <td colSpan={7}>{viewMode === "recent" ? "Keine fehlenden Rides gefunden." : "In diesem Zeitraum wurden keine noch nicht importierten Rides gefunden."}</td>
                     </tr>
+                  ) : !loading && !error && data && data.rides.length > 0 && filteredRides.length === 0 ? (
+                    <tr>
+                      <td colSpan={7}>Kein Ride passt zum aktuellen Namensfilter.</td>
+                    </tr>
                   ) : null}
-                  {data?.rides.map((ride) => (
+                  {filteredRides.map((ride) => (
                     <tr key={ride.activity_id}>
                       <td>
                         <input type="checkbox" checked={selectedIds.has(ride.activity_id)} disabled={importing} onChange={(event) => toggleSingle(ride.activity_id, event.target.checked)} aria-label={`Ride ${ride.name} auswählen`} />
@@ -501,10 +778,10 @@ export function CheckRidesPage() {
                 <circle className="progress-ring-value" cx="55" cy="55" r={ringRadius} strokeDasharray={ringCircumference} strokeDashoffset={ringOffset} />
               </svg>
               <div className="progress-ring-label">
-                {importCurrent}/{importTotal}
+                {importOverlayLabel}
               </div>
             </div>
-            <p className="import-overlay-title">Rides werden importiert</p>
+            <p className="import-overlay-title">{importPhase === "postprocessing" ? "Nachbereitung läuft" : "Rides werden eingelesen"}</p>
             <p className="import-overlay-subtitle">{importCurrentName ? `Aktuell: ${importCurrentName}` : "Bitte warten..."}</p>
           </div>
         </div>

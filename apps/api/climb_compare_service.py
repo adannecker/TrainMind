@@ -19,6 +19,8 @@ MAX_ROUTE_POINTS = 280
 MAX_PROFILE_POINTS = 320
 MAX_MATCH_CANDIDATES = 36
 DEFAULT_CHECK_RIDES_LIMIT = 0
+DEFAULT_FIND_RIDES_LIMIT = 300
+MAX_FIND_RIDES_LIMIT = 1000
 MIN_MOVING_SPEED_MPS = 0.6
 MIN_MOVING_DISTANCE_M = 1.0
 CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION = 3
@@ -491,6 +493,60 @@ def _find_match_on_activity(
     }
 
 
+def _find_point_pass_on_activity(
+    session,
+    *,
+    activity: Activity,
+    point: dict[str, float],
+    tolerance_m: float,
+) -> dict[str, Any] | None:
+    records = session.scalars(
+        select(ActivityRecord)
+        .where(ActivityRecord.activity_id == activity.id)
+        .where(ActivityRecord.latitude_deg.is_not(None))
+        .where(ActivityRecord.longitude_deg.is_not(None))
+        .order_by(ActivityRecord.record_index.asc())
+    ).all()
+    geo_records = _extract_geo_records(records)
+    if len(geo_records) < 2:
+        try:
+            from apps.api.activity_service import _hydrate_activity_streams_from_fit
+
+            _, _, hydrated_records = _hydrate_activity_streams_from_fit(session, activity, force_reparse=True)
+            geo_records = _extract_geo_records(hydrated_records)
+        except Exception:
+            session.rollback()
+            geo_records = _extract_geo_records(records)
+    if len(geo_records) < 2:
+        return None
+    candidates = _segment_candidates(geo_records, point, tolerance_m)
+    if not candidates:
+        return None
+    best_candidate = min(
+        candidates,
+        key=lambda item: (
+            float(item.get("distance_m") or math.inf),
+            float(item.get("route_distance_m") or math.inf),
+        ),
+    )
+    matched_record_index = int(best_candidate.get("matched_record_index") or 0)
+    matched_record_index = max(0, min(len(geo_records) - 1, matched_record_index))
+    matched_row = geo_records[matched_record_index]
+    route_distances_m = _build_route_distances_m(geo_records)
+    total_route_distance_m = float(route_distances_m[-1]) if route_distances_m else None
+    matched_route_distance_m = float(best_candidate.get("route_distance_m") or 0.0)
+    route_progress_pct = None
+    if total_route_distance_m is not None and total_route_distance_m > 0:
+        route_progress_pct = round((matched_route_distance_m / total_route_distance_m) * 100.0, 1)
+    return {
+        "distance_m": float(best_candidate.get("distance_m") or 0.0),
+        "route_distance_m": matched_route_distance_m,
+        "route_progress_pct": route_progress_pct,
+        "matched_point": _record_point(matched_row),
+        "matched_timestamp": matched_row.timestamp.isoformat() if matched_row.timestamp else None,
+    }
+
+
 def _find_representative_segment(
     session,
     *,
@@ -521,6 +577,121 @@ def _find_representative_segment(
         if best_result is None or float(result["score"]) < float(best_result["score"]):
             best_result = result
     return best_result
+
+
+def find_rides_on_map_point(user_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    point = _normalize_point(payload.get("point"), "point")
+    raw_tolerance_m = payload.get("tolerance_m", payload.get("search_tolerance_m", DEFAULT_SEARCH_TOLERANCE_M))
+    tolerance_m = DEFAULT_SEARCH_TOLERANCE_M if raw_tolerance_m is None else float(raw_tolerance_m)
+    if tolerance_m < MIN_SEARCH_TOLERANCE_M or tolerance_m > 500:
+        raise ValueError("tolerance_m must be between 15 and 500.")
+    raw_limit = payload.get("limit", DEFAULT_FIND_RIDES_LIMIT)
+    limit = DEFAULT_FIND_RIDES_LIMIT if raw_limit is None else int(raw_limit)
+    if limit < 1 or limit > MAX_FIND_RIDES_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_FIND_RIDES_LIMIT}.")
+
+    latitude_deg = float(point["latitude_deg"])
+    longitude_deg = float(point["longitude_deg"])
+    latitude_delta_deg = tolerance_m / 111320.0
+    meters_per_degree_lon = math.cos(math.radians(latitude_deg)) * 111320.0
+    longitude_delta_deg = tolerance_m / max(abs(meters_per_degree_lon), 1.0)
+
+    with SessionLocal() as session:
+        total_ride_total = int(
+            session.scalar(
+                select(func.count(Activity.id))
+                .where(Activity.user_id == user_id)
+                .where(Activity.started_at.is_not(None))
+            )
+            or 0
+        )
+        candidate_activity_ids = session.scalars(
+            select(Activity.id)
+            .join(ActivityRecord, ActivityRecord.activity_id == Activity.id)
+            .where(Activity.user_id == user_id)
+            .where(Activity.started_at.is_not(None))
+            .where(ActivityRecord.latitude_deg.is_not(None))
+            .where(ActivityRecord.longitude_deg.is_not(None))
+            .where(ActivityRecord.latitude_deg >= latitude_deg - latitude_delta_deg)
+            .where(ActivityRecord.latitude_deg <= latitude_deg + latitude_delta_deg)
+            .where(ActivityRecord.longitude_deg >= longitude_deg - longitude_delta_deg)
+            .where(ActivityRecord.longitude_deg <= longitude_deg + longitude_delta_deg)
+            .group_by(Activity.id, Activity.started_at)
+            .order_by(Activity.started_at.desc(), Activity.id.desc())
+        ).all()
+        candidate_total = len(candidate_activity_ids)
+        if not candidate_activity_ids:
+            return {
+                "point": point,
+                "tolerance_m": tolerance_m,
+                "limit": limit,
+                "total_ride_total": total_ride_total,
+                "candidate_total": 0,
+                "checked_total": 0,
+                "matched_total": 0,
+                "is_limited": False,
+                "message": "Keine Rides in der Nähe dieses Punkts gefunden.",
+                "matches": [],
+            }
+
+        candidate_activities = session.scalars(select(Activity).where(Activity.id.in_(candidate_activity_ids))).all()
+        activities_by_id = {int(activity.id): activity for activity in candidate_activities}
+        checked_total = 0
+        matches: list[dict[str, Any]] = []
+
+        for activity_id in candidate_activity_ids:
+            activity = activities_by_id.get(int(activity_id))
+            if activity is None:
+                continue
+            checked_total += 1
+            point_pass = _find_point_pass_on_activity(
+                session,
+                activity=activity,
+                point=point,
+                tolerance_m=tolerance_m,
+            )
+            if point_pass is None:
+                continue
+            matches.append(
+                {
+                    "activity_id": int(activity.id),
+                    "activity_name": _activity_label(activity),
+                    "started_at": activity.started_at.isoformat() if activity.started_at else None,
+                    "provider": activity.provider,
+                    "sport": activity.sport,
+                    "distance_m": _round_float(float(activity.distance_m), 1) if activity.distance_m is not None else None,
+                    "duration_s": int(activity.duration_s) if activity.duration_s is not None else None,
+                    "avg_power_w": _round_float(float(activity.avg_power_w), 1) if activity.avg_power_w is not None else None,
+                    "avg_hr_bpm": _round_float(float(activity.avg_hr_bpm), 1) if activity.avg_hr_bpm is not None else None,
+                    "closest_distance_m": _round_float(float(point_pass["distance_m"]), 1),
+                    "route_distance_m": _round_float(float(point_pass["route_distance_m"]), 1),
+                    "route_progress_pct": point_pass.get("route_progress_pct"),
+                    "matched_point": point_pass.get("matched_point"),
+                    "matched_timestamp": point_pass.get("matched_timestamp"),
+                }
+            )
+            if len(matches) >= limit:
+                break
+
+        is_limited = len(matches) >= limit and checked_total < candidate_total
+        if not matches:
+            message = "Keine Rides gehen innerhalb der Toleranz durch diesen Punkt."
+        elif is_limited:
+            message = f"{len(matches)} Treffer gefunden (auf {limit} begrenzt)."
+        else:
+            message = f"{len(matches)} Rides gehen durch den gesetzten Punkt."
+        return {
+            "point": point,
+            "tolerance_m": tolerance_m,
+            "limit": limit,
+            "total_ride_total": total_ride_total,
+            "candidate_total": candidate_total,
+            "checked_total": checked_total,
+            "matched_total": len(matches),
+            "is_limited": is_limited,
+            "message": message,
+            "matches": matches,
+        }
 
 
 def _find_representative_segment_with_preview_fallback(

@@ -5,7 +5,8 @@ import io
 import json
 import os
 import zipfile
-from datetime import date, datetime, time, timedelta
+import xml.etree.ElementTree as ET
+from datetime import date, datetime, time, timedelta, timezone
 from copy import deepcopy
 from typing import Any, Callable
 
@@ -438,6 +439,242 @@ def _unwrap_fit_payload(raw_bytes: bytes) -> bytes | None:
     return None
 
 
+def _looks_like_tcx_payload(raw_bytes: bytes) -> bool:
+    if not raw_bytes:
+        return False
+    head = raw_bytes[:4096].lower()
+    return b"<trainingcenterdatabase" in head or b"<trackpoint" in head
+
+
+def _unwrap_tcx_payload(raw_bytes: bytes) -> bytes | None:
+    if not raw_bytes:
+        return None
+
+    if _looks_like_tcx_payload(raw_bytes):
+        return raw_bytes
+
+    if raw_bytes[:2] == b"\x1f\x8b":
+        try:
+            inflated = gzip.decompress(raw_bytes)
+            if _looks_like_tcx_payload(inflated):
+                return inflated
+        except Exception:
+            return None
+
+    if raw_bytes[:2] == b"PK":
+        try:
+            with zipfile.ZipFile(io.BytesIO(raw_bytes)) as archive:
+                names = archive.namelist()
+                preferred_names = [name for name in names if name.lower().endswith(".tcx")]
+                if not preferred_names:
+                    preferred_names = [name for name in names if name.lower().endswith(".xml")]
+                if not preferred_names and names:
+                    preferred_names = [names[0]]
+                for target_name in preferred_names:
+                    extracted = archive.read(target_name)
+                    if _looks_like_tcx_payload(extracted):
+                        return extracted
+        except Exception:
+            return None
+
+    return None
+
+
+def _xml_local_name(tag: str) -> str:
+    if "}" in tag:
+        return tag.split("}", 1)[1]
+    return tag
+
+
+def _xml_direct_child(node: ET.Element | None, local_name: str) -> ET.Element | None:
+    if node is None:
+        return None
+    for child in list(node):
+        if _xml_local_name(str(child.tag)) == local_name:
+            return child
+    return None
+
+
+def _xml_direct_text(node: ET.Element | None, local_name: str) -> str | None:
+    child = _xml_direct_child(node, local_name)
+    if child is None or child.text is None:
+        return None
+    value = child.text.strip()
+    return value or None
+
+
+def _xml_desc_text(node: ET.Element | None, local_name: str) -> str | None:
+    if node is None:
+        return None
+    for child in node.iter():
+        if child is node:
+            continue
+        if _xml_local_name(str(child.tag)) != local_name:
+            continue
+        if child.text is None:
+            continue
+        value = child.text.strip()
+        if value:
+            return value
+    return None
+
+
+def _parse_tcx_datetime(value: str | None) -> datetime | None:
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        else:
+            parsed = datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
+def _parse_tcx_payload(
+    activity: Activity,
+    tcx_bytes: bytes,
+) -> tuple[list[ActivitySession], list[ActivityLap], list[ActivityRecord]]:
+    root = ET.fromstring(tcx_bytes)
+
+    activity_nodes = [node for node in root.iter() if _xml_local_name(str(node.tag)) == "Activity"]
+    activity_node = activity_nodes[0] if activity_nodes else None
+    activity_start = _parse_tcx_datetime(_xml_direct_text(activity_node, "Id"))
+
+    parsed_laps: list[ActivityLap] = []
+    for lap_index, lap_node in enumerate([node for node in root.iter() if _xml_local_name(str(node.tag)) == "Lap"], start=1):
+        lap_start_time = _parse_tcx_datetime(lap_node.attrib.get("StartTime")) or _parse_tcx_datetime(_xml_direct_text(lap_node, "StartTime"))
+        lap_elapsed_s = _fit_float(_xml_direct_text(lap_node, "TotalTimeSeconds"))
+        lap_distance_m = _fit_float(_xml_direct_text(lap_node, "DistanceMeters"))
+        lap_avg_speed_mps = (lap_distance_m / lap_elapsed_s) if lap_distance_m is not None and lap_elapsed_s and lap_elapsed_s > 0 else None
+        avg_hr_node = _xml_direct_child(lap_node, "AverageHeartRateBpm")
+        max_hr_node = _xml_direct_child(lap_node, "MaximumHeartRateBpm")
+        extensions_node = _xml_direct_child(lap_node, "Extensions")
+        parsed_laps.append(
+            ActivityLap(
+                activity_id=activity.id,
+                lap_index=lap_index,
+                start_time=lap_start_time,
+                total_elapsed_time_s=lap_elapsed_s,
+                total_timer_time_s=lap_elapsed_s,
+                total_distance_m=lap_distance_m,
+                avg_speed_mps=lap_avg_speed_mps,
+                avg_power_w=_fit_float(_xml_desc_text(extensions_node, "AvgWatts")),
+                max_power_w=_fit_float(_xml_desc_text(extensions_node, "MaxWatts")),
+                avg_hr_bpm=_fit_float(_xml_desc_text(avg_hr_node, "Value")),
+                max_hr_bpm=_fit_float(_xml_desc_text(max_hr_node, "Value")),
+            )
+        )
+
+    parsed_records: list[ActivityRecord] = []
+    record_start = activity.started_at or activity_start
+    for trackpoint in [node for node in root.iter() if _xml_local_name(str(node.tag)) == "Trackpoint"]:
+        record_time = _parse_tcx_datetime(_xml_direct_text(trackpoint, "Time"))
+        if record_start is None and record_time is not None:
+            record_start = record_time
+        elapsed_s = None
+        if record_time is not None and record_start is not None:
+            elapsed_s = float((record_time - record_start).total_seconds())
+        position_node = _xml_direct_child(trackpoint, "Position")
+        latitude_deg = _fit_float(_xml_direct_text(position_node, "LatitudeDegrees"))
+        longitude_deg = _fit_float(_xml_direct_text(position_node, "LongitudeDegrees"))
+        altitude_m = _fit_float(_xml_direct_text(trackpoint, "AltitudeMeters"))
+        distance_m = _fit_float(_xml_direct_text(trackpoint, "DistanceMeters"))
+        heart_rate_node = _xml_direct_child(trackpoint, "HeartRateBpm")
+        heart_rate_bpm = _fit_int(_xml_desc_text(heart_rate_node, "Value"))
+        cadence_rpm = _fit_int(_xml_direct_text(trackpoint, "Cadence") or _xml_direct_text(trackpoint, "RunCadence"))
+        extensions_node = _xml_direct_child(trackpoint, "Extensions")
+        speed_mps = _fit_float(_xml_desc_text(extensions_node, "Speed"))
+        power_w = _fit_int(_xml_desc_text(extensions_node, "Watts"))
+        temperature_c = _fit_float(_xml_desc_text(extensions_node, "Temperature"))
+
+        if (
+            record_time is None
+            and elapsed_s is None
+            and distance_m is None
+            and latitude_deg is None
+            and longitude_deg is None
+            and altitude_m is None
+            and speed_mps is None
+            and heart_rate_bpm is None
+            and cadence_rpm is None
+            and power_w is None
+            and temperature_c is None
+        ):
+            continue
+
+        parsed_records.append(
+            ActivityRecord(
+                activity_id=activity.id,
+                record_index=len(parsed_records),
+                timestamp=record_time,
+                elapsed_s=elapsed_s,
+                distance_m=distance_m,
+                latitude_deg=latitude_deg,
+                longitude_deg=longitude_deg,
+                altitude_m=altitude_m,
+                speed_mps=speed_mps,
+                heart_rate_bpm=heart_rate_bpm,
+                cadence_rpm=cadence_rpm,
+                power_w=power_w,
+                temperature_c=temperature_c,
+            )
+        )
+
+    parsed_sessions: list[ActivitySession] = []
+    if parsed_records or parsed_laps:
+        session_start_time = activity.started_at
+        if session_start_time is None:
+            session_start_time = activity_start
+        if session_start_time is None and parsed_laps:
+            session_start_time = parsed_laps[0].start_time
+        if session_start_time is None and parsed_records:
+            session_start_time = parsed_records[0].timestamp
+
+        total_elapsed_time_s = None
+        lap_elapsed_values = [float(lap.total_elapsed_time_s) for lap in parsed_laps if lap.total_elapsed_time_s is not None]
+        if lap_elapsed_values:
+            total_elapsed_time_s = sum(lap_elapsed_values)
+        elif parsed_records and parsed_records[-1].elapsed_s is not None:
+            total_elapsed_time_s = float(parsed_records[-1].elapsed_s)
+
+        total_distance_m = next((float(row.distance_m) for row in reversed(parsed_records) if row.distance_m is not None), None)
+        if total_distance_m is None:
+            lap_distance_values = [float(lap.total_distance_m) for lap in parsed_laps if lap.total_distance_m is not None]
+            if lap_distance_values:
+                total_distance_m = sum(lap_distance_values)
+
+        avg_speed_mps = (total_distance_m / total_elapsed_time_s) if total_distance_m is not None and total_elapsed_time_s and total_elapsed_time_s > 0 else None
+        speed_values = [float(row.speed_mps) for row in parsed_records if row.speed_mps is not None]
+        power_values = [float(row.power_w) for row in parsed_records if row.power_w is not None]
+        hr_values = [float(row.heart_rate_bpm) for row in parsed_records if row.heart_rate_bpm is not None]
+
+        parsed_sessions.append(
+            ActivitySession(
+                activity_id=activity.id,
+                session_index=0,
+                start_time=session_start_time,
+                total_elapsed_time_s=total_elapsed_time_s,
+                total_timer_time_s=total_elapsed_time_s,
+                total_distance_m=total_distance_m,
+                avg_speed_mps=avg_speed_mps,
+                max_speed_mps=max(speed_values) if speed_values else None,
+                avg_power_w=(sum(power_values) / len(power_values)) if power_values else None,
+                max_power_w=max(power_values) if power_values else None,
+                avg_hr_bpm=(sum(hr_values) / len(hr_values)) if hr_values else None,
+                max_hr_bpm=max(hr_values) if hr_values else None,
+            )
+        )
+
+    return parsed_sessions, parsed_laps, parsed_records
+
+
 def _parse_json_payload(raw_json: str | None) -> dict[str, Any]:
     if not raw_json:
         return {}
@@ -528,7 +765,12 @@ def _derive_activity_environment(
     }
 
 
-def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[list[ActivitySession], list[ActivityLap], list[ActivityRecord]]:
+def _hydrate_activity_streams_from_fit(
+    session,
+    activity: Activity,
+    *,
+    force_reparse: bool = False,
+) -> tuple[list[ActivitySession], list[ActivityLap], list[ActivityRecord]]:
     sessions = session.scalars(
         select(ActivitySession).where(ActivitySession.activity_id == activity.id).order_by(ActivitySession.session_index.asc())
     ).all()
@@ -539,7 +781,7 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
         select(ActivityRecord).where(ActivityRecord.activity_id == activity.id).order_by(ActivityRecord.record_index.asc())
     ).all()
 
-    if sessions and laps and records:
+    if not force_reparse and sessions and laps and records:
         has_usable_elapsed = any(record.elapsed_s is not None and float(record.elapsed_s) >= 0 for record in records)
         if has_usable_elapsed:
             return sessions, laps, records
@@ -550,80 +792,85 @@ def _hydrate_activity_streams_from_fit(session, activity: Activity) -> tuple[lis
     if payload is None or not payload.content:
         return sessions, laps, records
 
-    fit_bytes = _unwrap_fit_payload(payload.content)
-    if not fit_bytes:
-        return sessions, laps, records
-
-    try:
-        fit = ParsedFitFile(io.BytesIO(fit_bytes))
-    except Exception:
-        return sessions, laps, records
-    start_time = activity.started_at
-
     parsed_sessions: list[ActivitySession] = []
     parsed_laps: list[ActivityLap] = []
     parsed_records: list[ActivityRecord] = []
+    fit_bytes = _unwrap_fit_payload(payload.content)
+    if fit_bytes:
+        try:
+            fit = ParsedFitFile(io.BytesIO(fit_bytes))
+        except Exception:
+            return sessions, laps, records
+        start_time = activity.started_at
 
-    for index, message in enumerate(fit.get_messages("session")):
-        parsed_sessions.append(
-            ActivitySession(
-                activity_id=activity.id,
-                session_index=index,
-                start_time=_fit_datetime(message.get_value("start_time")) or _fit_datetime(message.get_value("timestamp")) or start_time,
-                total_elapsed_time_s=_fit_float(message.get_value("total_elapsed_time")),
-                total_timer_time_s=_fit_float(message.get_value("total_timer_time")),
-                total_distance_m=_fit_float(message.get_value("total_distance")),
-                avg_speed_mps=_coalesce_fit_float(message, "avg_speed", "enhanced_avg_speed", "average_speed"),
-                max_speed_mps=_coalesce_fit_float(message, "max_speed", "enhanced_max_speed", "maximum_speed"),
-                avg_power_w=_coalesce_fit_float(message, "avg_power", "total_average_power", "average_power"),
-                max_power_w=_fit_float(message.get_value("max_power")),
-                avg_hr_bpm=_coalesce_fit_float(message, "avg_heart_rate", "total_average_heart_rate", "total_average_hr", "average_heart_rate"),
-                max_hr_bpm=_fit_float(message.get_value("max_heart_rate")),
+        for index, message in enumerate(fit.get_messages("session")):
+            parsed_sessions.append(
+                ActivitySession(
+                    activity_id=activity.id,
+                    session_index=index,
+                    start_time=_fit_datetime(message.get_value("start_time")) or _fit_datetime(message.get_value("timestamp")) or start_time,
+                    total_elapsed_time_s=_fit_float(message.get_value("total_elapsed_time")),
+                    total_timer_time_s=_fit_float(message.get_value("total_timer_time")),
+                    total_distance_m=_fit_float(message.get_value("total_distance")),
+                    avg_speed_mps=_coalesce_fit_float(message, "avg_speed", "enhanced_avg_speed", "average_speed"),
+                    max_speed_mps=_coalesce_fit_float(message, "max_speed", "enhanced_max_speed", "maximum_speed"),
+                    avg_power_w=_coalesce_fit_float(message, "avg_power", "total_average_power", "average_power"),
+                    max_power_w=_fit_float(message.get_value("max_power")),
+                    avg_hr_bpm=_coalesce_fit_float(message, "avg_heart_rate", "total_average_heart_rate", "total_average_hr", "average_heart_rate"),
+                    max_hr_bpm=_fit_float(message.get_value("max_heart_rate")),
+                )
             )
-        )
 
-    for index, message in enumerate(fit.get_messages("lap"), start=1):
-        parsed_laps.append(
-            ActivityLap(
-                activity_id=activity.id,
-                lap_index=index,
-                start_time=_fit_datetime(message.get_value("start_time")) or _fit_datetime(message.get_value("timestamp")) or start_time,
-                total_elapsed_time_s=_fit_float(message.get_value("total_elapsed_time")),
-                total_timer_time_s=_fit_float(message.get_value("total_timer_time")),
-                total_distance_m=_fit_float(message.get_value("total_distance")),
-                avg_speed_mps=_coalesce_fit_float(message, "avg_speed", "enhanced_avg_speed", "average_speed"),
-                avg_power_w=_coalesce_fit_float(message, "avg_power", "total_average_power", "average_power"),
-                max_power_w=_fit_float(message.get_value("max_power")),
-                avg_hr_bpm=_coalesce_fit_float(message, "avg_heart_rate", "total_average_heart_rate", "total_average_hr", "average_heart_rate"),
-                max_hr_bpm=_fit_float(message.get_value("max_heart_rate")),
+        for index, message in enumerate(fit.get_messages("lap"), start=1):
+            parsed_laps.append(
+                ActivityLap(
+                    activity_id=activity.id,
+                    lap_index=index,
+                    start_time=_fit_datetime(message.get_value("start_time")) or _fit_datetime(message.get_value("timestamp")) or start_time,
+                    total_elapsed_time_s=_fit_float(message.get_value("total_elapsed_time")),
+                    total_timer_time_s=_fit_float(message.get_value("total_timer_time")),
+                    total_distance_m=_fit_float(message.get_value("total_distance")),
+                    avg_speed_mps=_coalesce_fit_float(message, "avg_speed", "enhanced_avg_speed", "average_speed"),
+                    avg_power_w=_coalesce_fit_float(message, "avg_power", "total_average_power", "average_power"),
+                    max_power_w=_fit_float(message.get_value("max_power")),
+                    avg_hr_bpm=_coalesce_fit_float(message, "avg_heart_rate", "total_average_heart_rate", "total_average_hr", "average_heart_rate"),
+                    max_hr_bpm=_fit_float(message.get_value("max_heart_rate")),
+                )
             )
-        )
 
-    record_start = parsed_sessions[0].start_time if parsed_sessions and parsed_sessions[0].start_time is not None else None
-    for index, message in enumerate(fit.get_messages("record")):
-        record_time = _fit_datetime(message.get_value("timestamp"))
-        if record_start is None and record_time is not None:
-            record_start = record_time
-        elapsed_s = None
-        if record_time is not None and record_start is not None:
-            elapsed_s = float((record_time - record_start).total_seconds())
-        parsed_records.append(
-            ActivityRecord(
-                activity_id=activity.id,
-                record_index=index,
-                timestamp=record_time,
-                elapsed_s=elapsed_s,
-                distance_m=_fit_float(message.get_value("distance")),
-                latitude_deg=_fit_coordinate_to_degrees(message.get_value("position_lat")),
-                longitude_deg=_fit_coordinate_to_degrees(message.get_value("position_long")),
-                altitude_m=_fit_float(message.get_value("enhanced_altitude") or message.get_value("altitude")),
-                speed_mps=_fit_float(message.get_value("enhanced_speed") or message.get_value("speed")),
-                heart_rate_bpm=_fit_int(message.get_value("heart_rate")),
-                cadence_rpm=_fit_int(message.get_value("cadence")),
-                power_w=_fit_int(message.get_value("power")),
-                temperature_c=_fit_float(message.get_value("temperature")),
+        record_start = parsed_sessions[0].start_time if parsed_sessions and parsed_sessions[0].start_time is not None else None
+        for index, message in enumerate(fit.get_messages("record")):
+            record_time = _fit_datetime(message.get_value("timestamp"))
+            if record_start is None and record_time is not None:
+                record_start = record_time
+            elapsed_s = None
+            if record_time is not None and record_start is not None:
+                elapsed_s = float((record_time - record_start).total_seconds())
+            parsed_records.append(
+                ActivityRecord(
+                    activity_id=activity.id,
+                    record_index=index,
+                    timestamp=record_time,
+                    elapsed_s=elapsed_s,
+                    distance_m=_fit_float(message.get_value("distance")),
+                    latitude_deg=_fit_coordinate_to_degrees(message.get_value("position_lat")),
+                    longitude_deg=_fit_coordinate_to_degrees(message.get_value("position_long")),
+                    altitude_m=_fit_float(message.get_value("enhanced_altitude") or message.get_value("altitude")),
+                    speed_mps=_fit_float(message.get_value("enhanced_speed") or message.get_value("speed")),
+                    heart_rate_bpm=_fit_int(message.get_value("heart_rate")),
+                    cadence_rpm=_fit_int(message.get_value("cadence")),
+                    power_w=_fit_int(message.get_value("power")),
+                    temperature_c=_fit_float(message.get_value("temperature")),
+                )
             )
-        )
+    else:
+        tcx_bytes = _unwrap_tcx_payload(payload.content)
+        if not tcx_bytes:
+            return sessions, laps, records
+        try:
+            parsed_sessions, parsed_laps, parsed_records = _parse_tcx_payload(activity, tcx_bytes)
+        except Exception:
+            return sessions, laps, records
 
     if parsed_sessions or parsed_laps or parsed_records:
         try:
