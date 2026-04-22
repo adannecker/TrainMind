@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { useRef } from "react";
 import { apiFetch } from "../api";
 import { API_BASE_URL, MAP_MAX_ZOOM, MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from "../config";
 import type { LatLng, LatLngBoundsExpression, LatLngTuple, Map as LeafletMap } from "leaflet";
@@ -283,6 +284,7 @@ type ChartPoint = {
   value: number;
 };
 type MapMetricKey = "power" | "hr" | "cadence" | "speed";
+type RouteStageMode = "map" | "flyover";
 type RoutePoint = {
   elapsed: number;
   distanceM: number;
@@ -294,6 +296,15 @@ type RoutePoint = {
   speedKmh: number | null;
   cadenceRpm: number | null;
   gradePct: number | null;
+};
+type FlyoverProjectedPoint = {
+  elapsed: number;
+  distanceM: number;
+  altitudeM: number | null;
+  x: number;
+  y: number;
+  shadowX: number;
+  shadowY: number;
 };
 
 const ACHIEVEMENT_CATEGORY_ORDER = ["hf", "records", "distance", "weekly", "zones", "moments"] as const;
@@ -1634,6 +1645,193 @@ function extractTrackPoints(points: RoutePoint[]): LatLngTuple[] {
     .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180);
 }
 
+function findNearestPointIndexByElapsed<T extends { elapsed: number }>(points: T[], elapsed: number | null): number {
+  if (!points.length || elapsed == null) return 0;
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+
+  points.forEach((point, index) => {
+    const distance = Math.abs(point.elapsed - elapsed);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+
+  return bestIndex;
+}
+
+function buildPlaybackDurationMs(pointCount: number): number {
+  return clamp(pointCount * 22, 14000, 42000);
+}
+
+function buildPolylinePointString(points: Array<{ x: number; y: number }>): string {
+  return points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+}
+
+function buildFlyoverProjection(points: RoutePoint[], width = 940, height = 560): FlyoverProjectedPoint[] {
+  const geoPoints = points.filter(
+    (point): point is RoutePoint & { latitudeDeg: number; longitudeDeg: number } =>
+      point.latitudeDeg != null && Number.isFinite(point.latitudeDeg) && point.longitudeDeg != null && Number.isFinite(point.longitudeDeg),
+  );
+  if (geoPoints.length < 2) return [];
+
+  const averageLatitude = geoPoints.reduce((sum, point) => sum + point.latitudeDeg, 0) / geoPoints.length;
+  const averageLongitude = geoPoints.reduce((sum, point) => sum + point.longitudeDeg, 0) / geoPoints.length;
+  const latitudeMeters = 111_320;
+  const longitudeMeters = Math.cos((averageLatitude * Math.PI) / 180) * 111_320;
+  const planarPoints = geoPoints.map((point) => ({
+    point,
+    rawX: (point.longitudeDeg - averageLongitude) * longitudeMeters,
+    rawY: (point.latitudeDeg - averageLatitude) * latitudeMeters,
+  }));
+  const startPoint = planarPoints[0];
+  const endPoint = planarPoints[planarPoints.length - 1];
+  const heading = Math.atan2(endPoint.rawY - startPoint.rawY, endPoint.rawX - startPoint.rawX);
+  const rotationCos = Math.cos(-heading);
+  const rotationSin = Math.sin(-heading);
+  const rotatedPoints = planarPoints.map((item) => ({
+    ...item,
+    axisX: item.rawX * rotationCos - item.rawY * rotationSin,
+    axisY: item.rawX * rotationSin + item.rawY * rotationCos,
+  }));
+  const altitudeValues = rotatedPoints
+    .map((item) => item.point.altitudeM)
+    .filter((value): value is number => value != null && Number.isFinite(value));
+  const minAltitude = altitudeValues.length ? Math.min(...altitudeValues) : 0;
+  const maxAltitude = altitudeValues.length ? Math.max(...altitudeValues) : minAltitude;
+  const altitudeSpan = Math.max(1, maxAltitude - minAltitude);
+  const axisSpanX = Math.max(...rotatedPoints.map((item) => item.axisX)) - Math.min(...rotatedPoints.map((item) => item.axisX));
+  const axisSpanY = Math.max(...rotatedPoints.map((item) => item.axisY)) - Math.min(...rotatedPoints.map((item) => item.axisY));
+  const groundSpan = Math.max(1, axisSpanX, axisSpanY);
+  const altitudeScale = clamp((groundSpan / Math.max(altitudeSpan, 80)) * 0.22, 0.45, 3.4);
+
+  const projectedPoints = rotatedPoints.map((item) => {
+    const groundX = item.axisX - item.axisY * 0.68;
+    const groundY = item.axisY * 0.34;
+    const elevatedY = groundY - ((item.point.altitudeM ?? minAltitude) - minAltitude) * altitudeScale;
+    return {
+      elapsed: item.point.elapsed,
+      distanceM: item.point.distanceM,
+      altitudeM: item.point.altitudeM,
+      rawX: groundX,
+      rawY: elevatedY,
+      rawShadowX: groundX,
+      rawShadowY: groundY + groundSpan * 0.08,
+    };
+  });
+
+  const minX = Math.min(...projectedPoints.map((item) => Math.min(item.rawX, item.rawShadowX)));
+  const maxX = Math.max(...projectedPoints.map((item) => Math.max(item.rawX, item.rawShadowX)));
+  const minY = Math.min(...projectedPoints.map((item) => item.rawY));
+  const maxY = Math.max(...projectedPoints.map((item) => Math.max(item.rawY, item.rawShadowY)));
+  const horizontalPadding = 42;
+  const verticalPadding = 36;
+  const scale = Math.min(
+    (width - horizontalPadding * 2) / Math.max(1, maxX - minX),
+    (height - verticalPadding * 2) / Math.max(1, maxY - minY),
+  );
+
+  return projectedPoints.map((item) => ({
+    elapsed: item.elapsed,
+    distanceM: item.distanceM,
+    altitudeM: item.altitudeM,
+    x: horizontalPadding + (item.rawX - minX) * scale,
+    y: verticalPadding + (item.rawY - minY) * scale,
+    shadowX: horizontalPadding + (item.rawShadowX - minX) * scale,
+    shadowY: verticalPadding + (item.rawShadowY - minY) * scale,
+  }));
+}
+
+function ActivityRouteFlyover({
+  routePoints,
+  hoverSecond,
+  selectedRange,
+}: {
+  routePoints: RoutePoint[];
+  hoverSecond: number | null;
+  selectedRange: DistanceRange | null;
+}) {
+  const projectedPoints = useMemo(() => buildFlyoverProjection(routePoints), [routePoints]);
+  const activePoint = useMemo(() => findNearestPointByElapsed(projectedPoints, hoverSecond), [hoverSecond, projectedPoints]);
+  const selectedProjectedPoints = useMemo(
+    () =>
+      selectedRange == null
+        ? []
+        : projectedPoints.filter((point) => point.distanceM >= selectedRange.start && point.distanceM <= selectedRange.end),
+    [projectedPoints, selectedRange],
+  );
+  const travelledProjectedPoints = useMemo(
+    () => (activePoint == null ? [] : projectedPoints.filter((point) => point.elapsed <= activePoint.elapsed)),
+    [activePoint, projectedPoints],
+  );
+
+  if (projectedPoints.length < 2) {
+    return (
+      <div className="activity-flyover-stage-empty">
+        Fuer die 3D-Ansicht brauchen wir GPS-Punkte. Sobald der Track Positionsdaten enthaelt, erscheint hier automatisch der Flyover.
+      </div>
+    );
+  }
+
+  const startPoint = projectedPoints[0] ?? null;
+  const endPoint = projectedPoints[projectedPoints.length - 1] ?? null;
+  const routeLine = buildPolylinePointString(projectedPoints.map((point) => ({ x: point.x, y: point.y })));
+  const shadowLine = buildPolylinePointString(projectedPoints.map((point) => ({ x: point.shadowX, y: point.shadowY })));
+  const selectedLine = buildPolylinePointString(selectedProjectedPoints.map((point) => ({ x: point.x, y: point.y })));
+  const travelledLine = buildPolylinePointString(travelledProjectedPoints.map((point) => ({ x: point.x, y: point.y })));
+
+  return (
+    <div className="activity-flyover-stage">
+      <svg className="activity-flyover-stage-svg" viewBox="0 0 940 560" aria-label="3D Flyover der Strecke">
+        <defs>
+          <linearGradient id="activityFlyoverSky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#f8fcfb" />
+            <stop offset="58%" stopColor="#edf7f3" />
+            <stop offset="100%" stopColor="#dfeee8" />
+          </linearGradient>
+          <linearGradient id="activityFlyoverGround" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.94" />
+            <stop offset="100%" stopColor="#eef7f3" stopOpacity="0.72" />
+          </linearGradient>
+          <filter id="activityFlyoverShadowBlur">
+            <feGaussianBlur stdDeviation="5" />
+          </filter>
+        </defs>
+
+        <rect x="0" y="0" width="940" height="560" rx="24" fill="url(#activityFlyoverSky)" />
+        <rect x="18" y="20" width="904" height="520" rx="22" fill="url(#activityFlyoverGround)" opacity="0.82" />
+        <ellipse cx="470" cy="470" rx="320" ry="74" fill="#d7e9e1" opacity="0.5" />
+        {Array.from({ length: 6 }).map((_, index) => {
+          const y = 102 + index * 58;
+          return <line key={`flyover-grid-row-${index}`} x1="58" y1={y} x2="882" y2={y} stroke="#d7e7e1" strokeWidth="1" opacity="0.55" />;
+        })}
+        {Array.from({ length: 7 }).map((_, index) => {
+          const x = 100 + index * 110;
+          return <line key={`flyover-grid-col-${index}`} x1={x} y1="72" x2={x} y2="502" stroke="#e6f0ec" strokeWidth="1" opacity="0.5" />;
+        })}
+
+        <polyline points={shadowLine} fill="none" stroke="#9bb6ad" strokeWidth="18" strokeOpacity="0.18" strokeLinecap="round" strokeLinejoin="round" filter="url(#activityFlyoverShadowBlur)" />
+        <polyline points={shadowLine} fill="none" stroke="#aec6be" strokeWidth="8" strokeOpacity="0.42" strokeLinecap="round" strokeLinejoin="round" />
+        <polyline points={routeLine} fill="none" stroke="#1f8b6f" strokeWidth="8" strokeOpacity="0.92" strokeLinecap="round" strokeLinejoin="round" />
+        {selectedProjectedPoints.length >= 2 ? <polyline points={selectedLine} fill="none" stroke="#f5c086" strokeWidth="10" strokeOpacity="0.62" strokeLinecap="round" strokeLinejoin="round" /> : null}
+        {travelledProjectedPoints.length >= 2 ? <polyline points={travelledLine} fill="none" stroke="#ef8d33" strokeWidth="7" strokeOpacity="0.94" strokeLinecap="round" strokeLinejoin="round" /> : null}
+
+        {startPoint ? <circle cx={startPoint.x} cy={startPoint.y} r="8" fill="#1f8b6f" stroke="#ffffff" strokeWidth="3" /> : null}
+        {endPoint ? <circle cx={endPoint.x} cy={endPoint.y} r="8" fill="#ef8d33" stroke="#ffffff" strokeWidth="3" /> : null}
+        {activePoint ? (
+          <>
+            <line x1={activePoint.shadowX} y1={activePoint.shadowY} x2={activePoint.x} y2={activePoint.y} stroke="#406057" strokeWidth="2.5" strokeDasharray="5 5" />
+            <circle cx={activePoint.shadowX} cy={activePoint.shadowY} r="7" fill="#dfe9e5" stroke="#8ea8a0" strokeWidth="2" />
+            <circle cx={activePoint.x} cy={activePoint.y} r="10" fill="#ffffff" stroke="#163d35" strokeWidth="3" />
+          </>
+        ) : null}
+      </svg>
+      <div className="activity-flyover-caption">3D Flyover aus GPS und Hoehenwerten</div>
+    </div>
+  );
+}
+
 function ActivityMapViewport({ bounds }: { bounds: LatLngBoundsExpression }) {
   const map = useMap();
 
@@ -1980,11 +2178,24 @@ function ActivityTrackMap({
   onDistanceSelectionEnd: () => void;
   onDistanceSelectionReset: () => void;
 }) {
+  const [stageMode, setStageMode] = useState<RouteStageMode>("map");
+  const [isPlaying, setIsPlaying] = useState(false);
+  const hoverSecondRef = useRef<number | null>(hoverSecond);
+
+  useEffect(() => {
+    hoverSecondRef.current = hoverSecond;
+  }, [hoverSecond]);
+
+  useEffect(() => {
+    setIsPlaying(false);
+  }, [distanceRange, routePoints]);
+
   const trackPoints = useMemo(() => extractTrackPoints(routePoints), [routePoints]);
   const bounds = useMemo<LatLngBoundsExpression>(() => trackPoints, [trackPoints]);
   const startPoint = trackPoints[0] ?? null;
   const endPoint = trackPoints[trackPoints.length - 1] ?? null;
   const activeRoutePoint = useMemo(() => findNearestPointByElapsed(routePoints, hoverSecond), [hoverSecond, routePoints]);
+  const displayRoutePoint = activeRoutePoint ?? routePoints[0] ?? null;
   const activeMapPoint =
     activeRoutePoint && activeRoutePoint.latitudeDeg != null && activeRoutePoint.longitudeDeg != null
       ? ([activeRoutePoint.latitudeDeg, activeRoutePoint.longitudeDeg] as LatLngTuple)
@@ -1993,6 +2204,14 @@ function ActivityTrackMap({
   const elevationPoints = useMemo(() => buildDistanceSeries(routePoints, (point) => point.altitudeM), [routePoints]);
   const selectedMetricRoutePoints = useMemo(() => filterPointsByDistanceRange(routePoints, distanceRange), [distanceRange, routePoints]);
   const metricPoints = useMemo(() => buildDistanceSeries(selectedMetricRoutePoints, selectedMetric.pick), [selectedMetricRoutePoints, selectedMetric]);
+  const playbackPoints = useMemo(() => {
+    const rangedPoints = distanceRange != null ? filterPointsByDistanceRange(routePoints, distanceRange) : routePoints;
+    return rangedPoints.length >= 2 ? rangedPoints : routePoints;
+  }, [distanceRange, routePoints]);
+  const playbackStartPoint = playbackPoints[0] ?? routePoints[0] ?? null;
+  const playbackEndPoint = playbackPoints[playbackPoints.length - 1] ?? routePoints[routePoints.length - 1] ?? null;
+  const playbackIndex = useMemo(() => findNearestPointIndexByElapsed(playbackPoints, hoverSecond), [hoverSecond, playbackPoints]);
+  const playbackProgress = playbackPoints.length > 1 ? playbackIndex / (playbackPoints.length - 1) : 0;
   const previewRange =
     dragSelection != null
       ? {
@@ -2012,8 +2231,75 @@ function ActivityTrackMap({
       ),
     );
   }, [previewRange, routePoints]);
+  const travelledTrackPoints = useMemo(() => {
+    if (!displayRoutePoint) return [];
+    return extractTrackPoints(
+      routePoints.filter(
+        (point) =>
+          point.elapsed <= displayRoutePoint.elapsed &&
+          point.latitudeDeg != null &&
+          point.longitudeDeg != null,
+      ),
+    );
+  }, [displayRoutePoint, routePoints]);
   const distanceRangeLabel =
     distanceRange != null ? `${formatAxisDistance(distanceRange.start)} bis ${formatAxisDistance(distanceRange.end)}` : "kein Ausschnitt gesetzt";
+  const replayLabel = distanceRange != null ? "Ausschnitt" : "Gesamte Fahrt";
+
+  useEffect(() => {
+    if (!isPlaying || playbackPoints.length < 2) return;
+
+    const firstElapsed = playbackPoints[0].elapsed;
+    const lastElapsed = playbackPoints[playbackPoints.length - 1].elapsed;
+    const currentHover = hoverSecondRef.current;
+    const startIndex =
+      currentHover != null && currentHover >= firstElapsed && currentHover < lastElapsed
+        ? findNearestPointIndexByElapsed(playbackPoints, currentHover)
+        : 0;
+    const maxIndex = playbackPoints.length - 1;
+    const remainingRatio = (maxIndex - startIndex) / Math.max(1, maxIndex);
+    const durationMs = Math.max(1, buildPlaybackDurationMs(playbackPoints.length) * remainingRatio);
+    let lastRenderedIndex = -1;
+    let frame = 0;
+    const startedAt = window.performance.now();
+
+    const tick = (now: number) => {
+      const progress = Math.min(1, (now - startedAt) / durationMs);
+      const nextIndex = Math.min(maxIndex, startIndex + Math.round((maxIndex - startIndex) * progress));
+      if (nextIndex !== lastRenderedIndex) {
+        lastRenderedIndex = nextIndex;
+        onHoverChange(playbackPoints[nextIndex]?.elapsed ?? null);
+      }
+      if (progress < 1) {
+        frame = window.requestAnimationFrame(tick);
+        return;
+      }
+      setIsPlaying(false);
+    };
+
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isPlaying, onHoverChange, playbackPoints]);
+
+  function handleTogglePlayback() {
+    if (playbackPoints.length < 2) return;
+    if (isPlaying) {
+      setIsPlaying(false);
+      return;
+    }
+    const firstElapsed = playbackPoints[0].elapsed;
+    const lastElapsed = playbackPoints[playbackPoints.length - 1].elapsed;
+    const currentHover = hoverSecondRef.current;
+    if (currentHover == null || currentHover < firstElapsed || currentHover >= lastElapsed) {
+      onHoverChange(firstElapsed);
+    }
+    setIsPlaying(true);
+  }
+
+  function handleResetPlayback() {
+    setIsPlaying(false);
+    onHoverChange(playbackStartPoint?.elapsed ?? null);
+  }
 
   if (trackPoints.length < 2) {
     return (
@@ -2034,42 +2320,109 @@ function ActivityTrackMap({
       <div className="card">
         <div className="section-title-row">
           <h2>Karte</h2>
-          <span className="training-note">OpenStreetMap | {trackPoints.length} GPS-Punkte</span>
+          <span className="training-note">{stageMode === "map" ? "OpenStreetMap" : "3D Flyover"} | {trackPoints.length} GPS-Punkte</span>
         </div>
         <div className="activity-map-shell">
-          <MapContainer className="activity-leaflet-map" center={trackPoints[0]} zoom={13} scrollWheelZoom>
-            <TileLayer attribution={MAP_TILE_ATTRIBUTION} url={MAP_TILE_URL} maxZoom={MAP_MAX_ZOOM} />
-            <Polyline positions={trackPoints} pathOptions={{ color: "#1f8b6f", weight: 5, opacity: 0.92 }} />
-            {selectedTrackPoints.length >= 2 ? <Polyline positions={selectedTrackPoints} pathOptions={{ color: "#ef8d33", weight: 7, opacity: 0.88 }} /> : null}
-            {startPoint ? <CircleMarker center={startPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1f8b6f", fillOpacity: 1 }} /> : null}
-            {endPoint ? <CircleMarker center={endPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#ef8d33", fillOpacity: 1 }} /> : null}
-            {activeMapPoint ? <CircleMarker center={activeMapPoint} radius={8} pathOptions={{ color: "#16322e", weight: 2, fillColor: "#ffffff", fillOpacity: 0.98 }} /> : null}
-            <ActivityMapViewport bounds={bounds} />
-            <ActivityMapHoverSync points={routePoints} onHoverChange={onHoverChange} />
-          </MapContainer>
-        </div>
-        <div className="activity-map-meta-row">
-          <span className="activity-map-badge">Start</span>
-          <span className="activity-map-badge activity-map-badge-finish">Ziel</span>
-          <span className="activity-map-note">Aktuell werden die Tiles direkt von OpenStreetMap geladen. Bei größerer Nutzung kannst du die Quelle per `.env` umstellen.</span>
-        </div>
-        <div className="training-mini-grid activity-map-point-grid">
-          <div className="training-mini-card">
-            <span>Trackpunkt</span>
-            <strong>{activeRoutePoint ? formatAxisDistance(activeRoutePoint.distanceM) : "-"}</strong>
+          <div className="activity-map-stage">
+            <div className="activity-map-toolbar">
+              <div className="activity-map-mode-toggle" role="tablist" aria-label="Ansicht wechseln">
+                <button className={`activity-map-toggle-button ${stageMode === "map" ? "active" : ""}`} type="button" onClick={() => setStageMode("map")}>
+                  2D Karte
+                </button>
+                <button className={`activity-map-toggle-button ${stageMode === "flyover" ? "active" : ""}`} type="button" onClick={() => setStageMode("flyover")}>
+                  3D Flyover
+                </button>
+              </div>
+              <div className="activity-map-replay-controls">
+                <button className="primary-button" type="button" onClick={handleTogglePlayback} disabled={playbackPoints.length < 2}>
+                  {isPlaying ? "Pause" : "Play"}
+                </button>
+                <button className="secondary-button" type="button" onClick={handleResetPlayback} disabled={playbackStartPoint == null}>
+                  Zum Anfang
+                </button>
+              </div>
+            </div>
+
+            <div className="activity-map-stage-shell">
+              {stageMode === "map" ? (
+                <MapContainer className="activity-leaflet-map" center={trackPoints[0]} zoom={13} scrollWheelZoom>
+                  <TileLayer attribution={MAP_TILE_ATTRIBUTION} url={MAP_TILE_URL} maxZoom={MAP_MAX_ZOOM} />
+                  <Polyline positions={trackPoints} pathOptions={{ color: "#1f8b6f", weight: 5, opacity: 0.9 }} />
+                  {selectedTrackPoints.length >= 2 ? <Polyline positions={selectedTrackPoints} pathOptions={{ color: "#f5c086", weight: 8, opacity: 0.72 }} /> : null}
+                  {travelledTrackPoints.length >= 2 ? <Polyline positions={travelledTrackPoints} pathOptions={{ color: "#ef8d33", weight: 7, opacity: 0.92 }} /> : null}
+                  {startPoint ? <CircleMarker center={startPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1f8b6f", fillOpacity: 1 }} /> : null}
+                  {endPoint ? <CircleMarker center={endPoint} radius={7} pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#ef8d33", fillOpacity: 1 }} /> : null}
+                  {activeMapPoint ? <CircleMarker center={activeMapPoint} radius={8} pathOptions={{ color: "#16322e", weight: 2, fillColor: "#ffffff", fillOpacity: 0.98 }} /> : null}
+                  <ActivityMapViewport bounds={bounds} />
+                  <ActivityMapHoverSync points={routePoints} onHoverChange={onHoverChange} />
+                </MapContainer>
+              ) : (
+                <ActivityRouteFlyover routePoints={routePoints} hoverSecond={hoverSecond} selectedRange={previewRange} />
+              )}
+            </div>
           </div>
-          <div className="training-mini-card">
-            <span>Höhe</span>
-            <strong>{activeRoutePoint ? formatNumber(activeRoutePoint.altitudeM, 0, " m") : "-"}</strong>
-          </div>
-          <div className="training-mini-card">
-            <span>Steigung</span>
-            <strong>{activeRoutePoint ? formatNumber(activeRoutePoint.gradePct, 1, " %") : "-"}</strong>
-          </div>
-          <div className="training-mini-card">
-            <span>{selectedMetric.label}</span>
-            <strong>{activeRoutePoint ? formatNumber(selectedMetric.pick(activeRoutePoint), selectedMetric.digits, selectedMetric.suffix) : "-"}</strong>
-          </div>
+
+          <aside className="activity-map-sidebar">
+            <div className="activity-map-marker-grid">
+              <div className="activity-map-marker-card start">
+                <span>Start</span>
+                <strong>{startPoint ? formatAxisTime(routePoints[0]?.elapsed ?? 0) : "-"}</strong>
+                <small>{routePoints[0] ? formatAxisDistance(routePoints[0].distanceM) : "-"}</small>
+              </div>
+              <div className="activity-map-marker-card finish">
+                <span>Ziel</span>
+                <strong>{endPoint ? formatAxisTime(routePoints[routePoints.length - 1]?.elapsed ?? 0) : "-"}</strong>
+                <small>{routePoints[routePoints.length - 1] ? formatAxisDistance(routePoints[routePoints.length - 1].distanceM) : "-"}</small>
+              </div>
+            </div>
+
+            <div className="settings-status-chip activity-map-replay-chip">
+              <span>Replay</span>
+              <strong>{isPlaying ? "Laeuft" : "Bereit"}</strong>
+              <small>
+                {replayLabel} | {Math.round(playbackProgress * 100)}%
+              </small>
+              <div className="activity-map-progress-bar" aria-hidden="true">
+                <span style={{ width: `${Math.round(playbackProgress * 100)}%` }} />
+              </div>
+              <small>
+                {playbackStartPoint && playbackEndPoint
+                  ? `${formatAxisTime(playbackStartPoint.elapsed)} bis ${formatAxisTime(playbackEndPoint.elapsed)}`
+                  : "-"}
+              </small>
+            </div>
+
+            <div className="settings-note-card activity-map-note-card">
+              <strong>{stageMode === "map" ? "Kartenquelle" : "3D-Flyover"}</strong>
+              <span className="activity-map-note">
+                {stageMode === "map"
+                  ? "Aktuell werden die Tiles direkt von OpenStreetMap geladen. Bei groesserer Nutzung kannst du die Quelle per .env umstellen."
+                  : "Die 3D-Ansicht nutzt GPS- und Hoehendaten aus dem Track und bleibt bewusst leichtgewichtig ohne zusaetzliche 3D-Bibliothek."}
+              </span>
+              <small>
+                {distanceRange != null ? `Play faehrt den gewaehlten Ausschnitt ab: ${distanceRangeLabel}.` : "Play faehrt die komplette Strecke vom Start bis ins Ziel ab."}
+              </small>
+            </div>
+
+            <div className="activity-map-point-grid">
+              <div className="training-mini-card">
+                <span>Trackpunkt</span>
+                <strong>{displayRoutePoint ? formatAxisDistance(displayRoutePoint.distanceM) : "-"}</strong>
+              </div>
+              <div className="training-mini-card">
+                <span>Hoehe</span>
+                <strong>{displayRoutePoint ? formatNumber(displayRoutePoint.altitudeM, 0, " m") : "-"}</strong>
+              </div>
+              <div className="training-mini-card">
+                <span>Steigung</span>
+                <strong>{displayRoutePoint ? formatNumber(displayRoutePoint.gradePct, 1, " %") : "-"}</strong>
+              </div>
+              <div className="training-mini-card">
+                <span>{selectedMetric.label}</span>
+                <strong>{displayRoutePoint ? formatNumber(selectedMetric.pick(displayRoutePoint), selectedMetric.digits, selectedMetric.suffix) : "-"}</strong>
+              </div>
+            </div>
+          </aside>
         </div>
       </div>
 

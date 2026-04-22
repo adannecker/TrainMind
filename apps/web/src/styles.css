@@ -2812,14 +2812,66 @@ h1 {
 .activity-map-shell {
   margin-top: 0.9rem;
   border: 1px solid #d7e7e0;
-  border-radius: 1rem;
+  border-radius: 1.2rem;
+  background: linear-gradient(180deg, #fbfdfc 0%, #f3faf7 100%);
+  padding: 1rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 0.95fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.activity-map-stage {
+  display: grid;
+  gap: 0.9rem;
+  min-width: 0;
+}
+
+.activity-map-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.activity-map-mode-toggle,
+.activity-map-replay-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.activity-map-toggle-button {
+  border: 1px solid #cfe3dc;
+  border-radius: 999px;
   background: #ffffff;
+  color: #275148;
+  padding: 0.48rem 0.9rem;
+  font-size: 0.86rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.activity-map-toggle-button.active {
+  border-color: #1f8b6f;
+  background: linear-gradient(135deg, #163d35 0%, #1f8b6f 100%);
+  color: #ffffff;
+  box-shadow: 0 12px 22px rgba(31, 139, 111, 0.18);
+}
+
+.activity-map-stage-shell {
+  min-height: 560px;
+  border: 1px solid #d7e7e0;
+  border-radius: 1rem;
   overflow: hidden;
+  background: #edf7f3;
 }
 
 .activity-leaflet-map {
   width: 100%;
-  height: 420px;
+  height: 560px;
 }
 
 .activity-leaflet-map .leaflet-control-attribution {
@@ -2832,38 +2884,163 @@ h1 {
   color: #1d433b;
 }
 
-.activity-map-meta-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.55rem;
-  align-items: center;
-  margin-top: 0.85rem;
+.activity-leaflet-map .leaflet-tile {
+  outline: 1px solid transparent;
+  backface-visibility: hidden;
 }
 
-.activity-map-point-grid {
-  margin-top: 0.9rem;
+.activity-flyover-stage {
+  position: relative;
+  width: 100%;
+  height: 560px;
+  overflow: hidden;
+  background: linear-gradient(180deg, #f7fcfa 0%, #e9f4ef 100%);
 }
 
-.activity-map-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 3.8rem;
-  padding: 0.35rem 0.7rem;
+.activity-flyover-stage-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.activity-flyover-stage-empty {
+  min-height: 560px;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  text-align: center;
+  color: #4b6d64;
+  background: linear-gradient(180deg, #f7fcfa 0%, #edf7f3 100%);
+}
+
+.activity-flyover-caption {
+  position: absolute;
+  left: 1rem;
+  bottom: 1rem;
+  padding: 0.45rem 0.7rem;
   border-radius: 999px;
-  background: #1f8b6f;
-  color: #ffffff;
-  font-size: 0.78rem;
-  font-weight: 700;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(22, 50, 46, 0.1);
+  color: #234b42;
+  font-size: 0.82rem;
+  font-weight: 800;
 }
 
-.activity-map-badge-finish {
-  background: #ef8d33;
+.activity-map-sidebar {
+  display: grid;
+  gap: 0.9rem;
+  align-content: start;
+}
+
+.activity-map-marker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.activity-map-marker-card {
+  border: 1px solid #d2e4dc;
+  border-radius: 1rem;
+  background: #ffffff;
+  padding: 0.85rem 0.9rem;
+  display: grid;
+  gap: 0.18rem;
+  box-shadow: 0 10px 24px rgba(18, 54, 45, 0.06);
+}
+
+.activity-map-marker-card span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #57736b;
+}
+
+.activity-map-marker-card strong {
+  font-size: 1.1rem;
+  color: #163b33;
+}
+
+.activity-map-marker-card small {
+  color: #69867e;
+  font-size: 0.82rem;
+}
+
+.activity-map-marker-card.start {
+  background: linear-gradient(180deg, #effbf5 0%, #ffffff 100%);
+}
+
+.activity-map-marker-card.finish {
+  background: linear-gradient(180deg, #fff7ef 0%, #ffffff 100%);
+}
+
+.activity-map-replay-chip {
+  gap: 0.35rem;
+}
+
+.activity-map-progress-bar {
+  height: 0.6rem;
+  border-radius: 999px;
+  background: #e2ece8;
+  overflow: hidden;
+}
+
+.activity-map-progress-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f8b6f 0%, #ef8d33 100%);
 }
 
 .activity-map-note {
   color: #466a62;
   font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.activity-map-note-card {
+  margin-top: 0;
+}
+
+.activity-map-note-card strong {
+  color: #173c34;
+}
+
+.activity-map-note-card small {
+  color: #66827a;
+  font-size: 0.8rem;
+}
+
+.activity-map-point-grid {
+  margin-top: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+@media (max-width: 980px) {
+  .activity-map-shell {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .activity-map-stage-shell,
+  .activity-leaflet-map,
+  .activity-flyover-stage,
+  .activity-flyover-stage-empty {
+    height: 440px;
+    min-height: 440px;
+  }
+
+  .activity-map-toolbar {
+    align-items: stretch;
+  }
+
+  .activity-map-marker-grid,
+  .activity-map-point-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .settings-status-chip {
