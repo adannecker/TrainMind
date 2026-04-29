@@ -1,9 +1,26 @@
 ﻿import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useRef } from "react";
+import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec";
 import { apiFetch } from "../api";
-import { API_BASE_URL, MAP_MAX_ZOOM, MAP_TILE_ATTRIBUTION, MAP_TILE_URL } from "../config";
+import maplibregl from "maplibre-gl";
+import type { FeatureCollection, GeoJsonProperties, LineString, Point } from "geojson";
+import {
+  API_BASE_URL,
+  MAP_3D_BEARING,
+  MAP_3D_DEM_ENCODING,
+  MAP_3D_DEM_TILE_SIZE,
+  MAP_3D_DEM_URL,
+  MAP_3D_EXAGGERATION,
+  MAP_3D_MAX_PITCH,
+  MAP_3D_PITCH,
+  MAP_3D_STYLE_URL,
+  MAP_MAX_ZOOM,
+  MAP_TILE_ATTRIBUTION,
+  MAP_TILE_URL,
+} from "../config";
 import type { LatLng, LatLngBoundsExpression, LatLngTuple, Map as LeafletMap } from "leaflet";
+import type { LngLatBoundsLike, Map as MapLibreMap } from "maplibre-gl";
 import { CircleMarker, MapContainer, Polyline, TileLayer, useMap, useMapEvents } from "react-leaflet";
 
 type ActivitySummary = {
@@ -297,15 +314,13 @@ type RoutePoint = {
   cadenceRpm: number | null;
   gradePct: number | null;
 };
-type FlyoverProjectedPoint = {
-  elapsed: number;
-  distanceM: number;
-  altitudeM: number | null;
-  x: number;
-  y: number;
-  shadowX: number;
-  shadowY: number;
+type RouteGeoPoint = RoutePoint & {
+  latitudeDeg: number;
+  longitudeDeg: number;
 };
+
+type GeoJsonLineCollection = FeatureCollection<LineString, GeoJsonProperties>;
+type GeoJsonPointCollection = FeatureCollection<Point, GeoJsonProperties>;
 
 const ACHIEVEMENT_CATEGORY_ORDER = ["hf", "records", "distance", "weekly", "zones", "moments"] as const;
 const HF_WINDOW_ORDER: Record<string, number> = {
@@ -1380,6 +1395,47 @@ function formatAxisDistance(distanceM: number): string {
   return `${(distanceM / 1000).toFixed(distanceM >= 10000 ? 0 : 1)} km`;
 }
 
+function interpolateElapsedAtDistance(points: Array<{ distanceM: number; elapsed: number }>, distanceM: number): number | null {
+  if (!points.length || !Number.isFinite(distanceM)) return null;
+  const first = points[0];
+  const last = points[points.length - 1];
+  if (distanceM <= first.distanceM) return first.elapsed;
+  if (distanceM >= last.distanceM) return last.elapsed;
+
+  for (let index = 1; index < points.length; index += 1) {
+    const previous = points[index - 1];
+    const current = points[index];
+    const lower = Math.min(previous.distanceM, current.distanceM);
+    const upper = Math.max(previous.distanceM, current.distanceM);
+    if (distanceM < lower || distanceM > upper) continue;
+    const span = current.distanceM - previous.distanceM;
+    if (span === 0) return current.elapsed;
+    const ratio = (distanceM - previous.distanceM) / span;
+    return previous.elapsed + (current.elapsed - previous.elapsed) * ratio;
+  }
+
+  return findNearestPointByDistance(points, distanceM)?.elapsed ?? null;
+}
+
+function formatAxisDistanceWithTime(points: Array<{ distanceM: number; elapsed: number }>, distanceM: number): { distance: string; time: string } {
+  const elapsed = interpolateElapsedAtDistance(points, distanceM);
+  return {
+    distance: formatAxisDistance(distanceM),
+    time: elapsed == null ? "-" : formatAxisTime(elapsed),
+  };
+}
+
+function formatDistanceTimeRange(points: Array<{ distanceM: number; elapsed: number }>, range: DistanceRange | null): string {
+  if (!points.length) return "Distanz: - | Zeit: -";
+  const first = points[0];
+  const last = points[points.length - 1];
+  const startDistance = range ? range.start : first.distanceM;
+  const endDistance = range ? range.end : last.distanceM;
+  const startTime = interpolateElapsedAtDistance(points, startDistance);
+  const endTime = interpolateElapsedAtDistance(points, endDistance);
+  return `Distanz: ${formatAxisDistance(startDistance)} bis ${formatAxisDistance(endDistance)} | Zeit: ${startTime == null ? "-" : formatAxisTime(startTime)} bis ${endTime == null ? "-" : formatAxisTime(endTime)}`;
+}
+
 type ChartRecord = ActivityRecordRow & {
   chart_elapsed_s: number;
 };
@@ -1645,6 +1701,17 @@ function extractTrackPoints(points: RoutePoint[]): LatLngTuple[] {
     .filter(([lat, lon]) => Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180);
 }
 
+function isRouteGeoPoint(point: RoutePoint): point is RouteGeoPoint {
+  return (
+    point.latitudeDeg != null &&
+    Number.isFinite(point.latitudeDeg) &&
+    Math.abs(point.latitudeDeg) <= 90 &&
+    point.longitudeDeg != null &&
+    Number.isFinite(point.longitudeDeg) &&
+    Math.abs(point.longitudeDeg) <= 180
+  );
+}
+
 function findNearestPointIndexByElapsed<T extends { elapsed: number }>(points: T[], elapsed: number | null): number {
   if (!points.length || elapsed == null) return 0;
   let bestIndex = 0;
@@ -1665,169 +1732,883 @@ function buildPlaybackDurationMs(pointCount: number): number {
   return clamp(pointCount * 22, 14000, 42000);
 }
 
-function buildPolylinePointString(points: Array<{ x: number; y: number }>): string {
-  return points.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" ");
+type MutableGeoJsonSource = {
+  setData: (data: GeoJsonLineCollection | GeoJsonPointCollection) => void;
+};
+
+function extractTrackGeoJsonCoordinates(points: RoutePoint[]): Array<[number, number]> {
+  return points
+    .filter(
+      (point): point is RoutePoint & { latitudeDeg: number; longitudeDeg: number } =>
+        point.latitudeDeg != null && Number.isFinite(point.latitudeDeg) && point.longitudeDeg != null && Number.isFinite(point.longitudeDeg),
+    )
+    .map((point) => [point.longitudeDeg, point.latitudeDeg] as [number, number])
+    .filter(([lng, lat]) => Number.isFinite(lng) && Math.abs(lng) <= 180 && Number.isFinite(lat) && Math.abs(lat) <= 90);
 }
 
-function buildFlyoverProjection(points: RoutePoint[], width = 940, height = 560): FlyoverProjectedPoint[] {
-  const geoPoints = points.filter(
-    (point): point is RoutePoint & { latitudeDeg: number; longitudeDeg: number } =>
-      point.latitudeDeg != null && Number.isFinite(point.latitudeDeg) && point.longitudeDeg != null && Number.isFinite(point.longitudeDeg),
-  );
-  if (geoPoints.length < 2) return [];
+function buildLineFeatureCollection(coordinates: Array<[number, number]>): GeoJsonLineCollection {
+  if (coordinates.length < 2) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "LineString",
+          coordinates,
+        },
+      },
+    ],
+  };
+}
 
-  const averageLatitude = geoPoints.reduce((sum, point) => sum + point.latitudeDeg, 0) / geoPoints.length;
-  const averageLongitude = geoPoints.reduce((sum, point) => sum + point.longitudeDeg, 0) / geoPoints.length;
-  const latitudeMeters = 111_320;
-  const longitudeMeters = Math.cos((averageLatitude * Math.PI) / 180) * 111_320;
-  const planarPoints = geoPoints.map((point) => ({
-    point,
-    rawX: (point.longitudeDeg - averageLongitude) * longitudeMeters,
-    rawY: (point.latitudeDeg - averageLatitude) * latitudeMeters,
-  }));
-  const startPoint = planarPoints[0];
-  const endPoint = planarPoints[planarPoints.length - 1];
-  const heading = Math.atan2(endPoint.rawY - startPoint.rawY, endPoint.rawX - startPoint.rawX);
-  const rotationCos = Math.cos(-heading);
-  const rotationSin = Math.sin(-heading);
-  const rotatedPoints = planarPoints.map((item) => ({
-    ...item,
-    axisX: item.rawX * rotationCos - item.rawY * rotationSin,
-    axisY: item.rawX * rotationSin + item.rawY * rotationCos,
-  }));
-  const altitudeValues = rotatedPoints
-    .map((item) => item.point.altitudeM)
-    .filter((value): value is number => value != null && Number.isFinite(value));
-  const minAltitude = altitudeValues.length ? Math.min(...altitudeValues) : 0;
-  const maxAltitude = altitudeValues.length ? Math.max(...altitudeValues) : minAltitude;
-  const altitudeSpan = Math.max(1, maxAltitude - minAltitude);
-  const axisSpanX = Math.max(...rotatedPoints.map((item) => item.axisX)) - Math.min(...rotatedPoints.map((item) => item.axisX));
-  const axisSpanY = Math.max(...rotatedPoints.map((item) => item.axisY)) - Math.min(...rotatedPoints.map((item) => item.axisY));
-  const groundSpan = Math.max(1, axisSpanX, axisSpanY);
-  const altitudeScale = clamp((groundSpan / Math.max(altitudeSpan, 80)) * 0.22, 0.45, 3.4);
+function buildPointFeatureCollection(coordinate: [number, number] | null): GeoJsonPointCollection {
+  if (!coordinate) {
+    return { type: "FeatureCollection", features: [] };
+  }
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        properties: {},
+        geometry: {
+          type: "Point",
+          coordinates: coordinate,
+        },
+      },
+    ],
+  };
+}
 
-  const projectedPoints = rotatedPoints.map((item) => {
-    const groundX = item.axisX - item.axisY * 0.68;
-    const groundY = item.axisY * 0.34;
-    const elevatedY = groundY - ((item.point.altitudeM ?? minAltitude) - minAltitude) * altitudeScale;
+function buildTrackBounds(coordinates: Array<[number, number]>): LngLatBoundsLike | null {
+  if (!coordinates.length) return null;
+  const lngs = coordinates.map((point) => point[0]);
+  const lats = coordinates.map((point) => point[1]);
+  return [
+    [Math.min(...lngs), Math.min(...lats)],
+    [Math.max(...lngs), Math.max(...lats)],
+  ];
+}
+
+function expandMapLibreTileUrls(tileUrl: string): string[] {
+  if (!tileUrl.includes("{s}")) return [tileUrl];
+  return ["a", "b", "c"].map((subdomain) => tileUrl.split("{s}").join(subdomain));
+}
+
+function buildActivityMap3dStyle(): StyleSpecification | string {
+  if (MAP_3D_STYLE_URL) return MAP_3D_STYLE_URL;
+
+  return {
+    version: 8,
+    name: "TrainMind Terrain Raster",
+    sources: {
+      "trainmind-raster": {
+        type: "raster",
+        tiles: expandMapLibreTileUrls(MAP_TILE_URL),
+        tileSize: 256,
+        attribution: MAP_TILE_ATTRIBUTION,
+        maxzoom: MAP_MAX_ZOOM,
+      },
+    },
+    layers: [
+      {
+        id: "trainmind-background",
+        type: "background",
+        paint: {
+          "background-color": "#edf5f1",
+        },
+      },
+      {
+        id: "trainmind-raster",
+        type: "raster",
+        source: "trainmind-raster",
+        minzoom: 0,
+        maxzoom: MAP_MAX_ZOOM,
+        paint: {
+          "raster-opacity": 1,
+          "raster-saturation": -0.08,
+          "raster-contrast": 0.08,
+        },
+      },
+    ],
+  };
+}
+
+function bearingBetweenRoutePoints(from: RouteGeoPoint, to: RouteGeoPoint): number {
+  const fromLat = (from.latitudeDeg * Math.PI) / 180;
+  const toLat = (to.latitudeDeg * Math.PI) / 180;
+  const deltaLon = ((to.longitudeDeg - from.longitudeDeg) * Math.PI) / 180;
+  const y = Math.sin(deltaLon) * Math.cos(toLat);
+  const x = Math.cos(fromLat) * Math.sin(toLat) - Math.sin(fromLat) * Math.cos(toLat) * Math.cos(deltaLon);
+  const degrees = (Math.atan2(y, x) * 180) / Math.PI;
+  return (degrees + 360) % 360;
+}
+
+function normalizeBearingForAnimation(nextBearing: number, currentBearing: number): number {
+  const delta = ((((nextBearing - currentBearing) % 360) + 540) % 360) - 180;
+  return currentBearing + delta;
+}
+
+type PlaybackCameraState = {
+  center: [number, number];
+  bearing: number;
+  pitch: number;
+  zoom: number;
+  offset: [number, number];
+};
+
+type PlaybackCameraMode = "preview" | "playback";
+
+type OverviewCameraState = {
+  bounds: LngLatBoundsLike | null;
+  bearing: number;
+  pitch: number;
+  maxZoom: number;
+  offset: [number, number];
+  padding: number;
+  focusAltitudeM?: number;
+};
+
+type StartViewCalibrationSnapshot = {
+  center: [number, number];
+  terrainHeightM: number | null;
+  zoom: number;
+  pitch: number;
+  bearing: number;
+};
+
+type StartViewCalibrationSample = {
+  activityReference: string;
+  start: StartViewCalibrationSnapshot;
+  best: StartViewCalibrationSnapshot;
+};
+
+type StartViewCalibration = {
+  sampleCount: number;
+  forwardMeters: number;
+  rightMeters: number;
+  zoomDelta: number;
+  pitchDelta: number;
+  bearingDelta: number;
+};
+
+const START_VIEW_CALIBRATION_SAMPLES: StartViewCalibrationSample[] = [
+  {
+    activityReference: "22619403357",
+    start: {
+      center: [7.699941, 47.632433],
+      terrainHeightM: 0,
+      zoom: 15.75,
+      pitch: 58,
+      bearing: -28.5,
+    },
+    best: {
+      center: [7.700526, 47.632696],
+      terrainHeightM: 407.8,
+      zoom: 18.74,
+      pitch: 58,
+      bearing: -28.5,
+    },
+  },
+];
+
+function metersPerLongitudeDegree(latitudeDeg: number): number {
+  return Math.cos((latitudeDeg * Math.PI) / 180) * 111_320;
+}
+
+function normalizeBearingDelta(nextBearing: number, currentBearing: number): number {
+  return ((((nextBearing - currentBearing) % 360) + 540) % 360) - 180;
+}
+
+function resolveCalibrationOffsetsMeters(
+  start: StartViewCalibrationSnapshot,
+  best: StartViewCalibrationSnapshot,
+): { forwardMeters: number; rightMeters: number } {
+  const referenceLatitude = (start.center[1] + best.center[1]) / 2;
+  const eastMeters = (best.center[0] - start.center[0]) * metersPerLongitudeDegree(referenceLatitude);
+  const northMeters = (best.center[1] - start.center[1]) * 111_320;
+  const bearingRad = (start.bearing * Math.PI) / 180;
+  const forwardMeters = eastMeters * Math.sin(bearingRad) + northMeters * Math.cos(bearingRad);
+  const rightMeters = eastMeters * Math.cos(bearingRad) - northMeters * Math.sin(bearingRad);
+  return { forwardMeters, rightMeters };
+}
+
+function buildStartViewCalibration(samples: StartViewCalibrationSample[]): StartViewCalibration {
+  if (!samples.length) {
     return {
-      elapsed: item.point.elapsed,
-      distanceM: item.point.distanceM,
-      altitudeM: item.point.altitudeM,
-      rawX: groundX,
-      rawY: elevatedY,
-      rawShadowX: groundX,
-      rawShadowY: groundY + groundSpan * 0.08,
+      sampleCount: 0,
+      forwardMeters: 0,
+      rightMeters: 0,
+      zoomDelta: 0,
+      pitchDelta: 0,
+      bearingDelta: 0,
     };
-  });
+  }
 
-  const minX = Math.min(...projectedPoints.map((item) => Math.min(item.rawX, item.rawShadowX)));
-  const maxX = Math.max(...projectedPoints.map((item) => Math.max(item.rawX, item.rawShadowX)));
-  const minY = Math.min(...projectedPoints.map((item) => item.rawY));
-  const maxY = Math.max(...projectedPoints.map((item) => Math.max(item.rawY, item.rawShadowY)));
-  const horizontalPadding = 42;
-  const verticalPadding = 36;
-  const scale = Math.min(
-    (width - horizontalPadding * 2) / Math.max(1, maxX - minX),
-    (height - verticalPadding * 2) / Math.max(1, maxY - minY),
+  const totals = samples.reduce(
+    (accumulator, sample) => {
+      const offsets = resolveCalibrationOffsetsMeters(sample.start, sample.best);
+      accumulator.forwardMeters += offsets.forwardMeters;
+      accumulator.rightMeters += offsets.rightMeters;
+      accumulator.zoomDelta += sample.best.zoom - sample.start.zoom;
+      accumulator.pitchDelta += sample.best.pitch - sample.start.pitch;
+      accumulator.bearingDelta += normalizeBearingDelta(sample.best.bearing, sample.start.bearing);
+      return accumulator;
+    },
+    {
+      forwardMeters: 0,
+      rightMeters: 0,
+      zoomDelta: 0,
+      pitchDelta: 0,
+      bearingDelta: 0,
+    },
   );
 
-  return projectedPoints.map((item) => ({
-    elapsed: item.elapsed,
-    distanceM: item.distanceM,
-    altitudeM: item.altitudeM,
-    x: horizontalPadding + (item.rawX - minX) * scale,
-    y: verticalPadding + (item.rawY - minY) * scale,
-    shadowX: horizontalPadding + (item.rawShadowX - minX) * scale,
-    shadowY: verticalPadding + (item.rawShadowY - minY) * scale,
-  }));
+  return {
+    sampleCount: samples.length,
+    forwardMeters: totals.forwardMeters / samples.length,
+    rightMeters: totals.rightMeters / samples.length,
+    zoomDelta: totals.zoomDelta / samples.length,
+    pitchDelta: totals.pitchDelta / samples.length,
+    bearingDelta: totals.bearingDelta / samples.length,
+  };
+}
+
+function offsetCoordinateByMeters(
+  center: [number, number],
+  bearing: number,
+  forwardMeters: number,
+  rightMeters: number,
+): [number, number] {
+  const bearingRad = (bearing * Math.PI) / 180;
+  const eastMeters = forwardMeters * Math.sin(bearingRad) + rightMeters * Math.cos(bearingRad);
+  const northMeters = forwardMeters * Math.cos(bearingRad) - rightMeters * Math.sin(bearingRad);
+  const latitudeDeg = center[1] + northMeters / 111_320;
+  const longitudeScale = Math.max(1, metersPerLongitudeDegree(center[1]));
+  const longitudeDeg = center[0] + eastMeters / longitudeScale;
+  return [longitudeDeg, latitudeDeg];
+}
+
+const START_VIEW_CALIBRATION = buildStartViewCalibration(START_VIEW_CALIBRATION_SAMPLES);
+
+const START_VIEW_ZOOM_LIMITS = {
+  min: 15.2,
+  max: 19.25,
+};
+
+function moveMapToPlaybackCamera(map: MapLibreMap, playbackCameraState: PlaybackCameraState, currentBearing: number, duration: number) {
+  const animatedBearing = normalizeBearingForAnimation(playbackCameraState.bearing, currentBearing);
+  map.easeTo({
+    center: playbackCameraState.center,
+    bearing: animatedBearing,
+    pitch: playbackCameraState.pitch,
+    zoom: playbackCameraState.zoom,
+    offset: playbackCameraState.offset,
+    duration,
+    essential: true,
+  });
+  return animatedBearing;
+}
+
+function moveMapToOverviewCamera(
+  map: MapLibreMap,
+  overviewCameraState: OverviewCameraState,
+  currentBearing: number,
+  duration: number,
+) {
+  if (overviewCameraState.bounds) {
+    map.fitBounds(overviewCameraState.bounds, {
+      padding: overviewCameraState.padding,
+      duration: 0,
+      maxZoom: overviewCameraState.maxZoom,
+    });
+  }
+
+  const targetBearing = overviewCameraState.bearing + START_VIEW_CALIBRATION.bearingDelta;
+  const calibratedCenter = offsetCoordinateByMeters(
+    [map.getCenter().lng, map.getCenter().lat],
+    targetBearing,
+    START_VIEW_CALIBRATION.forwardMeters,
+    START_VIEW_CALIBRATION.rightMeters,
+  );
+  const calibratedZoom = clamp(
+    Math.min(map.getZoom(), overviewCameraState.maxZoom) + START_VIEW_CALIBRATION.zoomDelta,
+    START_VIEW_ZOOM_LIMITS.min,
+    START_VIEW_ZOOM_LIMITS.max,
+  );
+  const calibratedPitch = clamp(
+    overviewCameraState.pitch + START_VIEW_CALIBRATION.pitchDelta,
+    46,
+    MAP_3D_MAX_PITCH - 6,
+  );
+  const animatedBearing = normalizeBearingForAnimation(targetBearing, currentBearing);
+  window.requestAnimationFrame(() => {
+    map.easeTo({
+      center: calibratedCenter,
+      elevation: overviewCameraState.focusAltitudeM,
+      bearing: animatedBearing,
+      pitch: calibratedPitch,
+      zoom: calibratedZoom,
+      offset: overviewCameraState.offset,
+      duration,
+      essential: true,
+    });
+  });
+  return animatedBearing;
+}
+
+function buildOverviewCameraState(points: RouteGeoPoint[], activePoint: RoutePoint | null): OverviewCameraState | null {
+  if (!points.length) return null;
+
+  const anchorPoint = activePoint && isRouteGeoPoint(activePoint) ? activePoint : points[0];
+  const activeIndex = findNearestPointIndexByElapsed(points, anchorPoint.elapsed);
+  const lookBehindPoint = points[Math.max(0, activeIndex - 2)] ?? points[activeIndex];
+  const lookAheadPoint = points[Math.min(points.length - 1, activeIndex + 6)] ?? points[activeIndex];
+  const overviewFocusPoint = points[Math.min(points.length - 1, activeIndex + 2)] ?? anchorPoint;
+  const rawBearing =
+    lookAheadPoint === lookBehindPoint
+      ? MAP_3D_BEARING
+      : bearingBetweenRoutePoints(lookBehindPoint, lookAheadPoint);
+  const bearingDelta = ((((rawBearing - MAP_3D_BEARING) % 360) + 540) % 360) - 180;
+  const climbGrade = Math.max(0, anchorPoint.gradePct ?? 0);
+  const overviewWindowEnd = Math.min(points.length, activeIndex + 22);
+  const overviewWindowCoordinates = points
+    .slice(Math.max(0, activeIndex - 2), overviewWindowEnd)
+    .map((point) => [point.longitudeDeg, point.latitudeDeg] as [number, number]);
+
+  return {
+    bounds: buildTrackBounds(overviewWindowCoordinates),
+    bearing: MAP_3D_BEARING + bearingDelta * 0.72,
+    pitch: clamp(58 - climbGrade * 0.1, 55, Math.min(64, MAP_3D_MAX_PITCH - 10)),
+    maxZoom: clamp(15.75 - climbGrade * 0.02, 15.45, 15.95),
+    offset: [0, Math.round(clamp(56 - climbGrade * 0.7, 46, 60))] as [number, number],
+    padding: 56,
+    focusAltitudeM: overviewFocusPoint.altitudeM ?? anchorPoint.altitudeM ?? undefined,
+  };
+}
+
+function buildPlaybackCameraState(
+  points: RouteGeoPoint[],
+  activePoint: RoutePoint | null,
+  mode: PlaybackCameraMode = "playback",
+): PlaybackCameraState | null {
+  if (!points.length || !activePoint || !isRouteGeoPoint(activePoint)) return null;
+
+  const activeIndex = findNearestPointIndexByElapsed(points, activePoint.elapsed);
+  const speedKmh =
+    activePoint.speedKmh ??
+    points[Math.min(points.length - 1, activeIndex + 1)]?.speedKmh ??
+    points[Math.max(0, activeIndex - 1)]?.speedKmh ??
+    24;
+  const lookAheadSteps = clamp(Math.round(speedKmh / 7), 3, 12);
+  const lookBehindSteps = clamp(Math.round(speedKmh / 18), 1, 4);
+  const previewAheadSteps = clamp(lookAheadSteps + 4, 6, 18);
+  const lookBehindPoint = points[Math.max(0, activeIndex - lookBehindSteps)] ?? points[activeIndex];
+  const lookAheadPoint =
+    points[Math.min(points.length - 1, activeIndex + (mode === "preview" ? previewAheadSteps : lookAheadSteps))] ?? points[activeIndex];
+  const rawBearing =
+    lookAheadPoint === lookBehindPoint
+      ? MAP_3D_BEARING
+      : bearingBetweenRoutePoints(lookBehindPoint, lookAheadPoint);
+  const previewBearingDelta = ((((rawBearing - MAP_3D_BEARING) % 360) + 540) % 360) - 180;
+  const previewBearing = MAP_3D_BEARING + previewBearingDelta * 0.72;
+  const climbGrade = Math.max(0, activePoint.gradePct ?? 0);
+  const descentGrade = Math.max(0, -(activePoint.gradePct ?? 0));
+  const gradeBoost = climbGrade * 0.06;
+  const previewCenterPoint =
+    points[Math.min(points.length - 1, activeIndex + clamp(Math.round(previewAheadSteps * 0.14), 0, 2))] ?? points[activeIndex];
+  const isStartSequence = mode === "playback" && activeIndex < 8;
+  const playbackCenterSteps = clamp(Math.round(lookAheadSteps * 0.4 + climbGrade / 3.5), 1, 8);
+  const playbackCenterPoint = points[Math.min(points.length - 1, activeIndex + playbackCenterSteps)] ?? points[activeIndex];
+  const climbPitchReduction = clamp(climbGrade * 0.82, 0, 12);
+  const climbZoomReduction = clamp(climbGrade * 0.055, 0, 0.92);
+  const zoom =
+    mode === "preview"
+      ? clamp(15.78 - speedKmh / 280 - climbZoomReduction * 0.16 + descentGrade * 0.01 + gradeBoost * 0.05, 15.45, 16.05)
+      : isStartSequence
+        ? clamp(15.6 - speedKmh / 240 - climbZoomReduction * 0.2 + descentGrade * 0.01, 15.3, 15.9)
+      : clamp(16.15 - speedKmh / 92 - climbZoomReduction + descentGrade * 0.02, 15.05, 16.4);
+  const pitch =
+    mode === "preview"
+      ? clamp(59 + speedKmh / 34 - climbPitchReduction * 0.1, 56, Math.min(66, MAP_3D_MAX_PITCH - 9))
+      : isStartSequence
+        ? clamp(58 + speedKmh / 26 - climbPitchReduction * 0.16, 55, Math.min(64, MAP_3D_MAX_PITCH - 10))
+      : clamp(73 + speedKmh / 13 - climbPitchReduction, 62, MAP_3D_MAX_PITCH - 3);
+
+  return {
+    center:
+      mode === "preview"
+        ? ([previewCenterPoint.longitudeDeg, previewCenterPoint.latitudeDeg] as [number, number])
+        : isStartSequence
+          ? ([points[Math.min(points.length - 1, activeIndex + 1)]?.longitudeDeg ?? playbackCenterPoint.longitudeDeg, points[Math.min(points.length - 1, activeIndex + 1)]?.latitudeDeg ?? playbackCenterPoint.latitudeDeg] as [number, number])
+          : ([playbackCenterPoint.longitudeDeg, playbackCenterPoint.latitudeDeg] as [number, number]),
+    bearing: mode === "preview" ? previewBearing : rawBearing,
+    pitch,
+    zoom,
+    offset:
+      mode === "preview"
+        ? ([0, Math.round(clamp(58 - climbGrade * 1.15 + descentGrade * 0.4, 44, 64))] as [number, number])
+        : isStartSequence
+          ? ([0, Math.round(clamp(74 - climbGrade * 1.6 + descentGrade * 0.5, 58, 82))] as [number, number])
+        : ([0, Math.round(clamp(165 - climbGrade * 4.2 + descentGrade * 1.4, 128, 168))] as [number, number]),
+  };
+}
+
+function resolvePreviewRoutePoint(routePoints: RoutePoint[], selectedRange: DistanceRange | null, hoverSecond: number | null): RoutePoint | null {
+  const hoveredPoint = findNearestPointByElapsed(routePoints, hoverSecond);
+  if (hoveredPoint) return hoveredPoint;
+  if (selectedRange) {
+    return routePoints.find((point) => point.distanceM >= selectedRange.start) ?? routePoints[0] ?? null;
+  }
+  return routePoints[0] ?? null;
+}
+
+function updateGeoJsonSource(map: MapLibreMap | null, sourceId: string, data: GeoJsonLineCollection | GeoJsonPointCollection) {
+  const source = map?.getSource(sourceId) as MutableGeoJsonSource | undefined;
+  source?.setData(data);
+}
+
+type FlyoverCameraDebugState = {
+  centerLng: number;
+  centerLat: number;
+  targetElevationM: number | null;
+  zoom: number;
+  pitch: number;
+  bearing: number;
+};
+
+function readFlyoverCameraDebugState(map: MapLibreMap): FlyoverCameraDebugState {
+  const center = map.getCenter();
+  const queriedTerrainElevation = map.queryTerrainElevation(center);
+  const targetElevation = queriedTerrainElevation ?? map.getCameraTargetElevation();
+  return {
+    centerLng: center.lng,
+    centerLat: center.lat,
+    targetElevationM: Number.isFinite(targetElevation) ? targetElevation : null,
+    zoom: map.getZoom(),
+    pitch: map.getPitch(),
+    bearing: map.getBearing(),
+  };
+}
+
+function buildFlyoverCameraDebugText(camera: FlyoverCameraDebugState | null, activityReference: string | null): string {
+  if (!camera) {
+    return activityReference ? `Ride: ${activityReference}` : "Ride: -";
+  }
+
+  return [
+    activityReference ? `Ride: ${activityReference}` : "Ride: -",
+    `x: ${camera.centerLng.toFixed(6)}`,
+    `y: ${camera.centerLat.toFixed(6)}`,
+    `terrain_hoehe_m: ${camera.targetElevationM == null ? "-" : camera.targetElevationM.toFixed(1)}`,
+    `zoom: ${camera.zoom.toFixed(2)}`,
+    `pitch: ${camera.pitch.toFixed(1)}`,
+    `bearing: ${camera.bearing.toFixed(1)}`,
+  ].join("\n");
+}
+
+function findNearestMapLibreHoverPoint(map: MapLibreMap, points: RoutePoint[], x: number, y: number): RoutePoint | null {
+  let bestPoint: RoutePoint | null = null;
+  let bestDistanceSquared = Number.POSITIVE_INFINITY;
+
+  for (const point of points) {
+    if (point.latitudeDeg == null || point.longitudeDeg == null) continue;
+    const projected = map.project([point.longitudeDeg, point.latitudeDeg]);
+    const dx = projected.x - x;
+    const dy = projected.y - y;
+    const distanceSquared = dx * dx + dy * dy;
+    if (distanceSquared < bestDistanceSquared) {
+      bestPoint = point;
+      bestDistanceSquared = distanceSquared;
+    }
+  }
+
+  return bestDistanceSquared <= 28 * 28 ? bestPoint : null;
 }
 
 function ActivityRouteFlyover({
   routePoints,
   hoverSecond,
   selectedRange,
+  isPlaying,
+  onHoverChange,
+  activityReference,
 }: {
   routePoints: RoutePoint[];
   hoverSecond: number | null;
   selectedRange: DistanceRange | null;
+  isPlaying: boolean;
+  onHoverChange: (nextSecond: number | null) => void;
+  activityReference: string | null;
 }) {
-  const projectedPoints = useMemo(() => buildFlyoverProjection(routePoints), [routePoints]);
-  const activePoint = useMemo(() => findNearestPointByElapsed(projectedPoints, hoverSecond), [hoverSecond, projectedPoints]);
-  const selectedProjectedPoints = useMemo(
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const mapRef = useRef<MapLibreMap | null>(null);
+  const hasFittedViewRef = useRef(false);
+  const isPlayingRef = useRef(isPlaying);
+  const wasPlayingRef = useRef(isPlaying);
+  const routePointsRef = useRef(routePoints);
+  const onHoverChangeRef = useRef(onHoverChange);
+  const overviewCameraStateRef = useRef<OverviewCameraState | null>(null);
+  const lastCameraUpdateRef = useRef(0);
+  const lastCameraBearingRef = useRef<number | null>(null);
+  const cameraDebugFrameRef = useRef<number | null>(null);
+  const copyFeedbackTimeoutRef = useRef<number | null>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const [terrainMessage, setTerrainMessage] = useState<string | null>(null);
+  const [cameraDebug, setCameraDebug] = useState<FlyoverCameraDebugState | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState<"idle" | "copied" | "error">("idle");
+  const routeGeoPoints = useMemo(() => routePoints.filter(isRouteGeoPoint), [routePoints]);
+  const trackCoordinates = useMemo(() => routeGeoPoints.map((point) => [point.longitudeDeg, point.latitudeDeg] as [number, number]), [routeGeoPoints]);
+  const overviewRoutePoint = useMemo(
+    () => (selectedRange == null ? routePoints[0] ?? null : routePoints.find((point) => point.distanceM >= selectedRange.start) ?? routePoints[0] ?? null),
+    [routePoints, selectedRange],
+  );
+  const activeRoutePoint = useMemo(() => resolvePreviewRoutePoint(routePoints, selectedRange, hoverSecond), [hoverSecond, routePoints, selectedRange]);
+  const activeCoordinate =
+    activeRoutePoint?.longitudeDeg != null && activeRoutePoint?.latitudeDeg != null
+      ? ([activeRoutePoint.longitudeDeg, activeRoutePoint.latitudeDeg] as [number, number])
+      : null;
+  const travelledCoordinates = useMemo(
+    () =>
+      activeRoutePoint == null
+        ? []
+        : extractTrackGeoJsonCoordinates(routePoints.filter((point) => point.elapsed <= activeRoutePoint.elapsed)),
+    [activeRoutePoint, routePoints],
+  );
+  const selectedCoordinates = useMemo(
     () =>
       selectedRange == null
         ? []
-        : projectedPoints.filter((point) => point.distanceM >= selectedRange.start && point.distanceM <= selectedRange.end),
-    [projectedPoints, selectedRange],
+        : extractTrackGeoJsonCoordinates(routePoints.filter((point) => point.distanceM >= selectedRange.start && point.distanceM <= selectedRange.end)),
+    [routePoints, selectedRange],
   );
-  const travelledProjectedPoints = useMemo(
-    () => (activePoint == null ? [] : projectedPoints.filter((point) => point.elapsed <= activePoint.elapsed)),
-    [activePoint, projectedPoints],
-  );
+  const startCoordinate = trackCoordinates[0] ?? null;
+  const endCoordinate = trackCoordinates[trackCoordinates.length - 1] ?? null;
+  const overviewCameraState = useMemo(() => buildOverviewCameraState(routeGeoPoints, overviewRoutePoint), [overviewRoutePoint, routeGeoPoints]);
+  const playbackCameraState = useMemo(() => buildPlaybackCameraState(routeGeoPoints, activeRoutePoint, "playback"), [routeGeoPoints, activeRoutePoint]);
 
-  if (projectedPoints.length < 2) {
+  useEffect(() => {
+    const previousPlaying = isPlayingRef.current;
+    isPlayingRef.current = isPlaying;
+    if (previousPlaying && !isPlaying) {
+      wasPlayingRef.current = true;
+    } else if (isPlaying) {
+      wasPlayingRef.current = false;
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    routePointsRef.current = routePoints;
+  }, [routePoints]);
+
+  useEffect(() => {
+    onHoverChangeRef.current = onHoverChange;
+  }, [onHoverChange]);
+
+  useEffect(() => {
+    overviewCameraStateRef.current = overviewCameraState;
+  }, [overviewCameraState]);
+
+  useEffect(() => {
+    return () => {
+      if (cameraDebugFrameRef.current != null) {
+        window.cancelAnimationFrame(cameraDebugFrameRef.current);
+      }
+      if (copyFeedbackTimeoutRef.current != null) {
+        window.clearTimeout(copyFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!containerRef.current || mapRef.current || trackCoordinates.length < 2) return;
+    setMapReady(false);
+    setCameraDebug(null);
+
+    const map = new maplibregl.Map({
+      container: containerRef.current,
+      style: buildActivityMap3dStyle(),
+      center: trackCoordinates[0],
+      zoom: 12,
+      pitch: MAP_3D_PITCH,
+      bearing: MAP_3D_BEARING,
+      maxPitch: MAP_3D_MAX_PITCH,
+      maxTileCacheSize: 256,
+      maxTileCacheZoomLevels: 8,
+      refreshExpiredTiles: false,
+      cancelPendingTileRequestsWhileZooming: false,
+      fadeDuration: 0,
+      attributionControl: false,
+    });
+
+    mapRef.current = map;
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
+
+    const syncCameraDebug = () => {
+      if (cameraDebugFrameRef.current != null) return;
+      cameraDebugFrameRef.current = window.requestAnimationFrame(() => {
+        cameraDebugFrameRef.current = null;
+        setCameraDebug(readFlyoverCameraDebugState(map));
+      });
+    };
+
+    map.on("load", () => {
+      setTerrainMessage(null);
+
+      if (!map.getSource("terrainSource")) {
+        map.addSource("terrainSource", {
+          type: "raster-dem",
+          url: MAP_3D_DEM_URL,
+          encoding: MAP_3D_DEM_ENCODING,
+          tileSize: MAP_3D_DEM_TILE_SIZE,
+        });
+      }
+      map.setTerrain({
+        source: "terrainSource",
+        exaggeration: MAP_3D_EXAGGERATION,
+      });
+      map.setSourceTileLodParams(5, 4);
+
+      map.addSource("activity-route", { type: "geojson", data: buildLineFeatureCollection(trackCoordinates) });
+      map.addSource("activity-selected", { type: "geojson", data: buildLineFeatureCollection([]) });
+      map.addSource("activity-progress", { type: "geojson", data: buildLineFeatureCollection([]) });
+      map.addSource("activity-start", { type: "geojson", data: buildPointFeatureCollection(startCoordinate) });
+      map.addSource("activity-finish", { type: "geojson", data: buildPointFeatureCollection(endCoordinate) });
+      map.addSource("activity-active", { type: "geojson", data: buildPointFeatureCollection(null) });
+
+      map.addLayer({
+        id: "activity-route-shadow",
+        type: "line",
+        source: "activity-route",
+        paint: {
+          "line-color": "#12352e",
+          "line-opacity": 0.18,
+          "line-width": 10,
+        },
+      });
+      map.addLayer({
+        id: "activity-route-line",
+        type: "line",
+        source: "activity-route",
+        paint: {
+          "line-color": "#1f8b6f",
+          "line-width": 6,
+        },
+      });
+      map.addLayer({
+        id: "activity-selected-line",
+        type: "line",
+        source: "activity-selected",
+        paint: {
+          "line-color": "#f5c086",
+          "line-opacity": 0.76,
+          "line-width": 8,
+        },
+      });
+      map.addLayer({
+        id: "activity-progress-line",
+        type: "line",
+        source: "activity-progress",
+        paint: {
+          "line-color": "#ef8d33",
+          "line-width": 6,
+        },
+      });
+      map.addLayer({
+        id: "activity-start-marker",
+        type: "circle",
+        source: "activity-start",
+        paint: {
+          "circle-radius": 6,
+          "circle-color": "#1f8b6f",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+        },
+      });
+      map.addLayer({
+        id: "activity-finish-marker",
+        type: "circle",
+        source: "activity-finish",
+        paint: {
+          "circle-radius": 6,
+          "circle-color": "#ef8d33",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+        },
+      });
+      map.addLayer({
+        id: "activity-active-marker",
+        type: "circle",
+        source: "activity-active",
+        paint: {
+          "circle-radius": 8,
+          "circle-color": "#ffffff",
+          "circle-stroke-color": "#163d35",
+          "circle-stroke-width": 3,
+        },
+      });
+
+      if (!hasFittedViewRef.current) {
+        const overview = overviewCameraStateRef.current;
+        if (overview) {
+          const currentBearing = lastCameraBearingRef.current ?? map.getBearing();
+          lastCameraBearingRef.current = moveMapToOverviewCamera(map, overview, currentBearing, 900);
+        } else if (trackCoordinates.length > 1) {
+          map.fitBounds(buildTrackBounds(trackCoordinates)!, { padding: 48, duration: 0 });
+          window.requestAnimationFrame(() => {
+            map.easeTo({
+              pitch: MAP_3D_PITCH,
+              bearing: MAP_3D_BEARING,
+              duration: 1200,
+              essential: true,
+            });
+          });
+        }
+        hasFittedViewRef.current = true;
+      }
+
+      syncCameraDebug();
+      setMapReady(true);
+    });
+
+    map.on("mousemove", (event) => {
+      if (isPlayingRef.current) return;
+      const nearest = findNearestMapLibreHoverPoint(map, routePointsRef.current, event.point.x, event.point.y);
+      onHoverChangeRef.current(nearest?.elapsed ?? null);
+    });
+
+    map.on("mouseleave", () => {
+      if (isPlayingRef.current) return;
+      onHoverChangeRef.current(null);
+    });
+
+    map.on("move", syncCameraDebug);
+    map.on("zoom", syncCameraDebug);
+    map.on("pitch", syncCameraDebug);
+    map.on("rotate", syncCameraDebug);
+    map.on("idle", syncCameraDebug);
+    map.on("data", (event) => {
+      const sourceId = "sourceId" in event ? event.sourceId : undefined;
+      if (event.dataType === "source" && sourceId === "terrainSource") {
+        syncCameraDebug();
+      }
+    });
+
+    map.on("error", (event) => {
+      const message = event.error instanceof Error ? event.error.message : "";
+      const loweredMessage = message.toLowerCase();
+      if (loweredMessage.includes("terrain") || loweredMessage.includes("dem") || loweredMessage.includes("source")) {
+        setTerrainMessage("Terrain-Daten konnten nicht vollständig geladen werden. Prüfe VITE_MAP_3D_DEM_URL und bei Bedarf auch VITE_MAP_3D_DEM_ENCODING.");
+      }
+    });
+
+    return () => {
+      hasFittedViewRef.current = false;
+      setMapReady(false);
+      if (cameraDebugFrameRef.current != null) {
+        window.cancelAnimationFrame(cameraDebugFrameRef.current);
+        cameraDebugFrameRef.current = null;
+      }
+      map.remove();
+      mapRef.current = null;
+    };
+  }, [endCoordinate, overviewRoutePoint, routeGeoPoints, startCoordinate, trackCoordinates]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !map.isStyleLoaded()) return;
+    updateGeoJsonSource(map, "activity-route", buildLineFeatureCollection(trackCoordinates));
+    updateGeoJsonSource(map, "activity-selected", buildLineFeatureCollection(selectedCoordinates));
+    updateGeoJsonSource(map, "activity-progress", buildLineFeatureCollection(travelledCoordinates));
+    updateGeoJsonSource(map, "activity-start", buildPointFeatureCollection(startCoordinate));
+    updateGeoJsonSource(map, "activity-finish", buildPointFeatureCollection(endCoordinate));
+    updateGeoJsonSource(map, "activity-active", buildPointFeatureCollection(activeCoordinate));
+  }, [activeCoordinate, endCoordinate, mapReady, selectedCoordinates, startCoordinate, trackCoordinates, travelledCoordinates]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !overviewCameraState || !map.isStyleLoaded() || isPlaying || !wasPlayingRef.current) return;
+
+    const currentBearing = lastCameraBearingRef.current ?? map.getBearing();
+    lastCameraBearingRef.current = moveMapToOverviewCamera(map, overviewCameraState, currentBearing, 1100);
+    wasPlayingRef.current = false;
+  }, [isPlaying, mapReady, overviewCameraState]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !mapReady || !isPlaying || !playbackCameraState) return;
+
+    const now = window.performance.now();
+    if (now - lastCameraUpdateRef.current < 140) return;
+    lastCameraUpdateRef.current = now;
+
+    const currentBearing = lastCameraBearingRef.current ?? map.getBearing();
+    lastCameraBearingRef.current = moveMapToPlaybackCamera(map, playbackCameraState, currentBearing, 260);
+  }, [isPlaying, mapReady, playbackCameraState]);
+
+  async function handleCopyCameraDebug() {
+    const text = buildFlyoverCameraDebugText(cameraDebug, activityReference);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback("copied");
+    } catch {
+      setCopyFeedback("error");
+    }
+
+    if (copyFeedbackTimeoutRef.current != null) {
+      window.clearTimeout(copyFeedbackTimeoutRef.current);
+    }
+    copyFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setCopyFeedback("idle");
+      copyFeedbackTimeoutRef.current = null;
+    }, 2200);
+  }
+
+  if (trackCoordinates.length < 2) {
     return (
       <div className="activity-flyover-stage-empty">
-        Fuer die 3D-Ansicht brauchen wir GPS-Punkte. Sobald der Track Positionsdaten enthaelt, erscheint hier automatisch der Flyover.
+        Für die 3D-Ansicht brauchen wir GPS-Punkte. Sobald der Track Positionsdaten enthält, erscheint hier automatisch die Terrain-Karte.
       </div>
     );
   }
 
-  const startPoint = projectedPoints[0] ?? null;
-  const endPoint = projectedPoints[projectedPoints.length - 1] ?? null;
-  const routeLine = buildPolylinePointString(projectedPoints.map((point) => ({ x: point.x, y: point.y })));
-  const shadowLine = buildPolylinePointString(projectedPoints.map((point) => ({ x: point.shadowX, y: point.shadowY })));
-  const selectedLine = buildPolylinePointString(selectedProjectedPoints.map((point) => ({ x: point.x, y: point.y })));
-  const travelledLine = buildPolylinePointString(travelledProjectedPoints.map((point) => ({ x: point.x, y: point.y })));
-
   return (
     <div className="activity-flyover-stage">
-      <svg className="activity-flyover-stage-svg" viewBox="0 0 940 560" aria-label="3D Flyover der Strecke">
-        <defs>
-          <linearGradient id="activityFlyoverSky" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f8fcfb" />
-            <stop offset="58%" stopColor="#edf7f3" />
-            <stop offset="100%" stopColor="#dfeee8" />
-          </linearGradient>
-          <linearGradient id="activityFlyoverGround" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#ffffff" stopOpacity="0.94" />
-            <stop offset="100%" stopColor="#eef7f3" stopOpacity="0.72" />
-          </linearGradient>
-          <filter id="activityFlyoverShadowBlur">
-            <feGaussianBlur stdDeviation="5" />
-          </filter>
-        </defs>
-
-        <rect x="0" y="0" width="940" height="560" rx="24" fill="url(#activityFlyoverSky)" />
-        <rect x="18" y="20" width="904" height="520" rx="22" fill="url(#activityFlyoverGround)" opacity="0.82" />
-        <ellipse cx="470" cy="470" rx="320" ry="74" fill="#d7e9e1" opacity="0.5" />
-        {Array.from({ length: 6 }).map((_, index) => {
-          const y = 102 + index * 58;
-          return <line key={`flyover-grid-row-${index}`} x1="58" y1={y} x2="882" y2={y} stroke="#d7e7e1" strokeWidth="1" opacity="0.55" />;
-        })}
-        {Array.from({ length: 7 }).map((_, index) => {
-          const x = 100 + index * 110;
-          return <line key={`flyover-grid-col-${index}`} x1={x} y1="72" x2={x} y2="502" stroke="#e6f0ec" strokeWidth="1" opacity="0.5" />;
-        })}
-
-        <polyline points={shadowLine} fill="none" stroke="#9bb6ad" strokeWidth="18" strokeOpacity="0.18" strokeLinecap="round" strokeLinejoin="round" filter="url(#activityFlyoverShadowBlur)" />
-        <polyline points={shadowLine} fill="none" stroke="#aec6be" strokeWidth="8" strokeOpacity="0.42" strokeLinecap="round" strokeLinejoin="round" />
-        <polyline points={routeLine} fill="none" stroke="#1f8b6f" strokeWidth="8" strokeOpacity="0.92" strokeLinecap="round" strokeLinejoin="round" />
-        {selectedProjectedPoints.length >= 2 ? <polyline points={selectedLine} fill="none" stroke="#f5c086" strokeWidth="10" strokeOpacity="0.62" strokeLinecap="round" strokeLinejoin="round" /> : null}
-        {travelledProjectedPoints.length >= 2 ? <polyline points={travelledLine} fill="none" stroke="#ef8d33" strokeWidth="7" strokeOpacity="0.94" strokeLinecap="round" strokeLinejoin="round" /> : null}
-
-        {startPoint ? <circle cx={startPoint.x} cy={startPoint.y} r="8" fill="#1f8b6f" stroke="#ffffff" strokeWidth="3" /> : null}
-        {endPoint ? <circle cx={endPoint.x} cy={endPoint.y} r="8" fill="#ef8d33" stroke="#ffffff" strokeWidth="3" /> : null}
-        {activePoint ? (
-          <>
-            <line x1={activePoint.shadowX} y1={activePoint.shadowY} x2={activePoint.x} y2={activePoint.y} stroke="#406057" strokeWidth="2.5" strokeDasharray="5 5" />
-            <circle cx={activePoint.shadowX} cy={activePoint.shadowY} r="7" fill="#dfe9e5" stroke="#8ea8a0" strokeWidth="2" />
-            <circle cx={activePoint.x} cy={activePoint.y} r="10" fill="#ffffff" stroke="#163d35" strokeWidth="3" />
-          </>
-        ) : null}
-      </svg>
-      <div className="activity-flyover-caption">3D Flyover aus GPS und Hoehenwerten</div>
+      <div ref={containerRef} className="activity-maplibre-map" aria-label="3D Terrain-Karte der Strecke" />
+      {cameraDebug ? (
+        <div className="activity-flyover-debug">
+          <div className="activity-flyover-debug-head">
+            <strong>3D Kamera</strong>
+            <button className="activity-flyover-debug-copy" type="button" onClick={handleCopyCameraDebug}>
+              {copyFeedback === "copied" ? "Kopiert" : copyFeedback === "error" ? "Kopieren fehlgeschlagen" : "Kamera kopieren"}
+            </button>
+          </div>
+          <div className="activity-flyover-debug-grid">
+            <span>Ride</span>
+            <strong>{activityReference ?? "-"}</strong>
+            <span>x</span>
+            <strong>{cameraDebug.centerLng.toFixed(6)}</strong>
+            <span>y</span>
+            <strong>{cameraDebug.centerLat.toFixed(6)}</strong>
+            <span>Terrain</span>
+            <strong>{cameraDebug.targetElevationM == null ? "-" : `${cameraDebug.targetElevationM.toFixed(1)} m`}</strong>
+            <span>Zoom</span>
+            <strong>{cameraDebug.zoom.toFixed(2)}</strong>
+            <span>Pitch</span>
+            <strong>{cameraDebug.pitch.toFixed(1)}°</strong>
+            <span>Bearing</span>
+            <strong>{cameraDebug.bearing.toFixed(1)}°</strong>
+          </div>
+          <small>Karte einmal passend ausrichten und mir diese Werte mit der Ride-ID schicken.</small>
+        </div>
+      ) : null}
+      <div className="activity-flyover-caption">3D Terrain mit MapLibre und DEM</div>
+      {terrainMessage ? <div className="activity-flyover-warning">{terrainMessage}</div> : null}
     </div>
   );
 }
@@ -1946,12 +2727,13 @@ function DistanceChart({
   const chartRight = 36;
   const chartWidth = Math.max(160, svgWidth - chartLeft - chartRight);
   const chartHeight = 220;
+  const svgHeight = 326;
   const plotLeftPercent = (chartLeft / svgWidth) * 100;
   const plotWidthPercent = (chartWidth / svgWidth) * 100;
   const minDistanceM = points.length ? Math.min(...points.map((point) => point.distanceM)) : 0;
   const maxDistanceM = points.length ? Math.max(...points.map((point) => point.distanceM), 1) : 1;
   const distanceSpan = Math.max(1, maxDistanceM - minDistanceM);
-  const projectedPoints = useMemo(() => (bounds ? projectDistanceSeries(points, bounds, chartWidth, chartHeight) : []), [bounds, points]);
+  const projectedPoints = useMemo(() => (bounds ? projectDistanceSeries(points, bounds, chartWidth, chartHeight) : []), [bounds, chartHeight, chartWidth, points]);
   const areaPath = useMemo(() => buildProjectedAreaPath(projectedPoints, chartHeight), [projectedPoints]);
   const hoveredPoint = useMemo(() => {
     if (hoverSecond == null || !points.length) return null;
@@ -1968,6 +2750,7 @@ function DistanceChart({
       ? Array.from({ length: 5 }, (_, index) => bounds.min + ((bounds.max - bounds.min) / 4) * index)
       : [];
   const xTicks = Array.from({ length: 5 }, (_, index) => minDistanceM + (distanceSpan / 4) * index);
+  const xTickLabels = xTicks.map((tick) => ({ distanceM: tick, ...formatAxisDistanceWithTime(points, tick) }));
   const activeSelection =
     dragSelection != null
       ? {
@@ -2041,8 +2824,8 @@ function DistanceChart({
           }
         }}
       >
-        <svg viewBox={`0 0 ${svgWidth} 300`} style={{ width: "100%", height: "300px", overflow: "visible", display: "block" }} aria-label={`${title} Verlauf auf Distanzbasis`}>
-          <rect x="0" y="0" width={svgWidth} height="300" rx="18" fill="#f7fcfa" />
+        <svg viewBox={`0 0 ${svgWidth} ${svgHeight}`} style={{ width: "100%", height: `${svgHeight}px`, overflow: "visible", display: "block" }} aria-label={`${title} Verlauf auf Distanz- und Zeitbasis`}>
+          <rect x="0" y="0" width={svgWidth} height={svgHeight} rx="18" fill="#f7fcfa" />
           {yTicks.map((tick, index) => {
             const y = chartTop + chartHeight - ((tick - bounds.axisMin) / bounds.span) * chartHeight;
             return (
@@ -2054,13 +2837,18 @@ function DistanceChart({
               </g>
             );
           })}
-          {xTicks.map((tick, index) => {
-            const x = chartLeft + ((tick - minDistanceM) / distanceSpan) * chartWidth;
+          {xTickLabels.map((tick, index) => {
+            const x = chartLeft + ((tick.distanceM - minDistanceM) / distanceSpan) * chartWidth;
             return (
               <g key={`${title}-x-distance-${index}`}>
                 <line x1={x} y1={chartTop} x2={x} y2={chartTop + chartHeight} stroke="#edf4f1" strokeWidth="1" />
-                <text x={x} y={chartTop + chartHeight + 28} textAnchor="middle" fontSize="12" fill="#5d756f">
-                  {formatAxisDistance(tick)}
+                <text textAnchor="middle" fontSize="12" fill="#5d756f">
+                  <tspan x={x} y={chartTop + chartHeight + 27}>
+                    {tick.distance}
+                  </tspan>
+                  <tspan x={x} y={chartTop + chartHeight + 43} fill="#7a918a">
+                    {tick.time}
+                  </tspan>
                 </text>
               </g>
             );
@@ -2108,8 +2896,8 @@ function DistanceChart({
           </g>
           {hoverX != null ? <line x1={hoverX} y1={chartTop} x2={hoverX} y2={chartTop + chartHeight} stroke="#2c3e39" strokeWidth="1.2" /> : null}
           {hoverX != null && hoverY != null ? <circle cx={hoverX} cy={hoverY} r="4.5" fill="#ffffff" stroke={color} strokeWidth="2" /> : null}
-          <text x={chartLeft + chartWidth / 2} y={chartTop + chartHeight + 56} textAnchor="middle" fontSize="13" fill="#3f5d57">
-            Distanzachse
+          <text x={chartLeft + chartWidth / 2} y={chartTop + chartHeight + 75} textAnchor="middle" fontSize="13" fill="#3f5d57">
+            Distanz und Zeit
           </text>
         </svg>
         {hoveredPoint ? (
@@ -2130,7 +2918,7 @@ function DistanceChart({
               color: "#16322e",
             }}
           >
-            {formatAxisDistance(hoveredPoint.distanceM)} | {formatNumber(hoveredPoint.value, digits, suffix)}
+            {formatAxisDistance(hoveredPoint.distanceM)} | {formatAxisTime(hoveredPoint.elapsed)} | {formatNumber(hoveredPoint.value, digits, suffix)}
           </div>
         ) : null}
         {visibleSelection && visibleSelection.right - visibleSelection.left >= 10 ? (
@@ -2138,7 +2926,7 @@ function DistanceChart({
             style={{
               position: "absolute",
               top: "18px",
-              bottom: "62px",
+              bottom: "88px",
               left: `${plotLeftPercent + ((visibleSelection.left - minDistanceM) / distanceSpan) * plotWidthPercent}%`,
               width: `${((visibleSelection.right - visibleSelection.left) / distanceSpan) * plotWidthPercent}%`,
               background: "rgba(31, 139, 111, 0.12)",
@@ -2165,6 +2953,7 @@ function ActivityTrackMap({
   onDistanceSelectionMove,
   onDistanceSelectionEnd,
   onDistanceSelectionReset,
+  activityReference,
 }: {
   routePoints: RoutePoint[];
   hoverSecond: number | null;
@@ -2177,6 +2966,7 @@ function ActivityTrackMap({
   onDistanceSelectionMove: (distanceM: number) => void;
   onDistanceSelectionEnd: () => void;
   onDistanceSelectionReset: () => void;
+  activityReference: string | null;
 }) {
   const [stageMode, setStageMode] = useState<RouteStageMode>("map");
   const [isPlaying, setIsPlaying] = useState(false);
@@ -2201,9 +2991,12 @@ function ActivityTrackMap({
       ? ([activeRoutePoint.latitudeDeg, activeRoutePoint.longitudeDeg] as LatLngTuple)
       : null;
   const selectedMetric = MAP_METRIC_OPTIONS.find((option) => option.key === mapMetricKey) ?? MAP_METRIC_OPTIONS[0];
-  const elevationPoints = useMemo(() => buildDistanceSeries(routePoints, (point) => point.altitudeM), [routePoints]);
-  const selectedMetricRoutePoints = useMemo(() => filterPointsByDistanceRange(routePoints, distanceRange), [distanceRange, routePoints]);
-  const metricPoints = useMemo(() => buildDistanceSeries(selectedMetricRoutePoints, selectedMetric.pick), [selectedMetricRoutePoints, selectedMetric]);
+  const chartRoutePoints = useMemo(() => {
+    const rangedPoints = distanceRange != null ? filterPointsByDistanceRange(routePoints, distanceRange) : routePoints;
+    return rangedPoints.length >= 2 ? rangedPoints : routePoints;
+  }, [distanceRange, routePoints]);
+  const elevationPoints = useMemo(() => buildDistanceSeries(chartRoutePoints, (point) => point.altitudeM), [chartRoutePoints]);
+  const metricPoints = useMemo(() => buildDistanceSeries(chartRoutePoints, selectedMetric.pick), [chartRoutePoints, selectedMetric]);
   const playbackPoints = useMemo(() => {
     const rangedPoints = distanceRange != null ? filterPointsByDistanceRange(routePoints, distanceRange) : routePoints;
     return rangedPoints.length >= 2 ? rangedPoints : routePoints;
@@ -2243,7 +3036,8 @@ function ActivityTrackMap({
     );
   }, [displayRoutePoint, routePoints]);
   const distanceRangeLabel =
-    distanceRange != null ? `${formatAxisDistance(distanceRange.start)} bis ${formatAxisDistance(distanceRange.end)}` : "kein Ausschnitt gesetzt";
+    distanceRange != null ? formatDistanceTimeRange(routePoints, distanceRange) : "kein Ausschnitt gesetzt";
+  const currentRouteRangeLabel = formatDistanceTimeRange(routePoints, distanceRange);
   const replayLabel = distanceRange != null ? "Ausschnitt" : "Gesamte Fahrt";
 
   useEffect(() => {
@@ -2301,6 +3095,15 @@ function ActivityTrackMap({
     onHoverChange(playbackStartPoint?.elapsed ?? null);
   }
 
+  function handleStageModeChange(nextMode: RouteStageMode) {
+    if (nextMode === stageMode) return;
+    if (nextMode === "flyover") {
+      setIsPlaying(false);
+      onHoverChange(playbackStartPoint?.elapsed ?? routePoints[0]?.elapsed ?? null);
+    }
+    setStageMode(nextMode);
+  }
+
   if (trackPoints.length < 2) {
     return (
       <div className="card">
@@ -2320,17 +3123,17 @@ function ActivityTrackMap({
       <div className="card">
         <div className="section-title-row">
           <h2>Karte</h2>
-          <span className="training-note">{stageMode === "map" ? "OpenStreetMap" : "3D Flyover"} | {trackPoints.length} GPS-Punkte</span>
+          <span className="training-note">{stageMode === "map" ? "OpenStreetMap" : "MapLibre 3D Terrain"} | {trackPoints.length} GPS-Punkte</span>
         </div>
         <div className="activity-map-shell">
           <div className="activity-map-stage">
             <div className="activity-map-toolbar">
               <div className="activity-map-mode-toggle" role="tablist" aria-label="Ansicht wechseln">
-                <button className={`activity-map-toggle-button ${stageMode === "map" ? "active" : ""}`} type="button" onClick={() => setStageMode("map")}>
+                <button className={`activity-map-toggle-button ${stageMode === "map" ? "active" : ""}`} type="button" onClick={() => handleStageModeChange("map")}>
                   2D Karte
                 </button>
-                <button className={`activity-map-toggle-button ${stageMode === "flyover" ? "active" : ""}`} type="button" onClick={() => setStageMode("flyover")}>
-                  3D Flyover
+                <button className={`activity-map-toggle-button ${stageMode === "flyover" ? "active" : ""}`} type="button" onClick={() => handleStageModeChange("flyover")}>
+                  3D Terrain
                 </button>
               </div>
               <div className="activity-map-replay-controls">
@@ -2357,7 +3160,14 @@ function ActivityTrackMap({
                   <ActivityMapHoverSync points={routePoints} onHoverChange={onHoverChange} />
                 </MapContainer>
               ) : (
-                <ActivityRouteFlyover routePoints={routePoints} hoverSecond={hoverSecond} selectedRange={previewRange} />
+                <ActivityRouteFlyover
+                  routePoints={routePoints}
+                  hoverSecond={hoverSecond}
+                  selectedRange={previewRange}
+                  isPlaying={isPlaying}
+                  onHoverChange={onHoverChange}
+                  activityReference={activityReference}
+                />
               )}
             </div>
           </div>
@@ -2378,7 +3188,7 @@ function ActivityTrackMap({
 
             <div className="settings-status-chip activity-map-replay-chip">
               <span>Replay</span>
-              <strong>{isPlaying ? "Laeuft" : "Bereit"}</strong>
+              <strong>{isPlaying ? "Läuft" : "Bereit"}</strong>
               <small>
                 {replayLabel} | {Math.round(playbackProgress * 100)}%
               </small>
@@ -2393,14 +3203,14 @@ function ActivityTrackMap({
             </div>
 
             <div className="settings-note-card activity-map-note-card">
-              <strong>{stageMode === "map" ? "Kartenquelle" : "3D-Flyover"}</strong>
+              <strong>{stageMode === "map" ? "Kartenquelle" : "3D-Terrain"}</strong>
               <span className="activity-map-note">
                 {stageMode === "map"
-                  ? "Aktuell werden die Tiles direkt von OpenStreetMap geladen. Bei groesserer Nutzung kannst du die Quelle per .env umstellen."
-                  : "Die 3D-Ansicht nutzt GPS- und Hoehendaten aus dem Track und bleibt bewusst leichtgewichtig ohne zusaetzliche 3D-Bibliothek."}
+                  ? "Aktuell werden die Tiles direkt von OpenStreetMap geladen. Bei größerer Nutzung kannst du die Quelle per .env umstellen."
+                  : "Die 3D-Ansicht nutzt jetzt einen offenen Stack mit MapLibre, OpenFreeMap als Vektor-Basiskarte und Mapterhorn als Terrainquelle für Höhenprofil und Kamerafahrt."}
               </span>
               <small>
-                {distanceRange != null ? `Play faehrt den gewaehlten Ausschnitt ab: ${distanceRangeLabel}.` : "Play faehrt die komplette Strecke vom Start bis ins Ziel ab."}
+                {distanceRange != null ? `Play fährt den gewählten Ausschnitt ab: ${distanceRangeLabel}.` : `Play fährt die komplette Strecke ab: ${currentRouteRangeLabel}.`}
               </small>
             </div>
 
@@ -2410,7 +3220,7 @@ function ActivityTrackMap({
                 <strong>{displayRoutePoint ? formatAxisDistance(displayRoutePoint.distanceM) : "-"}</strong>
               </div>
               <div className="training-mini-card">
-                <span>Hoehe</span>
+                <span>Höhe</span>
                 <strong>{displayRoutePoint ? formatNumber(displayRoutePoint.altitudeM, 0, " m") : "-"}</strong>
               </div>
               <div className="training-mini-card">
@@ -2436,7 +3246,6 @@ function ActivityTrackMap({
         hoverSecond={hoverSecond}
         onHoverChange={onHoverChange}
         colorByGrade
-        selectedRange={distanceRange}
         dragSelection={dragSelection}
         selectable
         onSelectionStart={onDistanceSelectionStart}
@@ -2460,7 +3269,7 @@ function ActivityTrackMap({
             </button>
           </div>
         </div>
-        <p className="training-note">Wähle aus, welche Größe direkt unter der Karte entlang der Strecke dargestellt werden soll. Hover auf Karte oder Diagramm synchronisiert den Trackpunkt. Aktueller Ausschnitt: {distanceRangeLabel}.</p>
+        <p className="training-note">Wähle aus, welche Größe direkt unter der Karte entlang der Strecke dargestellt werden soll. Hover auf Karte oder Diagramm synchronisiert den Trackpunkt. Aktuelle Ansicht: {currentRouteRangeLabel}.</p>
       </div>
 
       <DistanceChart
@@ -2474,9 +3283,10 @@ function ActivityTrackMap({
       />
 
       <div className="training-info-stack">
-        <div className="training-info-point">Die Karte läuft jetzt mit `Leaflet` und OpenStreetMap ganz ohne zusätzlichen API-Key.</div>
-        <div className="training-info-point">Wenn du später einen anderen Tile-Provider einsetzen willst, kannst du in der `.env` `VITE_MAP_TILE_URL`, `VITE_MAP_TILE_ATTRIBUTION` und optional `VITE_MAP_MAX_ZOOM` setzen.</div>
-        <div className="training-info-point">Für öffentliche oder stark genutzte Installationen würde ich langfristig eher einen eigenen Tile-Provider wie MapTiler oder Stadia eintragen, statt dauerhaft den freien Standard-Tile-Server zu belasten.</div>
+        <div className="training-info-point">Die 2D-Karte bleibt bei `Leaflet`, die 3D-Ansicht läuft jetzt mit `MapLibre GL JS` und einer DEM-Terrainquelle.</div>
+        <div className="training-info-point">Standardmäßig verwendet 3D jetzt `OpenFreeMap` für die offene Vektor-Basiskarte und `Mapterhorn` für das offene Terrain. Beides passt deutlich besser zu 3D als gestreckte Rastertiles.</div>
+        <div className="training-info-point">Wenn du die 3D-Quellen später selbst hosten willst, kannst du in der `.env` `VITE_MAP_3D_STYLE_URL`, `VITE_MAP_3D_DEM_URL`, `VITE_MAP_3D_DEM_ENCODING` und bei Bedarf `VITE_MAP_3D_PITCH`, `VITE_MAP_3D_BEARING` sowie `VITE_MAP_3D_EXAGGERATION` setzen.</div>
+        <div className="training-info-point">Ganz ohne Lizenzhinweise geht es trotzdem nicht: OpenStreetMap- und OpenMapTiles-Attribution bleibt notwendig. Technisch bleiben wir aber offen, vendorfrei und ohne proprietären API-Key.</div>
       </div>
     </div>
   );
@@ -3124,6 +3934,7 @@ export function ActivityDetailPage() {
                 onDistanceSelectionMove={handleMapSelectionMove}
                 onDistanceSelectionEnd={handleMapSelectionEnd}
                 onDistanceSelectionReset={resetMapSelection}
+                activityReference={data.activity.external_id || activityId || String(data.activity.id)}
               />
             ) : null}
 

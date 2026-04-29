@@ -2897,10 +2897,37 @@ h1 {
   background: linear-gradient(180deg, #f7fcfa 0%, #e9f4ef 100%);
 }
 
-.activity-flyover-stage-svg {
-  display: block;
+.activity-maplibre-map {
   width: 100%;
   height: 100%;
+}
+
+.activity-flyover-stage .maplibregl-canvas {
+  outline: none;
+}
+
+.activity-flyover-stage .maplibregl-ctrl-top-right {
+  top: 0.75rem;
+  right: 0.75rem;
+}
+
+.activity-flyover-stage .maplibregl-ctrl-bottom-right {
+  right: 0.75rem;
+  bottom: 0.75rem;
+}
+
+.activity-flyover-stage .maplibregl-ctrl-group,
+.activity-flyover-stage .maplibregl-ctrl-attrib {
+  border: 1px solid rgba(22, 50, 46, 0.12);
+  border-radius: 0.85rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 10px 24px rgba(18, 54, 45, 0.12);
+}
+
+.activity-flyover-stage .maplibregl-ctrl-attrib {
+  padding: 0.15rem 0.45rem;
+  color: #466a62;
+  font-size: 0.72rem;
 }
 
 .activity-flyover-stage-empty {
@@ -2924,6 +2951,89 @@ h1 {
   color: #234b42;
   font-size: 0.82rem;
   font-weight: 800;
+}
+
+.activity-flyover-warning {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  max-width: min(24rem, calc(100% - 8rem));
+  padding: 0.7rem 0.85rem;
+  border-radius: 0.9rem;
+  background: rgba(255, 247, 235, 0.96);
+  border: 1px solid #f0c694;
+  color: #6f4a1f;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  box-shadow: 0 12px 28px rgba(102, 66, 24, 0.12);
+}
+
+.activity-flyover-debug {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  z-index: 2;
+  min-width: min(19rem, calc(100% - 8rem));
+  max-width: min(24rem, calc(100% - 8rem));
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(22, 50, 46, 0.12);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 30px rgba(18, 54, 45, 0.16);
+  backdrop-filter: blur(10px);
+}
+
+.activity-flyover-debug-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.activity-flyover-debug-head strong {
+  color: #183b33;
+  font-size: 0.95rem;
+}
+
+.activity-flyover-debug-copy {
+  border: 1px solid #cfe3dc;
+  border-radius: 999px;
+  background: #f7fcfa;
+  color: #275148;
+  padding: 0.36rem 0.7rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  line-height: 1.2;
+  cursor: pointer;
+}
+
+.activity-flyover-debug-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.25rem 0.8rem;
+  align-items: baseline;
+}
+
+.activity-flyover-debug-grid span {
+  color: #648178;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.activity-flyover-debug-grid strong {
+  color: #173a33;
+  font-size: 0.84rem;
+  overflow-wrap: anywhere;
+}
+
+.activity-flyover-debug small {
+  color: #57736b;
+  font-size: 0.76rem;
+  line-height: 1.4;
 }
 
 .activity-map-sidebar {
@@ -3040,6 +3150,10 @@ h1 {
   .activity-map-marker-grid,
   .activity-map-point-grid {
     grid-template-columns: 1fr;
+  }
+
+  .activity-flyover-debug {
+    max-width: calc(100% - 6rem);
   }
 }
 
