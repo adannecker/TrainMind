@@ -57,6 +57,7 @@ from apps.api.garmin_service import (
     reset_imported_garmin_data,
 )
 from apps.api.garmin_file_import_service import analyze_fit_dump_zip, analyze_saved_fit_dump_zip, import_fit_dump_zip, list_saved_fit_dump_archives
+from apps.api.fit_create_llm_service import derive_fit_create_from_description
 from apps.api.llm_service import get_llm_status
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
@@ -93,6 +94,7 @@ from apps.api.training_service import (
     update_training_metric,
     upsert_training_zone_setting,
 )
+from packages.fit.fit_create_service import FitCreateError, generate_indoor_bike_fit
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -641,6 +643,63 @@ class ClimbCompareFindRidesRequest(BaseModel):
     limit: int = Field(default=300, ge=1, le=1000)
 
 
+class FitCreateLocationRequest(BaseModel):
+    name: str | None = None
+    latitude_deg: float = Field(ge=-90.0, le=90.0)
+    longitude_deg: float = Field(ge=-180.0, le=180.0)
+
+
+class FitCreateIncludeRequest(BaseModel):
+    power: bool = True
+    heart_rate: bool = True
+    cadence: bool = True
+    speed: bool = True
+    distance: bool = True
+    temperature: bool = True
+    humidity: bool = True
+    gps_position: bool = False
+    calories: bool = True
+    laps: bool = True
+    device_info: bool = True
+
+
+class FitCreateIntervalRequest(BaseModel):
+    name: str | None = None
+    duration_seconds: int = Field(ge=30, le=8 * 60 * 60)
+    avg_power_w: float = Field(ge=0.0, le=2500.0)
+    max_power_w: float = Field(ge=0.0, le=2500.0)
+    min_power_w: float = Field(ge=0.0, le=2500.0)
+    avg_hr_bpm: float = Field(ge=0.0, le=260.0)
+    max_hr_bpm: float = Field(ge=0.0, le=260.0)
+    min_hr_bpm: float = Field(ge=0.0, le=260.0)
+    start_hr_bpm: float = Field(ge=0.0, le=260.0)
+    end_hr_bpm: float = Field(ge=0.0, le=260.0)
+    avg_cadence_rpm: float = Field(ge=0.0, le=250.0)
+    min_cadence_rpm: float = Field(ge=0.0, le=250.0)
+    max_cadence_rpm: float = Field(ge=0.0, le=250.0)
+
+
+class FitCreateGenerateRequest(BaseModel):
+    start_time: str
+    temperature_c: float | None = Field(default=None, ge=-40.0, le=60.0)
+    humidity_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    location: FitCreateLocationRequest | None = None
+    training_type: str = Field(default="indoor", pattern=r"^indoor$")
+    device: str = Field(default="technogym_indoor_trainer", pattern=r"^technogym_indoor_trainer$")
+    system_mass_kg: float = Field(default=85.0, ge=40.0, le=180.0)
+    include: FitCreateIncludeRequest = Field(default_factory=FitCreateIncludeRequest)
+    intervals: list[FitCreateIntervalRequest] = Field(min_length=1, max_length=80)
+
+
+class FitCreateDescribeRequest(BaseModel):
+    description: str = Field(min_length=8, max_length=8000)
+    date: str | None = None
+    time: str | None = None
+    temperature_c: float | None = Field(default=None, ge=-40.0, le=60.0)
+    humidity_pct: float | None = Field(default=None, ge=0.0, le=100.0)
+    system_mass_kg: float | None = Field(default=None, ge=40.0, le=180.0)
+
+
 class WeightLogCreateRequest(BaseModel):
     recorded_at: str | None = None
     weight_kg: float
@@ -1074,6 +1133,7 @@ for request_model in (
     TrainingConfigSectionDeriveRequest,
     TrainingPlanSectionRequest,
     TrainingPlanDeriveRequest,
+    FitCreateDescribeRequest,
 ):
     request_model.model_rebuild()
 
@@ -1559,6 +1619,52 @@ async def fit_fix_inspect(file: UploadFile = File(...), current_user: dict = Dep
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
+
+
+@app.post("/fit-create/generate")
+def fit_create_generate(payload: FitCreateGenerateRequest, current_user: dict = Depends(get_current_user)) -> Response:
+    _ = current_user
+    try:
+        output_bytes, summary = generate_indoor_bike_fit(payload.model_dump())
+        download_name = str(summary.get("download_name") or "trainmind_indoor_bike.fit")
+        headers = {
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "X-TrainMind-Duration-Seconds": str(summary.get("duration_seconds") or 0),
+            "X-TrainMind-Distance-M": str(summary.get("distance_m") or 0),
+            "X-TrainMind-Avg-Speed-KMH": str(summary.get("avg_speed_kmh") or 0),
+            "X-TrainMind-Avg-Power": str(summary.get("avg_power_w") or 0),
+            "X-TrainMind-Estimated-Calories": str(summary.get("estimated_calories") or 0),
+            "X-TrainMind-Records": str(summary.get("records_count") or 0),
+        }
+        return Response(content=output_bytes, media_type="application/octet-stream", headers=headers)
+    except FitCreateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT create error: {exc}") from exc
+
+
+@app.post("/fit-create/describe")
+def fit_create_describe(payload: FitCreateDescribeRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return derive_fit_create_from_description(
+            user_id=int(current_user["id"]),
+            description=payload.description,
+            context={
+                "date": payload.date,
+                "time": payload.time,
+                "temperature_c": payload.temperature_c,
+                "humidity_pct": payload.humidity_pct,
+                "system_mass_kg": payload.system_mass_kg,
+            },
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OPENAI_API_KEY" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT create LLM error: {exc}") from exc
 
 
 @app.post("/garmin/import-files/analyze")
