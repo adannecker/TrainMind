@@ -121,6 +121,14 @@ def _get_metric_value_at(session, user_id: int, metric_type: str, reference_dt: 
     return float(fallback_value) if fallback_value is not None else None
 
 
+def _get_ftp_reference_at(session, user_id: int, reference_dt: datetime | None) -> float | None:
+    for metric_type in ("ftp", "ftp_w"):
+        value = _get_metric_value_at(session, user_id, metric_type, reference_dt)
+        if value is not None:
+            return value
+    return None
+
+
 def _fit_coordinate_to_degrees(value: Any) -> float | None:
     try:
         if value is None:
@@ -185,6 +193,87 @@ def _rolling_average(values: list[float], window: int) -> list[float]:
         total = prefix[end] - prefix[end - window]
         averaged.append(total / window)
     return averaged
+
+
+def _positive_seconds(value: Any) -> int | None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if numeric <= 0:
+        return None
+    return int(round(numeric))
+
+
+def _records_have_power(records: list[ActivityRecord]) -> bool:
+    return any(row.power_w is not None for row in records)
+
+
+def _records_have_usable_elapsed(records: list[ActivityRecord]) -> bool:
+    for row in records:
+        if row.elapsed_s is None:
+            continue
+        try:
+            if float(row.elapsed_s) >= 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _duration_from_streams(
+    activity: Activity,
+    *,
+    sessions: list[ActivitySession] | None = None,
+    records: list[ActivityRecord] | None = None,
+) -> int | None:
+    activity_duration_s = _positive_seconds(activity.duration_s)
+    if activity_duration_s is not None:
+        return activity_duration_s
+
+    if sessions:
+        session_durations = [
+            value
+            for row in sessions
+            for value in (
+                _positive_seconds(row.total_timer_time_s),
+                _positive_seconds(row.total_elapsed_time_s),
+            )
+            if value is not None
+        ]
+        if session_durations:
+            return max(session_durations)
+
+    if records:
+        elapsed_values: list[float] = []
+        timestamp_values: list[datetime] = []
+        for row in records:
+            if row.elapsed_s is not None:
+                try:
+                    elapsed_values.append(float(row.elapsed_s))
+                except (TypeError, ValueError):
+                    pass
+            if row.timestamp is not None:
+                timestamp_values.append(row.timestamp)
+        if elapsed_values:
+            return max(1, int(round(max(elapsed_values))) + 1)
+        if len(timestamp_values) >= 2:
+            return max(1, int(round((max(timestamp_values) - min(timestamp_values)).total_seconds())) + 1)
+
+    return None
+
+
+def _activity_stress_values(activities: list[dict[str, Any]]) -> list[float]:
+    values: list[float] = []
+    for activity in activities:
+        value = activity.get("stress_score")
+        if value is None:
+            continue
+        try:
+            values.append(float(value))
+        except (TypeError, ValueError):
+            continue
+    return values
 
 
 def _estimate_calories_from_work_kj(total_work_kj: float, eff_metabolic: float = 0.24) -> float | None:
@@ -255,21 +344,35 @@ def _resolve_activity_training_stress_score(
     if training_stress_score is not None:
         return training_stress_score
 
-    ftp_reference_w = _get_metric_value_at(session, activity.user_id, "ftp_w", activity.started_at)
+    ftp_reference_w = _get_ftp_reference_at(session, activity.user_id, activity.started_at)
     if ftp_reference_w is None:
         return None
 
     resolved_records = records
+    resolved_sessions: list[ActivitySession] | None = None
     if resolved_records is None:
         resolved_records = session.scalars(
             select(ActivityRecord).where(ActivityRecord.activity_id == activity.id).order_by(ActivityRecord.record_index.asc())
         ).all()
-    if not resolved_records and activity.source_fit_file_id is not None:
-        _sessions, _laps, resolved_records = _hydrate_activity_streams_from_fit(session, activity)
+    needs_hydration = (
+        not resolved_records
+        or not _records_have_power(resolved_records)
+        or not _records_have_usable_elapsed(resolved_records)
+    )
+    if needs_hydration and activity.source_fit_file_id is not None:
+        resolved_sessions, _laps, hydrated_records = _hydrate_activity_streams_from_fit(
+            session,
+            activity,
+            force_reparse=bool(resolved_records),
+        )
+        if hydrated_records:
+            resolved_records = hydrated_records
+
+    duration_s = _duration_from_streams(activity, sessions=resolved_sessions, records=resolved_records)
 
     derived_power_metrics = _compute_power_metrics(
         avg_power_w=activity.avg_power_w,
-        duration_s=activity.duration_s,
+        duration_s=duration_s,
         records=resolved_records,
         ftp_w=ftp_reference_w,
     )
@@ -969,8 +1072,6 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
         week_moving_s = 0
         week_distance_m = 0.0
         week_total_ascent_m = 0.0
-        week_stress_total = 0.0
-        week_stress_count = 0
 
         for row in rows:
             start_time = row.started_at
@@ -1010,9 +1111,6 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
             if row.distance_m:
                 week_distance_m += float(row.distance_m)
             week_total_ascent_m += float(total_ascent_m)
-            if stress_score is not None:
-                week_stress_total += stress_score
-                week_stress_count += 1
 
         weekday_labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
         days: list[dict[str, Any]] = []
@@ -1023,7 +1121,7 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
             day_moving_s = sum(a["duration_s"] or 0 for a in activities)
             day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
             day_total_ascent_m = round(sum(float(a["total_ascent_m"] or 0) for a in activities), 1)
-            stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
+            stress_values = _activity_stress_values(activities)
 
             days.append(
                 {
@@ -1042,6 +1140,8 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                 }
             )
 
+        week_stress_values = _activity_stress_values([activity for day in days for activity in day["activities"]])
+
         return {
             "week_start": week_start.isoformat(),
             "week_end": week_end.isoformat(),
@@ -1052,8 +1152,8 @@ def get_weekly_activities(user_id: int, reference_date: str | None = None) -> di
                 "moving_time_label": _duration_label(week_moving_s),
                 "distance_m": week_distance_m,
                 "total_ascent_m": round(week_total_ascent_m, 1),
-                "stress_total": week_stress_total if week_stress_count > 0 else None,
-                "stress_avg": (week_stress_total / week_stress_count) if week_stress_count > 0 else None,
+                "stress_total": sum(week_stress_values) if week_stress_values else None,
+                "stress_avg": (sum(week_stress_values) / len(week_stress_values)) if week_stress_values else None,
                 "goal": {
                     "target_hours": weekly_target_hours,
                     "target_stress": weekly_target_stress,
@@ -1118,8 +1218,6 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
         month_moving_s = 0
         month_distance_m = 0.0
         month_total_ascent_m = 0.0
-        month_stress_total = 0.0
-        month_stress_count = 0
 
         for row in rows:
             start_time = row.started_at
@@ -1157,9 +1255,6 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
             if row.distance_m:
                 month_distance_m += float(row.distance_m)
             month_total_ascent_m += float(total_ascent_m)
-            if stress_score is not None:
-                month_stress_total += stress_score
-                month_stress_count += 1
 
         weekday_labels = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
         days: list[dict[str, Any]] = []
@@ -1169,7 +1264,7 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
             day_moving_s = sum(a["duration_s"] or 0 for a in activities)
             day_distance_m = sum(float(a["distance_m"] or 0) for a in activities)
             day_total_ascent_m = round(sum(float(a["total_ascent_m"] or 0) for a in activities), 1)
-            stress_values = [float(a["stress_score"]) for a in activities if a["stress_score"] is not None]
+            stress_values = _activity_stress_values(activities)
             days.append(
                 {
                     "date": cursor.isoformat(),
@@ -1189,6 +1284,8 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
             )
             cursor += timedelta(days=1)
 
+        month_stress_values = _activity_stress_values([activity for day in days for activity in day["activities"]])
+
         return {
             "month_start": month_start.isoformat(),
             "month_end": month_end.isoformat(),
@@ -1200,8 +1297,8 @@ def get_monthly_activities(user_id: int, reference_date: str | None = None) -> d
                 "moving_time_label": _duration_label(month_moving_s),
                 "distance_m": month_distance_m,
                 "total_ascent_m": round(month_total_ascent_m, 1),
-                "stress_total": month_stress_total if month_stress_count > 0 else None,
-                "stress_avg": (month_stress_total / month_stress_count) if month_stress_count > 0 else None,
+                "stress_total": sum(month_stress_values) if month_stress_values else None,
+                "stress_avg": (sum(month_stress_values) / len(month_stress_values)) if month_stress_values else None,
                 "active_days": len([day for day in days if day["summary"]["activities_count"] > 0]),
             },
         }
@@ -1429,7 +1526,7 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
             raise ValueError("Activity not found.")
         sessions, laps, records = _hydrate_activity_streams_from_fit(session, activity)
         session.refresh(activity)
-        ftp_reference_w = _get_metric_value_at(session, user_id=user_id, metric_type="ftp", reference_dt=activity.started_at)
+        ftp_reference_w = _get_ftp_reference_at(session, user_id=user_id, reference_dt=activity.started_at)
         max_hr_reference_bpm = _get_metric_value_at(session, user_id=user_id, metric_type="max_hr", reference_dt=activity.started_at)
         llm_cache_row = session.scalar(
             select(ActivityLlmAnalysisCache).where(

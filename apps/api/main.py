@@ -674,6 +674,7 @@ class FitCreateIntervalRequest(BaseModel):
     min_hr_bpm: float = Field(ge=0.0, le=260.0)
     start_hr_bpm: float = Field(ge=0.0, le=260.0)
     end_hr_bpm: float = Field(ge=0.0, le=260.0)
+    hr_curve: str = Field(default="linear", pattern=r"^(linear|log_fast|log_late)$")
     avg_cadence_rpm: float = Field(ge=0.0, le=250.0)
     min_cadence_rpm: float = Field(ge=0.0, le=250.0)
     max_cadence_rpm: float = Field(ge=0.0, le=250.0)

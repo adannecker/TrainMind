@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import math
 import os
-import random
 import struct
 import tempfile
 from datetime import datetime, timezone
@@ -29,6 +28,7 @@ class FitCreateError(ValueError):
 FIT_EPOCH = datetime(1989, 12, 31, tzinfo=timezone.utc)
 FIELD_NUMBERS = {"timestamp": 253, "start_time": 2, "time_created": 4}
 SEMICIRCLES_PER_DEGREE = 2**31 / 180.0
+HR_CURVE_MODES = {"linear", "log_fast", "log_late"}
 FIT_CRC_TABLE = (
     0x0000,
     0xCC01,
@@ -240,11 +240,6 @@ def _wrap_fit_messages(messages: list[Any]) -> list[Record]:
     return records
 
 
-def _smoothstep(value: float) -> float:
-    clamped = max(0.0, min(1.0, value))
-    return clamped * clamped * (3.0 - 2.0 * clamped)
-
-
 def _air_density(temp_c: float | None, humidity_pct: float | None) -> float:
     temp = 15.0 if temp_c is None else float(temp_c)
     humidity = 50.0 if humidity_pct is None else max(0.0, min(100.0, float(humidity_pct)))
@@ -286,41 +281,102 @@ def _power_to_speed_flat(
     return (lo + hi) / 2.0
 
 
-def _wave_value(rng: random.Random, avg: float, min_value: float, max_value: float, phase: float) -> float:
+def _phase_offset(interval_index: int, metric_seed: int, component_index: int) -> float:
+    raw = math.sin((interval_index + 1) * 12.9898 + metric_seed * 78.233 + (component_index + 1) * 37.719) * 43758.5453
+    return raw - math.floor(raw)
+
+
+def _normalize_hr_curve(value: Any) -> str:
+    mode = str(value or "linear")
+    return mode if mode in HR_CURVE_MODES else "linear"
+
+
+def _hr_curve_progress(phase: float, mode: str) -> float:
+    clamped = max(0.0, min(1.0, phase))
+    curve = _normalize_hr_curve(mode)
+    if curve == "log_fast":
+        return math.log1p(clamped * 9.0) / math.log1p(9.0)
+    if curve == "log_late":
+        return 1.0 - math.log1p((1.0 - clamped) * 9.0) / math.log1p(9.0)
+    return clamped
+
+
+def _clamp_range(value: float, min_value: float, max_value: float) -> float:
+    low = min(min_value, max_value)
+    high = max(min_value, max_value)
+    return max(low, min(high, value))
+
+
+def _hr_baseline_value(start_hr: float, end_hr: float, min_hr: float, max_hr: float, phase: float, curve: str) -> float:
+    start = _clamp_range(start_hr, min_hr, max_hr)
+    end = _clamp_range(end_hr, min_hr, max_hr)
+    progress = _hr_curve_progress(phase, curve)
+    return _clamp_range(start + (end - start) * progress, min_hr, max_hr)
+
+
+def _hr_curve_average(start_hr: float, end_hr: float, min_hr: float, max_hr: float, curve: str) -> float:
+    sample_count = 121
+    total = 0.0
+    for index in range(sample_count):
+        total += _hr_baseline_value(start_hr, end_hr, min_hr, max_hr, index / float(sample_count - 1), curve)
+    return total / sample_count
+
+
+def _time_wave_value(
+    avg: float,
+    min_value: float,
+    max_value: float,
+    elapsed_seconds: float,
+    duration_seconds: float,
+    interval_index: int,
+    metric_seed: int,
+    periods_seconds: tuple[float, ...],
+    weights: tuple[float, ...],
+) -> float:
     low = min(avg, min_value)
     high = max(avg, max_value)
-    base_wave = (
-        0.58 * math.sin(2.0 * math.pi * (phase * 2.2 + 0.13))
-        + 0.25 * math.sin(2.0 * math.pi * (phase * 7.0 + 0.41))
-        + rng.uniform(-0.17, 0.17)
-    )
+    duration = max(1.0, duration_seconds)
+    base_wave = 0.0
+    for component_index, (period, weight) in enumerate(zip(periods_seconds, weights)):
+        dampening = min(1.0, max(0.18, duration / max(1.0, period)))
+        phase = elapsed_seconds / max(1.0, period) + _phase_offset(interval_index, metric_seed, component_index)
+        base_wave += weight * dampening * math.sin(2.0 * math.pi * phase)
+    base_wave = max(-0.92, min(0.92, base_wave))
     if base_wave >= 0:
         return avg + (high - avg) * min(base_wave, 1.0)
     return avg + (avg - low) * max(base_wave, -1.0)
 
 
 def _hr_value(
-    rng: random.Random,
     start_hr: float,
     end_hr: float,
     avg_hr: float,
     min_hr: float,
     max_hr: float,
     phase: float,
+    elapsed_seconds: float,
+    duration_seconds: float,
+    interval_index: int,
+    curve: str,
     *,
     is_first: bool,
     is_last: bool,
 ) -> float:
     if is_first:
-        return start_hr
+        return _hr_baseline_value(start_hr, end_hr, min_hr, max_hr, 0.0, curve)
     if is_last:
-        return end_hr
+        return _hr_baseline_value(start_hr, end_hr, min_hr, max_hr, 1.0, curve)
 
-    baseline = start_hr + (end_hr - start_hr) * _smoothstep(phase)
-    midpoint_avg = (start_hr + end_hr) / 2.0
+    baseline = _hr_baseline_value(start_hr, end_hr, min_hr, max_hr, phase, curve)
+    baseline_avg = _hr_curve_average(start_hr, end_hr, min_hr, max_hr, curve)
     bell = math.sin(math.pi * phase)
-    correction = (avg_hr - midpoint_avg) * bell * 1.35
-    ripple = math.sin(2.0 * math.pi * (phase * 3.0 + 0.2)) * 1.2 + rng.uniform(-0.8, 0.8)
+    correction = (avg_hr - baseline_avg) * bell * 1.35
+    duration = max(1.0, duration_seconds)
+    ripple = 0.0
+    for component_index, (period, weight) in enumerate(((95.0, 0.8), (43.0, 0.45), (17.0, 0.18))):
+        dampening = min(1.0, max(0.12, duration / period))
+        wave_phase = elapsed_seconds / period + _phase_offset(interval_index, 3, component_index)
+        ripple += weight * dampening * math.sin(2.0 * math.pi * wave_phase)
     return max(min_hr, min(max_hr, baseline + correction + ripple))
 
 
@@ -345,6 +401,7 @@ def _normalize_intervals(raw_intervals: Any) -> list[dict[str, Any]]:
         max_hr = _safe_float(raw.get("max_hr_bpm"), avg_hr)
         start_hr = _safe_float(raw.get("start_hr_bpm"), avg_hr)
         end_hr = _safe_float(raw.get("end_hr_bpm"), avg_hr)
+        hr_curve = _normalize_hr_curve(raw.get("hr_curve"))
         avg_cadence = _safe_float(raw.get("avg_cadence_rpm"), 0.0)
         min_cadence = _safe_float(raw.get("min_cadence_rpm"), avg_cadence)
         max_cadence = _safe_float(raw.get("max_cadence_rpm"), avg_cadence)
@@ -368,6 +425,7 @@ def _normalize_intervals(raw_intervals: Any) -> list[dict[str, Any]]:
                 "max_hr_bpm": max_hr,
                 "start_hr_bpm": max(min_hr, min(max_hr, start_hr)),
                 "end_hr_bpm": max(min_hr, min(max_hr, end_hr)),
+                "hr_curve": hr_curve,
                 "avg_cadence_rpm": avg_cadence,
                 "min_cadence_rpm": min_cadence,
                 "max_cadence_rpm": max_cadence,
@@ -469,7 +527,6 @@ def generate_indoor_bike_fit(payload: dict[str, Any]) -> tuple[bytes, dict[str, 
     include_device_info = bool(include.get("device_info", True))
 
     seed = _build_seed(payload)
-    rng = random.Random(seed)
     messages: list[Any] = []
 
     file_id = FileIdMessage()
@@ -526,30 +583,41 @@ def generate_indoor_bike_fit(payload: dict[str, Any]) -> tuple[bytes, dict[str, 
         for second in range(duration):
             phase = 0.0 if duration <= 1 else second / float(duration - 1)
             timestamp = start_time.timestamp() + current_second
-            power = _wave_value(
-                rng,
+            power = _time_wave_value(
                 interval["avg_power_w"],
                 interval["min_power_w"],
                 interval["max_power_w"],
-                phase,
+                current_second,
+                duration,
+                interval_index,
+                1,
+                (75.0, 28.0, 11.0, 5.5),
+                (0.26, 0.32, 0.18, 0.06),
             )
             hr = _hr_value(
-                rng,
                 interval["start_hr_bpm"],
                 interval["end_hr_bpm"],
                 interval["avg_hr_bpm"],
                 interval["min_hr_bpm"],
                 interval["max_hr_bpm"],
                 phase,
+                current_second,
+                duration,
+                interval_index,
+                interval["hr_curve"],
                 is_first=second == 0,
                 is_last=second == duration - 1,
             )
-            cadence = _wave_value(
-                rng,
+            cadence = _time_wave_value(
                 interval["avg_cadence_rpm"],
                 interval["min_cadence_rpm"],
                 interval["max_cadence_rpm"],
-                phase,
+                current_second,
+                duration,
+                interval_index,
+                2,
+                (95.0, 38.0, 16.0, 7.0),
+                (0.22, 0.22, 0.11, 0.04),
             )
             speed = _power_to_speed_flat(
                 power,
