@@ -122,6 +122,7 @@ type ActivityLapRow = {
   avg_power_w: number | null;
   max_power_w: number | null;
   avg_hr_bpm: number | null;
+  min_hr_bpm: number | null;
   max_hr_bpm: number | null;
   duration_label: string | null;
 };
@@ -466,6 +467,12 @@ function formatSignedNumber(value: number, digits = 1, suffix = ""): string {
   return `${prefix}${value.toFixed(digits)}${suffix}`;
 }
 
+function referencesDiffer(left: number | null | undefined, right: number | null | undefined): boolean {
+  if (left == null && right == null) return false;
+  if (left == null || right == null) return true;
+  return Math.round(left) !== Math.round(right);
+}
+
 function buildAnalysisSamples(records: ChartRecord[]): AnalysisSample[] {
   return records.map((row, index) => {
     const next = records[index + 1];
@@ -656,9 +663,9 @@ function buildHeartRateZones(maxHrReferenceBpm: number | null): ZoneDefinition[]
   ];
 }
 
-function findZoneForValue(value: number | null, zones: ZoneDefinition[]): ZoneDefinition | null {
-  if (value == null || !Number.isFinite(value)) return null;
-  return zones.find((zone) => (zone.min == null || value >= zone.min) && (zone.max == null || value <= zone.max)) ?? null;
+function findZonesForValue(value: number | null, zones: ZoneDefinition[]): ZoneDefinition[] {
+  if (value == null || !Number.isFinite(value)) return [];
+  return zones.filter((zone) => (zone.min == null || value >= zone.min) && (zone.max == null || value <= zone.max));
 }
 
 function summarizeZoneDurations(samples: AnalysisSample[], zones: ZoneDefinition[], pick: (sample: AnalysisSample) => number | null): ZoneDurationRow[] {
@@ -668,9 +675,10 @@ function summarizeZoneDurations(samples: AnalysisSample[], zones: ZoneDefinition
     secondsByZone.set(zone.id, 0);
   }
   for (const sample of samples) {
-    const zone = findZoneForValue(pick(sample), zones);
-    if (!zone) continue;
-    secondsByZone.set(zone.id, (secondsByZone.get(zone.id) ?? 0) + sample.seconds);
+    const matchingZones = findZonesForValue(pick(sample), zones);
+    for (const zone of matchingZones) {
+      secondsByZone.set(zone.id, (secondsByZone.get(zone.id) ?? 0) + sample.seconds);
+    }
   }
   return zones.map((zone) => {
     const seconds = secondsByZone.get(zone.id) ?? 0;
@@ -704,10 +712,10 @@ function buildZoneSegments(samples: AnalysisSample[], zones: ZoneDefinition[], p
     }
     if (index < windowSize - 1) continue;
     const avg = rollingSum / windowSize;
-    const zone = findZoneForValue(avg, zones);
+    const matchingZones = findZonesForValue(avg, zones);
     matches.push({
       second: perSecond[index].second,
-      inZone: zone?.id === selectedZoneId,
+      inZone: matchingZones.some((zone) => zone.id === selectedZoneId),
     });
   }
 
@@ -749,12 +757,16 @@ function deriveTrainingEffectAnalysis({
 }): TrainingEffectAnalysis {
   const ftpReferenceW = activity.ftp_reference_w;
   const movingHours = (activity.moving_time_s ?? activity.duration_s ?? 0) / 3600;
+  const recalculatedIntensityFactor =
+    activity.normalized_power_w != null && ftpReferenceW != null && ftpReferenceW > 0 ? activity.normalized_power_w / ftpReferenceW : null;
   const intensityFactor =
-    activity.intensity_factor ??
-    (activity.normalized_power_w != null && ftpReferenceW != null && ftpReferenceW > 0 ? activity.normalized_power_w / ftpReferenceW : null);
+    recalculatedIntensityFactor ??
+    activity.intensity_factor;
+  const recalculatedStressScore =
+    movingHours > 0 && recalculatedIntensityFactor != null ? movingHours * recalculatedIntensityFactor * recalculatedIntensityFactor * 100 : null;
   const stressScore =
-    activity.training_stress_score ??
-    (movingHours > 0 && intensityFactor != null ? movingHours * intensityFactor * intensityFactor * 100 : null);
+    recalculatedStressScore ??
+    activity.training_stress_score;
   const zoneSeconds = (minRatio: number | null, maxRatio: number | null) =>
     weightedSecondsForRange(samples, (sample) => {
       if (sample.power == null || ftpReferenceW == null || ftpReferenceW <= 0) return false;
@@ -3541,6 +3553,7 @@ export function ActivityDetailPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("general");
   const [data, setData] = useState<ActivityDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [analysisRefreshing, setAnalysisRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [viewRange, setViewRange] = useState<{ start: number; end: number } | null>(null);
   const [dragSelection, setDragSelection] = useState<ZoomSelection | null>(null);
@@ -3558,27 +3571,37 @@ export function ActivityDetailPage() {
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function loadDetail() {
-      if (!activityId) return;
+  async function loadActivityDetail({ pageLoading = false, analysisRefresh = false } = {}) {
+    if (!activityId) return;
+    if (pageLoading) {
       setLoading(true);
-      setError(null);
-      try {
-        const response = await apiFetch(`${API_BASE_URL}/activities/${activityId}`);
-        const payload = await parseJsonSafely<ActivityDetailResponse | { detail?: string }>(response);
-        if (!response.ok || !payload || !("activity" in payload)) {
-          throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Aktivität konnte nicht geladen werden.");
-        }
-        setData(payload);
-        setLlmAnalysis(payload.llm_analysis ?? null);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unbekannter Fehler");
-      } finally {
+    }
+    if (analysisRefresh) {
+      setAnalysisRefreshing(true);
+    }
+    setError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/activities/${activityId}`);
+      const payload = await parseJsonSafely<ActivityDetailResponse | { detail?: string }>(response);
+      if (!response.ok || !payload || !("activity" in payload)) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Aktivität konnte nicht geladen werden.");
+      }
+      setData(payload);
+      setLlmAnalysis(payload.llm_analysis ?? null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unbekannter Fehler");
+    } finally {
+      if (pageLoading) {
         setLoading(false);
       }
+      if (analysisRefresh) {
+        setAnalysisRefreshing(false);
+      }
     }
+  }
 
-    void loadDetail();
+  useEffect(() => {
+    void loadActivityDetail({ pageLoading: true });
   }, [activityId]);
 
   const normalizedRecords = useMemo(() => normalizeRecordTimeline(data?.records ?? []), [data?.records]);
@@ -3587,11 +3610,19 @@ export function ActivityDetailPage() {
   const viewStart = viewRange?.start ?? 0;
   const viewEnd = viewRange?.end ?? totalDuration;
   const llmStatus = data?.llm_analysis_status ?? null;
-  const llmNeedsUpdate = Boolean(llmStatus?.has_newer_version);
+  const llmSnapshot = llmAnalysis?.context_snapshot ?? data?.llm_analysis?.context_snapshot ?? null;
+  const llmReferenceChanged = llmSnapshot != null && (
+    referencesDiffer(data?.activity.ftp_reference_w, llmSnapshot?.ftp_reference_w) ||
+    referencesDiffer(data?.activity.max_hr_reference_bpm, llmSnapshot?.max_hr_reference_bpm)
+  );
+  const llmVersionNeedsUpdate = Boolean(llmStatus?.has_newer_version);
+  const llmNeedsUpdate = llmVersionNeedsUpdate || llmReferenceChanged;
   const llmButtonClassName = llmNeedsUpdate ? "primary-button analysis-stale" : "primary-button";
   const llmButtonLabel = llmLoading
     ? "Analysiere..."
-    : llmNeedsUpdate
+    : llmReferenceChanged
+      ? "Analyse mit aktueller FTP neu machen"
+      : llmVersionNeedsUpdate
       ? `Analyse auf ${formatAnalysisVersion(llmStatus?.current_version ?? null)} aktualisieren`
       : llmStatus?.available
         ? "Gespeicherte Analyse laden"
@@ -3987,13 +4018,14 @@ export function ActivityDetailPage() {
                           <th>Ø Watt</th>
                           <th>Max Watt</th>
                           <th>Ø HF</th>
+                          <th>Min HF</th>
                           <th>Max HF</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.laps.length === 0 ? (
                           <tr>
-                            <td colSpan={9}>Noch keine Rundendaten vorhanden.</td>
+                            <td colSpan={10}>Noch keine Rundendaten vorhanden.</td>
                           </tr>
                         ) : (
                           data.laps.map((lap) => (
@@ -4006,6 +4038,7 @@ export function ActivityDetailPage() {
                               <td>{formatNumber(lap.avg_power_w, 0, " W")}</td>
                               <td>{formatNumber(lap.max_power_w, 0, " W")}</td>
                               <td>{formatNumber(lap.avg_hr_bpm, 0, " bpm")}</td>
+                              <td>{formatNumber(lap.min_hr_bpm, 0, " bpm")}</td>
                               <td>{formatNumber(lap.max_hr_bpm, 0, " bpm")}</td>
                             </tr>
                           ))
@@ -4062,6 +4095,15 @@ export function ActivityDetailPage() {
                 <div className="card">
                   <div className="section-title-row">
                     <h2>Trainingsanalyse</h2>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void loadActivityDetail({ analysisRefresh: true })}
+                      disabled={loading || analysisRefreshing}
+                      aria-label="Trainingsanalyse mit aktueller FTP neu berechnen"
+                    >
+                      {analysisRefreshing ? "Aktualisiere..." : "Analyse neu berechnen"}
+                    </button>
                   </div>
                   <p className="training-note">
                     Dieser Bereich ist bewusst deterministisch und regelbasiert. Wenn im importierten Ride originale Garmin-Werte vorhanden sind, zeigen wir sie direkt an. Eigene Regeln und Heuristiken erklären dann nur noch, wie sich der Reiz fachlich einordnen lässt.
@@ -4191,7 +4233,7 @@ export function ActivityDetailPage() {
                       <h2>Wattzonen</h2>
                     </div>
                     <p className="training-note">
-                      Hier siehst du alle Wattzonen auf Basis der aktuellen FTP-Referenz, wie lange du darin unterwegs warst und welche zusammenhängenden Zeitblöcke in der gewählten Zone wirklich stabil waren.
+                      Hier siehst du alle Wattzonen auf Basis der aktuellen FTP-Referenz, wie lange du darin unterwegs warst und welche zusammenhängenden Zeitblöcke in der gewählten Zone wirklich stabil waren. Überlappende Zusatzbereiche wie Sweetspot werden zusätzlich zur Hauptzone gezählt.
                     </p>
                     {powerZones.length ? (
                       <>
@@ -4255,7 +4297,7 @@ export function ActivityDetailPage() {
                   <div className="section-title-row">
                     <h2>LLM Analyse</h2>
                     <div className="settings-actions">
-                      <button className={llmButtonClassName} type="button" onClick={() => void runLlmAnalysis()} disabled={llmLoading}>
+                      <button className={llmButtonClassName} type="button" onClick={() => void runLlmAnalysis(llmReferenceChanged)} disabled={llmLoading}>
                         {llmButtonLabel}
                       </button>
                       {llmStatus?.available || llmAnalysis ? (
@@ -4302,7 +4344,7 @@ export function ActivityDetailPage() {
                     {llmStatus?.available ? (
                       <div className="training-info-point">
                         Gespeichert ist {formatAnalysisVersion(llmStatus.analysis_version)} vom {formatDateTime(llmStatus.generated_at)}.
-                        {llmStatus.has_newer_version ? ` Aktuell verfügbar ist ${formatAnalysisVersion(llmStatus.current_version)}.` : " Diese Analyse ist aktuell."}
+                        {llmVersionNeedsUpdate ? ` Aktuell verfügbar ist ${formatAnalysisVersion(llmStatus.current_version)}.` : llmReferenceChanged ? " Die Referenzwerte haben sich seitdem geändert." : " Diese Analyse ist aktuell."}
                       </div>
                     ) : (
                       <div className="training-info-point">Für diese Aktivität ist noch keine gespeicherte LLM Analyse vorhanden.</div>

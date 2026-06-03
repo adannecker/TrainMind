@@ -23,7 +23,8 @@ DEFAULT_FIND_RIDES_LIMIT = 300
 MAX_FIND_RIDES_LIMIT = 1000
 MIN_MOVING_SPEED_MPS = 0.6
 MIN_MOVING_DISTANCE_M = 1.0
-CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION = 3
+MIN_COMPARE_SEGMENT_DISTANCE_M = 100.0
+CLIMB_COMPARE_SEARCH_ALGORITHM_VERSION = 4
 CLIMB_COMPARE_EXPORT_SCHEMA_VERSION = 1
 
 
@@ -430,12 +431,10 @@ def _derive_segment_summary(records: list[ActivityRecord]) -> dict[str, Any]:
     }
 
 
-def _is_valid_climb_summary(summary: dict[str, Any]) -> bool:
+def _is_valid_compare_summary(summary: dict[str, Any]) -> bool:
     distance_m = float(summary.get("distance_m") or 0.0)
-    ascent_m = float(summary.get("ascent_m") or 0.0)
-    descent_m = float(summary.get("descent_m") or 0.0)
-    net_gain_m = float(summary.get("net_gain_m") or 0.0)
-    return distance_m >= 100.0 and ascent_m >= 10.0 and net_gain_m > 0.0 and ascent_m > descent_m
+    route_points = summary.get("route_points") or []
+    return distance_m >= MIN_COMPARE_SEGMENT_DISTANCE_M and len(route_points) >= 2
 
 
 def _find_match_on_activity(
@@ -481,7 +480,7 @@ def _find_match_on_activity(
     matched_via_record = geo_records[int(match.get("matched_via_index", int(match["via_index"])))]
     matched_end_record = geo_records[int(match.get("matched_end_index", end_index))]
     segment_summary = _derive_segment_summary(geo_records[start_index : end_index + 1])
-    if not _is_valid_climb_summary(segment_summary):
+    if not _is_valid_compare_summary(segment_summary):
         return None
     return {
         "score": float(match["score"]),

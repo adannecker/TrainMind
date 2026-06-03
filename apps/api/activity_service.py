@@ -504,6 +504,7 @@ def _derive_record_metrics(records: list[ActivityRecord]) -> dict[str, float | N
         "avg_power_w": (sum(power_values) / len(power_values)) if power_values else None,
         "max_power_w": max(power_values) if power_values else None,
         "avg_hr_bpm": (sum(hr_values) / len(hr_values)) if hr_values else None,
+        "min_hr_bpm": min(hr_values) if hr_values else None,
         "max_hr_bpm": max(hr_values) if hr_values else None,
         "avg_speed_kmh": (sum(speed_values) / len(speed_values)) if speed_values else None,
     }
@@ -1472,7 +1473,11 @@ def list_activities(
             avg_speed_kmh = None
             if row.duration_s and row.duration_s > 0 and row.distance_m is not None:
                 avg_speed_kmh = (row.distance_m / row.duration_s) * 3.6
-            stress_score = _resolve_activity_training_stress_score(session, activity=row)
+            # Keep the all-activities table cheap. Deriving TSS from FIT streams can
+            # hydrate and recalculate thousands of records per activity.
+            stress_score = _stress_from_raw_json(row.raw_json)
+            if stress_score is None:
+                stress_score = _extract_summary_metric(row.raw_json, "tss", "trainingStressScore")
             items.append(
                 {
                     "id": row.id,
@@ -1741,6 +1746,7 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
                 "avg_power_w": row.avg_power_w if row.avg_power_w is not None else derived_metrics["avg_power_w"],
                 "max_power_w": row.max_power_w if row.max_power_w is not None else derived_metrics["max_power_w"],
                 "avg_hr_bpm": row.avg_hr_bpm if row.avg_hr_bpm is not None else derived_metrics["avg_hr_bpm"],
+                "min_hr_bpm": derived_metrics["min_hr_bpm"],
                 "max_hr_bpm": row.max_hr_bpm if row.max_hr_bpm is not None else derived_metrics["max_hr_bpm"],
                 "duration_label": _duration_label(int(row.total_timer_time_s)) if row.total_timer_time_s is not None else _duration_label(int(row.total_elapsed_time_s)) if row.total_elapsed_time_s is not None else None,
                 "_elapsed_to_s": elapsed_to_s,
@@ -2264,7 +2270,8 @@ def _build_activity_llm_context(detail: dict[str, Any], max_hr_reference_bpm: fl
                     ("<55% FTP", None, 0.55),
                     ("56-75% FTP", 0.56, 0.75),
                     ("76-90% FTP", 0.76, 0.90),
-                    ("91-105% FTP", 0.91, 1.05),
+                    ("88-94% FTP Sweetspot", 0.88, 0.94),
+                    ("91-105% FTP Schwelle", 0.91, 1.05),
                     ("106-120% FTP", 1.06, 1.20),
                     (">120% FTP", 1.21, None),
                 ],
