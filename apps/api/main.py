@@ -96,6 +96,7 @@ from apps.api.training_service import (
 )
 from packages.fit.fit_create_service import FitCreateError, generate_indoor_bike_fit
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
+from packages.fit.fit_trim_service import FitTrimError, inspect_fit_for_trim, normalize_delete_segments, trim_fit_file
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 load_dotenv(dotenv_path=REPO_ROOT / ".env")
@@ -1622,6 +1623,20 @@ async def fit_fix_inspect(file: UploadFile = File(...), current_user: dict = Dep
         raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
 
 
+@app.post("/fit-trim/inspect")
+async def fit_trim_inspect(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitTrimError("Bitte eine FIT-Datei auswählen.")
+        return inspect_fit_for_trim(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+    except FitTrimError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT trim error: {exc}") from exc
+
+
 @app.post("/fit-create/generate")
 def fit_create_generate(payload: FitCreateGenerateRequest, current_user: dict = Depends(get_current_user)) -> Response:
     _ = current_user
@@ -1771,6 +1786,49 @@ async def fit_fix_apply(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected FIT error: {exc}") from exc
+
+
+@app.post("/fit-trim/apply")
+async def fit_trim_apply(
+    file: UploadFile = File(...),
+    delete_segments_json: str = Form(...),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitTrimError("Bitte eine FIT-Datei auswählen.")
+        inspected = inspect_fit_for_trim(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+        raw_segments = json.loads(delete_segments_json)
+        delete_segments = normalize_delete_segments(raw_segments, int(inspected["duration_seconds"]))
+        output_bytes, summary = trim_fit_file(file_bytes=file_bytes, delete_segments=delete_segments)
+
+        source_name = (file.filename or "uploaded.fit").strip() or "uploaded.fit"
+        if source_name.lower().endswith(".fit"):
+            download_name = f"{source_name[:-4]}_trimmed.fit"
+        else:
+            download_name = f"{source_name}_trimmed.fit"
+
+        headers = {
+            "Content-Disposition": f'attachment; filename="{download_name}"',
+            "X-TrainMind-Original-Duration-Seconds": str(summary["original_duration_seconds"]),
+            "X-TrainMind-Duration-Seconds": str(summary["duration_seconds"]),
+            "X-TrainMind-Kept-Records": str(summary["kept_record_count"]),
+            "X-TrainMind-Removed-Records": str(summary["removed_record_count"]),
+            "X-TrainMind-Total-Distance-M": str(summary["total_distance_m"]),
+            "X-TrainMind-Avg-Speed-KMH": str(round(float(summary["avg_speed_mps"]) * 3.6, 2)),
+            "X-TrainMind-Avg-Power": str(summary["avg_power"] or ""),
+            "X-TrainMind-Max-Power": str(summary["max_power"] or ""),
+            "X-TrainMind-Updated-Fields": ",".join(summary["updated_fields"]),
+        }
+        return Response(content=output_bytes, media_type="application/octet-stream", headers=headers)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid delete segments JSON: {exc}") from exc
+    except FitTrimError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT trim error: {exc}") from exc
 
 
 @app.get("/activities/week")

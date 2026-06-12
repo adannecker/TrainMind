@@ -14,6 +14,7 @@ import { ClimbComparePage } from "./pages/ClimbComparePage";
 import { CreateFitFilePage } from "./pages/CreateFitFilePage";
 import { FindRidesOnMapPage } from "./pages/FindRidesOnMapPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
+import { FitTrimPage } from "./pages/FitTrimPage";
 import { HomePage } from "./pages/HomePage";
 import { ImportFilesPage } from "./pages/ImportFilesPage";
 import { IngredientsPage } from "./pages/IngredientsPage";
@@ -75,6 +76,7 @@ const navGroups: NavGroup[] = [
       { label: "Create FIT File", to: "/tools/create-fit-file" },
       { label: "Import Files", to: "/tools/import-files" },
       { label: "Fix FIT file", to: "/tools/fix-fit-file" },
+      { label: "FIT file kürzen", to: "/tools/trim-fit-file" },
     ],
   },
   {
@@ -624,6 +626,7 @@ function Layout() {
               <Route path="/tools/import-files" element={<ImportFilesPage />} />
               <Route path="/tools/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/tools/create-fit-file" element={<CreateFitFilePage />} />
+              <Route path="/tools/trim-fit-file" element={<FitTrimPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
               <Route path="/activities/month" element={<ActivitiesMonthPage />} />
               <Route path="/activities/climb-compare" element={<ClimbComparePage />} />
