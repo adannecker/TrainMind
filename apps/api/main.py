@@ -25,6 +25,7 @@ from apps.api.activity_service import (
     get_activity_detail,
     get_activity_achievement_check_status,
     get_monthly_activities,
+    get_yearly_activity_dashboard,
     list_activities,
     get_weekly_activities,
     rebuild_activity_achievement_checks,
@@ -79,6 +80,7 @@ from apps.api.nutrition_service import (
     update_recipe,
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
+from apps.api.ride_analysis_service import RideAnalysisError, analyze_ride_file_no_import
 from apps.api.training_service import (
     build_athlete_profile_prompt,
     build_training_config_prompt,
@@ -1637,6 +1639,18 @@ async def fit_trim_inspect(file: UploadFile = File(...), current_user: dict = De
         raise HTTPException(status_code=500, detail=f"Unexpected FIT trim error: {exc}") from exc
 
 
+@app.post("/ride-analysis/no-import/analyze")
+async def ride_analysis_no_import_analyze(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        return analyze_ride_file_no_import(file_bytes=file_bytes, filename=file.filename or "uploaded")
+    except RideAnalysisError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected ride analysis error: {exc}") from exc
+
+
 @app.post("/fit-create/generate")
 def fit_create_generate(payload: FitCreateGenerateRequest, current_user: dict = Depends(get_current_user)) -> Response:
     _ = current_user
@@ -1871,6 +1885,19 @@ def activities_months_available(current_user: dict = Depends(get_current_user)) 
         return get_available_activity_months(user_id=int(current_user["id"]))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected activity error: {exc}") from exc
+
+
+@app.get("/activities/year-dashboard")
+def activities_year_dashboard(
+    year: int | None = Query(default=None, ge=1970, le=2200),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return get_yearly_activity_dashboard(user_id=int(current_user["id"]), year=year)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected activity dashboard error: {exc}") from exc
 
 
 @app.get("/activities")

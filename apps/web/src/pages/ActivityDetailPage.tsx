@@ -48,6 +48,7 @@ type ActivitySummary = {
   intensity_factor: number | null;
   variability_index: number | null;
   training_stress_score: number | null;
+  training_stress_source_label?: string | null;
   aerobic_training_effect: number | null;
   anaerobic_training_effect: number | null;
   aerobic_training_effect_message: string | null;
@@ -67,6 +68,7 @@ type ActivitySummary = {
   paused_time_s: number | null;
   paused_time_label: string | null;
   stress_score: number | null;
+  stress_source_label?: string | null;
   achievements_checked_at: string | null;
   achievements_check_version: number | null;
   records_count: number;
@@ -3719,16 +3721,16 @@ export function ActivityDetailPage() {
             },
             {
               primary: {
-                label: "TSS",
+                label: data.activity.training_stress_source_label ? `TSS (${data.activity.training_stress_source_label})` : "TSS",
                 value: formatNumber(data.activity.training_stress_score, 1),
-                help: "Training Stress Score kombiniert Dauer und Intensität zu einem Belastungswert. Rund 100 TSS entsprechen grob einer Stunde bei FTP.",
+                help: "Training Stress Score kombiniert Dauer und Intensität zu einem Belastungswert. Ohne Watt wird der Wert aus Herzfrequenz oder notfalls aus Dauer, Distanz und Höhenmetern geschätzt.",
               },
             },
             {
               primary: {
-                label: "Stress",
+                label: data.activity.stress_source_label ? `Stress (${data.activity.stress_source_label})` : "Stress",
                 value: formatNumber(data.activity.stress_score, 1),
-                help: "Das ist der verfügbare Belastungswert für diese Aktivität. Wenn kein externer Stresswert vorliegt, verwenden wir den berechneten TSS.",
+                help: "Das ist der verfügbare Belastungswert für diese Aktivität. Die Klammer zeigt, ob er vom Gerät, aus Power, aus Herzfrequenz oder als Schätzung kommt.",
               },
             },
             {

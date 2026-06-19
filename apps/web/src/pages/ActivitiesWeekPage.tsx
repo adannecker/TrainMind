@@ -1,6 +1,39 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiFetch } from "../api";
+import {
+  AnalyticsScopeNav,
+  DashboardCard,
+  DashboardHeader,
+  DonutChart,
+  KpiCard,
+  KpiGrid,
+  MetricList,
+  MiniDistribution,
+  ProgressCard,
+  VerticalBarChart,
+} from "../components/DashboardComponents";
+import {
+  WEEKLY_ASCENT_TARGET_M,
+  WEEKLY_DISTANCE_TARGET_KM,
+  YEARLY_ASCENT_TARGET_M,
+  addDays,
+  addMonths,
+  buildIntensityBuckets,
+  flattenActivities,
+  formatApiErrorDetail,
+  formatDate,
+  formatDeltaPercent,
+  formatHoursFromSeconds,
+  formatKilometersFromMeters,
+  formatMeters,
+  formatNumber,
+  formatTime,
+  getComparison,
+  numeric,
+  percentOf,
+  todayIsoDate,
+} from "../components/dashboardUtils";
 import { API_BASE_URL } from "../config";
 
 type WeekActivity = {
@@ -16,6 +49,7 @@ type WeekActivity = {
   avg_power_w: number | null;
   avg_speed_kmh: number | null;
   stress_score: number | null;
+  stress_source_label?: string | null;
 };
 
 type DayBundle = {
@@ -61,92 +95,107 @@ type AvailableWeek = {
   activities_count: number;
 };
 
-const WEEKLY_ASCENT_TARGET_M = 2500;
-const ASCENT_MILESTONES_M = [500, 1000, 1500, 2000, WEEKLY_ASCENT_TARGET_M];
+type TrainingMetricsResponse = {
+  ftp?: { value: number }[];
+};
+
+type ClimbContext = {
+  monthAscentM: number | null;
+  yearAscentM: number | null;
+  yearTargetAscentM: number;
+};
 
 async function parseJsonSafely<T>(response: Response): Promise<T | null> {
   const text = await response.text();
-  if (!text) {
-    return null;
-  }
+  if (!text) return null;
   return JSON.parse(text) as T;
 }
 
-function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+async function requestWeek(referenceDate: string): Promise<WeekResponse> {
+  const response = await apiFetch(`${API_BASE_URL}/activities/week?reference_date=${referenceDate}`);
+  const payload = await parseJsonSafely<WeekResponse | { detail?: unknown }>(response);
+  if (!response.ok || !payload || !("week_start" in payload)) {
+    throw new Error(formatApiErrorDetail(payload && "detail" in payload ? payload.detail : null, "Wochenansicht konnte nicht geladen werden."));
+  }
+  return payload;
 }
 
-function parseIsoDateParts(isoDate: string): { y: number; m: number; d: number } | null {
-  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!match) {
-    return null;
-  }
-  return { y: Number(match[1]), m: Number(match[2]), d: Number(match[3]) };
+function intensityClass(stress: number | null): string {
+  const value = numeric(stress);
+  if (value <= 0) return "load-none";
+  if (value < 35) return "load-low";
+  if (value < 75) return "load-medium";
+  if (value < 120) return "load-high";
+  return "load-very-high";
 }
 
-function addDays(isoDate: string, days: number): string {
-  const parts = parseIsoDateParts(isoDate);
-  if (!parts) {
-    return isoDate;
+function weightedAverage(activities: WeekActivity[], key: "avg_power_w" | "avg_speed_kmh"): number | null {
+  let weighted = 0;
+  let seconds = 0;
+  for (const activity of activities) {
+    const value = activity[key];
+    const duration = numeric(activity.duration_s);
+    if (value === null || value === undefined || duration <= 0) continue;
+    weighted += Number(value) * duration;
+    seconds += duration;
   }
-  const dt = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return seconds > 0 ? weighted / seconds : null;
 }
 
-function addMonths(isoDate: string, months: number): string {
-  const parts = parseIsoDateParts(isoDate);
-  if (!parts) {
-    return isoDate;
+function bestBy(
+  activities: WeekActivity[],
+  selector: (activity: WeekActivity) => number,
+): { activity: WeekActivity; value: number } | null {
+  let best: { activity: WeekActivity; value: number } | null = null;
+  for (const activity of activities) {
+    const value = selector(activity);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    if (!best || value > best.value) {
+      best = { activity, value };
+    }
   }
-  const dt = new Date(Date.UTC(parts.y, parts.m - 1, parts.d));
-  dt.setUTCMonth(dt.getUTCMonth() + months);
-  const y = dt.getUTCFullYear();
-  const m = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(dt.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${d}`;
+  return best;
 }
 
-function formatDate(value: string): string {
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) {
-    return value;
-  }
-  return dt.toLocaleDateString("de-CH", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
+function buildWeekStreaks(weeks: AvailableWeek[]): { active: number; longest: number; lastGap: string } {
+  const starts = weeks.map((week) => week.week_start).sort((left, right) => right.localeCompare(left));
+  if (!starts.length) return { active: 0, longest: 0, lastGap: "-" };
 
-function formatTime(value: string | null): string {
-  if (!value) {
-    return "-";
+  let active = 1;
+  for (let index = 1; index < starts.length; index += 1) {
+    if (addDays(starts[index - 1], -7) !== starts[index]) break;
+    active += 1;
   }
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) {
-    return "-";
-  }
-  return dt.toLocaleTimeString("de-CH", { hour: "2-digit", minute: "2-digit" });
-}
 
-function formatDistanceMeters(value: number | null): string {
-  if (value === null || value === undefined) {
-    return "-";
+  let longest = 1;
+  let current = 1;
+  let lastGap = "-";
+  for (let index = 1; index < starts.length; index += 1) {
+    if (addDays(starts[index - 1], -7) === starts[index]) {
+      current += 1;
+      longest = Math.max(longest, current);
+    } else {
+      if (lastGap === "-") {
+        lastGap = `${formatDate(addDays(starts[index], 7))} bis ${formatDate(addDays(starts[index - 1], -1))}`;
+      }
+      current = 1;
+    }
   }
-  return `${(value / 1000).toFixed(1)} km`;
-}
 
-function formatNumber(value: number | null, digits = 0): string {
-  if (value === null || value === undefined) {
-    return "-";
-  }
-  return value.toFixed(digits);
+  return { active, longest, lastGap };
 }
 
 export function ActivitiesWeekPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<WeekResponse | null>(null);
+  const [previousData, setPreviousData] = useState<WeekResponse | null>(null);
   const [availableWeeks, setAvailableWeeks] = useState<AvailableWeek[]>([]);
+  const [ftp, setFtp] = useState<number | null>(null);
+  const [climbContext, setClimbContext] = useState<ClimbContext>({
+    monthAscentM: null,
+    yearAscentM: null,
+    yearTargetAscentM: YEARLY_ASCENT_TARGET_M,
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayIsoDate());
@@ -159,7 +208,50 @@ export function ActivitiesWeekPage() {
         setAvailableWeeks(payload.weeks ?? []);
       }
     } catch {
-      // Keep view usable when auxiliary endpoint fails.
+      setAvailableWeeks([]);
+    }
+  }
+
+  async function loadTrainingMetrics() {
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/training/metrics`);
+      const payload = await parseJsonSafely<TrainingMetricsResponse>(response);
+      if (response.ok && payload?.ftp?.length) {
+        setFtp(Number(payload.ftp[0].value));
+      }
+    } catch {
+      setFtp(null);
+    }
+  }
+
+  async function loadClimbContext(referenceDate: string) {
+    const year = new Date(`${referenceDate}T00:00:00Z`).getUTCFullYear();
+    try {
+      const [monthResult, yearResult] = await Promise.allSettled([
+        apiFetch(`${API_BASE_URL}/activities/month?reference_date=${referenceDate}`),
+        apiFetch(`${API_BASE_URL}/activities/year-dashboard?year=${year}`),
+      ]);
+
+      let monthAscentM: number | null = null;
+      let yearAscentM: number | null = null;
+      let yearTargetAscentM = YEARLY_ASCENT_TARGET_M;
+
+      if (monthResult.status === "fulfilled" && monthResult.value.ok) {
+        const payload = await parseJsonSafely<{ summary?: { total_ascent_m?: number } }>(monthResult.value);
+        monthAscentM = payload?.summary?.total_ascent_m ?? null;
+      }
+      if (yearResult.status === "fulfilled" && yearResult.value.ok) {
+        const payload = await parseJsonSafely<{
+          summary?: { total_ascent_m?: number };
+          goals?: { ascent_m?: number };
+        }>(yearResult.value);
+        yearAscentM = payload?.summary?.total_ascent_m ?? null;
+        yearTargetAscentM = payload?.goals?.ascent_m ?? YEARLY_ASCENT_TARGET_M;
+      }
+
+      setClimbContext({ monthAscentM, yearAscentM, yearTargetAscentM });
+    } catch {
+      setClimbContext({ monthAscentM: null, yearAscentM: null, yearTargetAscentM: YEARLY_ASCENT_TARGET_M });
     }
   }
 
@@ -167,19 +259,17 @@ export function ActivitiesWeekPage() {
     setLoading(true);
     setError(null);
     try {
-      const response = await apiFetch(`${API_BASE_URL}/activities/week?reference_date=${referenceDate}`);
-      const payload = await parseJsonSafely<WeekResponse | { detail?: string }>(response);
-      if (!response.ok) {
-        throw new Error(
-          typeof payload === "object" && payload && "detail" in payload && payload.detail
-            ? payload.detail
-            : "Wochenansicht konnte nicht geladen werden.",
-        );
+      const [currentResult, previousResult] = await Promise.allSettled([
+        requestWeek(referenceDate),
+        requestWeek(addDays(referenceDate, -7)),
+      ]);
+
+      if (currentResult.status === "rejected") {
+        throw currentResult.reason instanceof Error ? currentResult.reason : new Error("Wochenansicht konnte nicht geladen werden.");
       }
-      if (!payload) {
-        throw new Error("Wochenansicht konnte nicht geladen werden: leere Antwort von der API.");
-      }
-      setData(payload as WeekResponse);
+      setData(currentResult.value);
+      setPreviousData(previousResult.status === "fulfilled" ? previousResult.value : null);
+      void loadClimbContext(referenceDate);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unbekannter Fehler");
     } finally {
@@ -189,239 +279,274 @@ export function ActivitiesWeekPage() {
 
   useEffect(() => {
     void loadWeeksAvailable();
+    void loadTrainingMetrics();
   }, []);
 
   useEffect(() => {
     void loadWeek(selectedDate);
   }, [selectedDate]);
 
-  const weekTitle = useMemo(() => {
-    if (!data) {
-      return "Woche -";
-    }
-    return `Woche ${formatDate(data.week_start)} - ${formatDate(data.week_end)}`;
-  }, [data]);
-
-  const weekDistanceKm = useMemo(() => ((data?.summary.distance_m ?? 0) / 1000), [data]);
-  const weekHours = useMemo(() => ((data?.summary.moving_time_s ?? 0) / 3600), [data]);
-  const weekStress = useMemo(() => (data?.summary.stress_total ?? 0), [data]);
-  const weekAscentM = useMemo(() => (data?.summary.total_ascent_m ?? 0), [data]);
+  const activities = useMemo(() => flattenActivities(data?.days ?? []) as WeekActivity[], [data]);
+  const activeDays = useMemo(() => data?.days.filter((day) => day.summary.activities_count > 0).length ?? 0, [data]);
+  const weekHours = numeric(data?.summary.moving_time_s) / 3600;
+  const weekDistanceKm = numeric(data?.summary.distance_m) / 1000;
+  const weekAscentM = numeric(data?.summary.total_ascent_m);
+  const weekStress = numeric(data?.summary.stress_total);
   const targetHours = data?.summary.goal?.target_hours ?? 10;
   const targetStress = data?.summary.goal?.target_stress ?? 300;
-  const timeProgress = Math.max(0, Math.min(100, (weekHours / Math.max(0.1, targetHours)) * 100));
-  const stressProgress = Math.max(0, Math.min(100, (weekStress / Math.max(1, targetStress)) * 100));
-  const loadScore = Math.round((timeProgress + stressProgress) / 2);
-  const ascentProgress = Math.max(0, Math.min(100, (weekAscentM / WEEKLY_ASCENT_TARGET_M) * 100));
-  const ascentRemainingM = Math.max(0, WEEKLY_ASCENT_TARGET_M - weekAscentM);
-  const climbQuestCompleted = ascentProgress >= 100;
+  const averagePower = weightedAverage(activities, "avg_power_w");
+  const averageSpeed = weightedAverage(activities, "avg_speed_kmh");
+  const tssPerHourValue = weekHours > 0 ? weekStress / weekHours : null;
+  const tssPerUnit = activities.length > 0 ? weekStress / activities.length : null;
+  const streaks = useMemo(() => buildWeekStreaks(availableWeeks), [availableWeeks]);
+  const zoneBuckets = useMemo(() => buildIntensityBuckets(activities, ftp), [activities, ftp]);
+
+  const bestStress = bestBy(activities, (activity) => numeric(activity.stress_score));
+  const bestDuration = bestBy(activities, (activity) => numeric(activity.duration_s));
+  const bestAscent = bestBy(activities, (activity) => numeric(activity.total_ascent_m));
+  const bestPower = bestBy(activities, (activity) => numeric(activity.avg_power_w));
+
+  const comparisonItems = [
+    {
+      label: "Zeit",
+      current: numeric(data?.summary.moving_time_s) / 3600,
+      previous: numeric(previousData?.summary.moving_time_s) / 3600,
+      suffix: " h",
+    },
+    {
+      label: "Distanz",
+      current: weekDistanceKm,
+      previous: numeric(previousData?.summary.distance_m) / 1000,
+      suffix: " km",
+    },
+    {
+      label: "HM",
+      current: weekAscentM,
+      previous: numeric(previousData?.summary.total_ascent_m),
+      suffix: " m",
+    },
+    {
+      label: "TSS",
+      current: weekStress,
+      previous: numeric(previousData?.summary.stress_total),
+      suffix: "",
+    },
+    {
+      label: "Aktivitäten",
+      current: numeric(data?.summary.activities_count),
+      previous: numeric(previousData?.summary.activities_count),
+      suffix: "",
+    },
+  ];
 
   function goToPreviousWeek() {
-    const base = data?.week_start ?? selectedDate;
-    setSelectedDate(addDays(base, -7));
+    setSelectedDate(addDays(data?.week_start ?? selectedDate, -7));
   }
 
   function goToNextWeek() {
-    const base = data?.week_start ?? selectedDate;
-    setSelectedDate(addDays(base, 7));
+    setSelectedDate(addDays(data?.week_start ?? selectedDate, 7));
   }
 
   function goToPreviousMonth() {
-    const base = data?.week_start ?? selectedDate;
-    setSelectedDate(addMonths(base, -1));
+    setSelectedDate(addMonths(data?.week_start ?? selectedDate, -1));
   }
 
   function goToNextMonth() {
-    const base = data?.week_start ?? selectedDate;
-    setSelectedDate(addMonths(base, 1));
+    setSelectedDate(addMonths(data?.week_start ?? selectedDate, 1));
   }
 
   return (
-    <section className="page">
-      <div className="hero week-hero-layout">
-        <div className="week-hero-main">
-          <p className="eyebrow">Aktivitäten</p>
-          <h1>Wochenansicht</h1>
-          <p className="week-title-line">
-            <span className="week-data-indicator has-data" />
-            <span>{weekTitle}</span>
-          </p>
-
-          <div className="week-controls">
-            <button
-              className="secondary-button week-nav-btn"
-              type="button"
-              onClick={goToPreviousMonth}
-              title="Einen Monat zurück"
-            >
-              {"<<"}
-            </button>
-            <button className="secondary-button week-nav-btn" type="button" onClick={goToPreviousWeek} title="Eine Woche zurück">
-              {"<"}
-            </button>
-            <select
-              className="week-data-select"
-              value={data?.week_start ?? ""}
-              onChange={(event) => setSelectedDate(event.target.value)}
-              aria-label="Woche auswählen"
-            >
-              <option value="" disabled>
-                Woche auswählen...
+    <section className="page analytics-page">
+      <AnalyticsScopeNav />
+      <DashboardHeader
+        eyebrow="Aktivitäten"
+        title="Wochenansicht"
+        subtitle={data ? `${formatDate(data.week_start)} - ${formatDate(data.week_end)}` : "Trainingswoche"}
+      >
+        <div className="analytics-controls">
+          <button className="secondary-button week-nav-btn" type="button" onClick={goToPreviousMonth} title="Einen Monat zurück">
+            {"<<"}
+          </button>
+          <button className="secondary-button week-nav-btn" type="button" onClick={goToPreviousWeek} title="Eine Woche zurück">
+            {"<"}
+          </button>
+          <select
+            className="week-data-select"
+            value={data?.week_start ?? ""}
+            onChange={(event) => setSelectedDate(event.target.value)}
+            aria-label="Woche auswählen"
+          >
+            <option value="" disabled>
+              Woche auswählen
+            </option>
+            {availableWeeks.map((week) => (
+              <option key={week.week_start} value={week.week_start}>
+                {week.week_start} - {week.week_end} ({week.activities_count})
               </option>
-              {availableWeeks.map((week) => (
-                <option key={week.week_start} value={week.week_start}>
-                  {week.week_start} - {week.week_end} ({week.activities_count})
-                </option>
-              ))}
-            </select>
-            <button className="secondary-button week-nav-btn" type="button" onClick={goToNextWeek} title="Eine Woche vor">
-              {">"}
-            </button>
-            <button
-              className="secondary-button week-nav-btn"
-              type="button"
-              onClick={goToNextMonth}
-              title="Einen Monat vor"
-            >
-              {">>"}
-            </button>
-          </div>
+            ))}
+          </select>
+          <button className="secondary-button week-nav-btn" type="button" onClick={goToNextWeek} title="Eine Woche vor">
+            {">"}
+          </button>
+          <button className="secondary-button week-nav-btn" type="button" onClick={goToNextMonth} title="Einen Monat vor">
+            {">>"}
+          </button>
         </div>
+      </DashboardHeader>
 
-        <div className="week-hero-right">
-          <div className="week-hero-summary card">
-            <h2>Wochenüberblick</h2>
-            {loading ? <p>Lade Wochenansicht...</p> : null}
-            {error ? <p className="error-text">{error}</p> : null}
-            {!loading && !error && data ? (
-              <>
-                <div className="stats-line">
-                  <span>Aktivitäten: {data.summary.activities_count}</span>
-                  <span>Zeit in Bewegung: {data.summary.moving_time_label ?? "-"}</span>
-                  <span>Distanz: {formatDistanceMeters(data.summary.distance_m)}</span>
-                  <span>TSS gesamt: {formatNumber(data.summary.stress_total, 1)}</span>
-                </div>
-                <div className="week-elevation-quest">
-                  <div className="week-elevation-quest-head">
-                    <strong>Climb Quest</strong>
-                    <span>
-                      {formatNumber(weekAscentM, 0)} / {WEEKLY_ASCENT_TARGET_M} m
-                    </span>
-                  </div>
-                  <div
-                    className="week-elevation-track"
-                    role="progressbar"
-                    aria-label="Wochenziel Höhenmeter"
-                    aria-valuemin={0}
-                    aria-valuemax={WEEKLY_ASCENT_TARGET_M}
-                    aria-valuenow={Math.round(weekAscentM)}
-                  >
-                    <div
-                      className={`week-elevation-fill ${climbQuestCompleted ? "complete" : ""}`}
-                      style={{ width: `${ascentProgress}%` }}
-                    >
-                      {ascentProgress >= 18 ? `${Math.round(ascentProgress)}%` : ""}
-                    </div>
-                  </div>
-                  <div className="week-elevation-badges">
-                    {ASCENT_MILESTONES_M.map((milestone) => (
-                      <span
-                        key={milestone}
-                        className={`week-elevation-badge ${weekAscentM >= milestone ? "unlocked" : ""}`}
-                      >
-                        {milestone} m
-                      </span>
-                    ))}
-                  </div>
-                  <p className="week-elevation-note">
-                    {ascentRemainingM > 0
-                      ? `Noch ${formatNumber(ascentRemainingM, 0)} m bis zum Wochenziel.`
-                      : "Wochenziel erreicht. Starkes Kletter-Volumen diese Woche."}
-                  </p>
-                  {climbQuestCompleted ? (
-                    <div className="week-elevation-trophy" aria-label="Climb Quest abgeschlossen">
-                      🏆
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            ) : null}
-          </div>
-
-          <div className="week-visualizer card">
-            <h2>Wochenziel</h2>
-            <p className="week-visualizer-target">
-              Ziel: {formatNumber(targetHours, 1)} h auf dem Rad / {formatNumber(targetStress, 0)} Trainingsreiz pro Woche
-              {data?.summary.goal?.is_custom ? "" : " (Standardziel)"}
-            </p>
-            <p className="week-visualizer-note">Der Trainingsreiz orientiert sich an TSS und ergänzt die reine Radzeit.</p>
-            <div
-              className="week-load-gauge"
-              style={{ ["--progress" as any]: `${loadScore}%` }}
-              aria-label={`Weekly load score ${loadScore}%`}
-            >
-              <div className="week-load-gauge-inner">{loadScore}%</div>
-            </div>
-            <div className="week-progress-bars">
-              <div className="week-progress-row">
-                <span>Zeit auf dem Rad</span>
-                <span>{formatNumber(weekHours, 1)} / {formatNumber(targetHours, 1)} h</span>
-                <div className="week-progress-track">
-                  <div className="week-progress-fill time" style={{ width: `${timeProgress}%` }} />
-                </div>
-              </div>
-              <div className="week-progress-row">
-                <span>Trainingsreiz (TSS)</span>
-                <span>{formatNumber(weekStress, 1)} / {formatNumber(targetStress, 0)}</span>
-                <div className="week-progress-track">
-                  <div className="week-progress-fill stress" style={{ width: `${stressProgress}%` }} />
-                </div>
-              </div>
-            </div>
-            <div className="stats-line">
-              <span>Kilometer: {formatNumber(weekDistanceKm, 1)} km</span>
-              <span>Ø TSS pro Einheit: {formatNumber(data?.summary.stress_avg ?? null, 1)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      {loading ? <div className="card">Lade Wochenansicht...</div> : null}
+      {error ? <p className="error-text">{error}</p> : null}
 
       {!loading && !error && data ? (
-        <div className="week-grid">
-          {data.days.map((day) => (
-            <article className="week-day-card" key={day.date}>
-              <header className="week-day-header">
-                <h3>
-                  {day.weekday_short} <span>{formatDate(day.date)}</span>
-                </h3>
-              </header>
+        <>
+          <KpiGrid>
+            <KpiCard label="Aktivitäten" value={formatNumber(data.summary.activities_count)} subValue={`${activeDays} aktive Tage`} tone="green" />
+            <KpiCard label="Trainingszeit" value={formatHoursFromSeconds(data.summary.moving_time_s)} subValue={`${formatNumber(tssPerHourValue, 1)} TSS/h`} tone="blue" />
+            <KpiCard label="Distanz" value={formatKilometersFromMeters(data.summary.distance_m)} subValue={`${formatNumber(averageSpeed, 1)} km/h`} tone="slate" />
+            <KpiCard label="Höhenmeter" value={formatMeters(data.summary.total_ascent_m)} subValue={`${formatNumber(weekAscentM / Math.max(1, weekDistanceKm), 0)} m/km`} tone="amber" />
+            <KpiCard label="Gesamt-TSS" value={formatNumber(data.summary.stress_total, 0)} subValue={`${formatNumber(tssPerUnit, 1)} pro Einheit`} tone="red" />
+            <KpiCard label="Ø Leistung" value={`${formatNumber(averagePower, 0)} W`} subValue={ftp ? `FTP ${formatNumber(ftp, 0)} W` : "Leistungsbasis"} tone="blue" />
+          </KpiGrid>
 
-              {day.activities.length === 0 ? (
-                <p className="week-day-empty">Keine Aktivitäten.</p>
-              ) : (
-                <div className="week-activities-list">
-                  {day.activities.map((activity) => (
-                    <div className="week-activity-item" key={activity.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/activities/${activity.id}`)}>
-                      <p className="week-activity-name">{activity.name}</p>
-                      <p className="week-activity-meta">
-                        {formatTime(activity.start_time)} - {formatTime(activity.end_time)} | {activity.duration_label ?? "-"}
-                      </p>
-                      <p className="week-activity-metrics">
-                        Ø Watt: {formatNumber(activity.avg_power_w)} W | Ø Speed: {formatNumber(activity.avg_speed_kmh, 1)} km/h | HM: {formatNumber(activity.total_ascent_m, 0)} m | TSS: {formatNumber(activity.stress_score, 1)}
-                      </p>
+          <div className="analytics-grid two">
+            <DashboardCard title="Wochenziele" subtitle={data.summary.goal.is_custom ? "Persönliche Zielwerte aktiv" : "Standardziel mit erweitertem Umfang"}>
+              <div className="analytics-progress-grid">
+                <ProgressCard label="Zeit" value={`${formatNumber(weekHours, 1)} h`} target={`${formatNumber(targetHours, 1)} h`} percent={percentOf(weekHours, targetHours)} tone="blue" />
+                <ProgressCard label="Distanz" value={`${formatNumber(weekDistanceKm, 1)} km`} target={`${WEEKLY_DISTANCE_TARGET_KM} km`} percent={percentOf(weekDistanceKm, WEEKLY_DISTANCE_TARGET_KM)} tone="green" />
+                <ProgressCard label="TSS" value={formatNumber(weekStress, 0)} target={formatNumber(targetStress, 0)} percent={percentOf(weekStress, targetStress)} tone="red" />
+                <ProgressCard label="HM" value={formatMeters(weekAscentM)} target={formatMeters(WEEKLY_ASCENT_TARGET_M)} percent={percentOf(weekAscentM, WEEKLY_ASCENT_TARGET_M)} tone="amber" />
+              </div>
+            </DashboardCard>
+
+            <DashboardCard title="Belastungsverteilung" subtitle="TSS pro Tag">
+              <VerticalBarChart
+                data={data.days.map((day) => ({
+                  label: day.weekday_short,
+                  value: numeric(day.summary.stress_total),
+                  title: `${formatDate(day.date)}: ${formatNumber(day.summary.stress_total, 0)} TSS`,
+                }))}
+              />
+            </DashboardCard>
+          </div>
+
+          <div className="analytics-grid three">
+            <DashboardCard title="Trainingsverteilung">
+              <MiniDistribution data={data.days.map((day) => ({ label: day.weekday_short, value: day.summary.activities_count }))} />
+            </DashboardCard>
+
+            <DashboardCard title="Intensitätsverteilung" subtitle={ftp ? "Aus Ø Leistung und FTP abgeleitet" : "Aus TSS pro Stunde abgeleitet"}>
+              <DonutChart segments={zoneBuckets} centerLabel="h" />
+            </DashboardCard>
+
+            <DashboardCard title="Wochenvergleich" subtitle="Aktuelle Woche vs. Vorwoche">
+              <MetricList
+                items={comparisonItems.map((item) => {
+                  const comparison = getComparison(item.current, item.previous);
+                  return {
+                    label: item.label,
+                    value: `${formatNumber(item.current, item.label === "Zeit" || item.label === "Distanz" ? 1 : 0)}${item.suffix}`,
+                    subValue: `${comparison.absolute >= 0 ? "+" : ""}${formatNumber(comparison.absolute, item.label === "Zeit" || item.label === "Distanz" ? 1 : 0)}${item.suffix} / ${formatDeltaPercent(comparison.percent)}`,
+                  };
+                })}
+              />
+            </DashboardCard>
+          </div>
+
+          <div className="analytics-grid three">
+            <DashboardCard title="Beste Einheit der Woche">
+              <MetricList
+                items={[
+                  {
+                    label: "Höchster TSS",
+                    value: bestStress ? formatNumber(bestStress.value, 0) : "-",
+                    subValue: bestStress?.activity.name,
+                  },
+                  {
+                    label: "Längste Fahrt",
+                    value: bestDuration ? formatHoursFromSeconds(bestDuration.value, 1) : "-",
+                    subValue: bestDuration?.activity.name,
+                  },
+                  {
+                    label: "Meiste HM",
+                    value: bestAscent ? formatMeters(bestAscent.value) : "-",
+                    subValue: bestAscent?.activity.name,
+                  },
+                  {
+                    label: "Höchste Ø Leistung",
+                    value: bestPower ? `${formatNumber(bestPower.value, 0)} W` : "-",
+                    subValue: bestPower?.activity.name,
+                  },
+                ]}
+              />
+            </DashboardCard>
+
+            <DashboardCard title="Streaks">
+              <MetricList
+                items={[
+                  { label: "Aktive Wochen in Folge", value: formatNumber(streaks.active) },
+                  { label: "Längste Serie", value: formatNumber(streaks.longest) },
+                  { label: "Letzter freier Zeitraum", value: streaks.lastGap },
+                ]}
+              />
+            </DashboardCard>
+
+            <DashboardCard title="Climb Quest">
+              <div className="analytics-progress-grid single">
+                <ProgressCard label="Woche" value={formatMeters(weekAscentM)} target={formatMeters(WEEKLY_ASCENT_TARGET_M)} percent={percentOf(weekAscentM, WEEKLY_ASCENT_TARGET_M)} tone="amber" />
+                <ProgressCard label="Monat" value={formatMeters(climbContext.monthAscentM)} target="8'000 m" percent={percentOf(numeric(climbContext.monthAscentM), 8000)} tone="amber" />
+                <ProgressCard label="Jahr" value={formatMeters(climbContext.yearAscentM)} target={formatMeters(climbContext.yearTargetAscentM)} percent={percentOf(numeric(climbContext.yearAscentM), climbContext.yearTargetAscentM)} tone="amber" />
+              </div>
+            </DashboardCard>
+          </div>
+
+          <DashboardCard title="Wochenkalender" subtitle="Tageskarten mit Belastungsfarbe und Aktivitätsnavigation">
+            <div className="week-grid analytics-week-grid">
+              {data.days.map((day) => (
+                <article className={`week-day-card analytics-day-card ${intensityClass(day.summary.stress_total)}`} key={day.date}>
+                  <header className="week-day-header">
+                    <h3>
+                      {day.weekday_short} <span>{formatDate(day.date)}</span>
+                    </h3>
+                  </header>
+
+                  {day.activities.length === 0 ? (
+                    <p className="week-day-empty">Trainingsfrei</p>
+                  ) : (
+                    <div className="week-activities-list">
+                      {day.activities.map((activity) => (
+                        <button
+                          className="week-activity-item analytics-activity-button"
+                          key={activity.id}
+                          type="button"
+                          title={`${activity.duration_label ?? "-"} | ${formatKilometersFromMeters(activity.distance_m)} | ${formatNumber(activity.stress_score, 0)} TSS${activity.stress_source_label ? ` (${activity.stress_source_label})` : ""}`}
+                          onClick={() => navigate(`/activities/${activity.id}`)}
+                        >
+                          <span className="analytics-ride-marker" aria-hidden="true" />
+                          <span>
+                            <strong className="week-activity-name">{activity.name}</strong>
+                            <small className="week-activity-meta">
+                              {formatTime(activity.start_time)} - {formatTime(activity.end_time)} | {activity.duration_label ?? "-"}
+                            </small>
+                            <small className="week-activity-metrics">
+                              Ø {formatNumber(activity.avg_power_w, 0)} W | {formatNumber(activity.avg_speed_kmh, 1)} km/h | HM {formatNumber(activity.total_ascent_m, 0)} | TSS {formatNumber(activity.stress_score, 0)}{activity.stress_source_label ? ` (${activity.stress_source_label})` : ""}
+                            </small>
+                          </span>
+                        </button>
+                      ))}
                     </div>
-                  ))}
-                </div>
-              )}
+                  )}
 
-              <footer className="week-day-summary">
-                <span>Zeit: {day.summary.moving_time_label ?? "-"}</span>
-                <span>Distanz: {formatDistanceMeters(day.summary.distance_m)}</span>
-                <span>HM: {formatNumber(day.summary.total_ascent_m, 0)} m</span>
-                <span>TSS: {formatNumber(day.summary.stress_total, 1)}</span>
-              </footer>
-            </article>
-          ))}
-        </div>
+                  <footer className="week-day-summary">
+                    <span>{day.summary.moving_time_label ?? "-"}</span>
+                    <span>{formatKilometersFromMeters(day.summary.distance_m)}</span>
+                    <span>{formatMeters(day.summary.total_ascent_m)}</span>
+                    <span>{formatNumber(day.summary.stress_total, 0)} TSS</span>
+                  </footer>
+                </article>
+              ))}
+            </div>
+          </DashboardCard>
+        </>
       ) : null}
     </section>
   );

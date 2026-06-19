@@ -7,6 +7,7 @@ import { API_BASE_URL } from "./config";
 import { AchievementsPage } from "./pages/AchievementsPage";
 import { ActivityDetailPage } from "./pages/ActivityDetailPage";
 import { ActivitiesAllPage } from "./pages/ActivitiesAllPage";
+import { ActivitiesDashboardPage } from "./pages/ActivitiesDashboardPage";
 import { ActivitiesMonthPage } from "./pages/ActivitiesMonthPage";
 import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
@@ -23,6 +24,7 @@ import { NutritionPage } from "./pages/NutritionPage";
 import { PlaceholderPage } from "./pages/PlaceholderPage";
 import { RecheckRidesPage } from "./pages/RecheckRidesPage";
 import { RecipesPage } from "./pages/RecipesPage";
+import { RideAnalysisNoImportPage } from "./pages/RideAnalysisNoImportPage";
 import { SetPasswordPage } from "./pages/SetPasswordPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { ImpressumPage, PrivacyPage } from "./pages/LegalPages";
@@ -75,6 +77,7 @@ const navGroups: NavGroup[] = [
     items: [
       { label: "Create FIT File", to: "/tools/create-fit-file" },
       { label: "Import Files", to: "/tools/import-files" },
+      { label: "Analyse Ride (no import)", to: "/tools/analyze-ride-no-import" },
       { label: "Fix FIT file", to: "/tools/fix-fit-file" },
       { label: "FIT file kürzen", to: "/tools/trim-fit-file" },
     ],
@@ -83,6 +86,7 @@ const navGroups: NavGroup[] = [
     key: "activities",
     label: "Aktivitäten",
     items: [
+      { label: "Dashboard", to: "/activities/dashboard" },
       { label: "Wochenansicht", to: "/activities/week" },
       { label: "Monatsansicht", to: "/activities/month" },
       { label: "Climb Compare", to: "/activities/climb-compare" },
@@ -624,9 +628,11 @@ function Layout() {
                 }
               />
               <Route path="/tools/import-files" element={<ImportFilesPage />} />
+              <Route path="/tools/analyze-ride-no-import" element={<RideAnalysisNoImportPage />} />
               <Route path="/tools/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/tools/create-fit-file" element={<CreateFitFilePage />} />
               <Route path="/tools/trim-fit-file" element={<FitTrimPage />} />
+              <Route path="/activities/dashboard" element={<ActivitiesDashboardPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
               <Route path="/activities/month" element={<ActivitiesMonthPage />} />
               <Route path="/activities/climb-compare" element={<ClimbComparePage />} />

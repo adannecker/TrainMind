@@ -47,6 +47,10 @@ class User(Base):
     )
     food_entries: Mapped[list["FoodEntry"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     activities: Mapped[list["Activity"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    activity_dashboard_caches: Mapped[list["ActivityDashboardCache"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     fit_files: Mapped[list["FitFile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     profile: Mapped["UserProfile | None"] = relationship(
         back_populates="user",
@@ -365,6 +369,30 @@ class Activity(Base):
     sessions: Mapped[list["ActivitySession"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     laps: Mapped[list["ActivityLap"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
     records: Mapped[list["ActivityRecord"]] = relationship(back_populates="activity", cascade="all, delete-orphan")
+
+
+class ActivityDashboardCache(Base):
+    __tablename__ = "activity_dashboard_caches"
+    __table_args__ = (
+        UniqueConstraint("user_id", "view_type", "period_start_date", name="uq_activity_dashboard_caches_user_view_period"),
+        Index("ix_activity_dashboard_caches_user_view_period", "user_id", "view_type", "period_start_date"),
+        {"schema": GARMIN_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    view_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    period_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    period_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    view_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    activity_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    activity_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="activity_dashboard_caches")
 
 
 class ActivitySession(Base):

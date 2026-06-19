@@ -19,6 +19,7 @@ type ActivityRow = {
   max_hr_bpm: number | null;
   avg_speed_kmh: number | null;
   stress_score: number | null;
+  stress_source_label?: string | null;
 };
 
 type ActivitiesResponse = {
@@ -148,7 +149,10 @@ const COLUMN_DEFS: ColumnDef[] = [
     key: "stress",
     label: "Stress",
     sortable: true,
-    render: (row) => formatDecimal(row.stress_score, 1),
+    render: (row) => {
+      const value = formatDecimal(row.stress_score, 1);
+      return row.stress_source_label && value !== "-" ? `${value} (${row.stress_source_label})` : value;
+    },
   },
   {
     key: "external_id",
