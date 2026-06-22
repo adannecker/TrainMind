@@ -437,6 +437,7 @@ class ActivityLap(Base):
     avg_speed_mps: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
+    normalized_power_w: Mapped[float | None] = mapped_column(Float, nullable=True)
     avg_hr_bpm: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_hr_bpm: Mapped[float | None] = mapped_column(Float, nullable=True)
 

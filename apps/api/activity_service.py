@@ -12,7 +12,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 from fitparse import FitFile as ParsedFitFile
-from sqlalchemy import asc, delete, desc, func, or_, select
+from sqlalchemy import asc, delete, desc, func, or_, select, update
 
 from apps.api.achievement_service import ACHIEVEMENT_CHECK_VERSION, get_activity_achievement_check_status, rebuild_activity_achievement_checks
 from apps.api.llm_service import DEFAULT_OPENAI_MODEL, openai_chat_completion
@@ -552,6 +552,60 @@ def _compute_power_metrics(
         "estimated_calories_kcal": estimated_calories,
         "ftp_reference_w": float(ftp_w) if ftp_w is not None else None,
     }
+
+
+def _compute_segment_normalized_power(
+    records: list[ActivityRecord],
+    *,
+    duration_s: float | None,
+    activity_start: datetime | None,
+    start_time: datetime | None,
+    elapsed_from_s: float | None,
+) -> float | None:
+    series: list[tuple[int, int]] = []
+    fallback_elapsed = 0
+    for row in records:
+        if row.power_w is None:
+            continue
+        try:
+            power = int(round(float(row.power_w)))
+        except (TypeError, ValueError):
+            continue
+
+        elapsed_raw: float | int | None = None
+        try:
+            if row.elapsed_s is not None and elapsed_from_s is not None:
+                elapsed_raw = float(row.elapsed_s) - float(elapsed_from_s)
+            elif row.timestamp is not None and start_time is not None:
+                elapsed_raw = (row.timestamp - start_time).total_seconds()
+            elif row.timestamp is not None and activity_start is not None and elapsed_from_s is not None:
+                elapsed_raw = (row.timestamp - activity_start).total_seconds() - float(elapsed_from_s)
+            else:
+                elapsed_raw = fallback_elapsed
+        except (TypeError, ValueError):
+            elapsed_raw = fallback_elapsed
+
+        try:
+            elapsed = max(0, int(round(float(elapsed_raw))))
+        except (TypeError, ValueError):
+            elapsed = fallback_elapsed
+        if series and elapsed <= series[-1][0]:
+            elapsed = series[-1][0] + 1
+        series.append((elapsed, power))
+        fallback_elapsed = elapsed + 1
+
+    if not series:
+        return None
+
+    duration_seconds = _positive_seconds(duration_s)
+    second_values = _expand_power_to_seconds(series, duration_seconds)
+    if len(second_values) < 30:
+        return None
+
+    rolling_30 = _rolling_average(second_values, 30)
+    if not rolling_30:
+        return None
+    return (sum(value ** 4 for value in rolling_30) / len(rolling_30)) ** 0.25
 
 
 def _resolve_activity_training_stress_score(
@@ -1136,6 +1190,7 @@ def _parse_tcx_payload(
                 avg_speed_mps=lap_avg_speed_mps,
                 avg_power_w=_fit_float(_xml_desc_text(extensions_node, "AvgWatts")),
                 max_power_w=_fit_float(_xml_desc_text(extensions_node, "MaxWatts")),
+                normalized_power_w=_fit_float(_xml_desc_text(extensions_node, "NormalizedPower")),
                 avg_hr_bpm=_fit_float(_xml_desc_text(avg_hr_node, "Value")),
                 max_hr_bpm=_fit_float(_xml_desc_text(max_hr_node, "Value")),
             )
@@ -1402,6 +1457,7 @@ def _hydrate_activity_streams_from_fit(
                     avg_speed_mps=_coalesce_fit_float(message, "avg_speed", "enhanced_avg_speed", "average_speed"),
                     avg_power_w=_coalesce_fit_float(message, "avg_power", "total_average_power", "average_power"),
                     max_power_w=_fit_float(message.get_value("max_power")),
+                    normalized_power_w=_coalesce_fit_float(message, "normalized_power", "normalized_power_w", "norm_power"),
                     avg_hr_bpm=_coalesce_fit_float(message, "avg_heart_rate", "total_average_heart_rate", "total_average_hr", "average_heart_rate"),
                     max_hr_bpm=_fit_float(message.get_value("max_heart_rate")),
                 )
@@ -2899,6 +2955,7 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
         ],
     }
 
+    lap_np_backfills: list[tuple[int, float]] = []
     for lap_index, row in enumerate(laps):
         start_time = row.start_time
         duration_seconds = row.total_timer_time_s if row.total_timer_time_s is not None else row.total_elapsed_time_s
@@ -2929,6 +2986,17 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
             elapsed_to_s=elapsed_to_s,
         )
         derived_metrics = _derive_record_metrics(slice_records)
+        lap_normalized_power_w = row.normalized_power_w
+        if lap_normalized_power_w is None:
+            lap_normalized_power_w = _compute_segment_normalized_power(
+                slice_records,
+                duration_s=duration_seconds,
+                activity_start=activity.started_at,
+                start_time=start_time,
+                elapsed_from_s=elapsed_from_s,
+            )
+            if lap_normalized_power_w is not None:
+                lap_np_backfills.append((row.id, float(lap_normalized_power_w)))
         payload["laps"].append(
             {
                 "lap_index": row.lap_index,
@@ -2939,6 +3007,7 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
                 "avg_speed_kmh": (row.avg_speed_mps * 3.6) if row.avg_speed_mps is not None else derived_metrics["avg_speed_kmh"],
                 "avg_power_w": row.avg_power_w if row.avg_power_w is not None else derived_metrics["avg_power_w"],
                 "max_power_w": row.max_power_w if row.max_power_w is not None else derived_metrics["max_power_w"],
+                "normalized_power_w": lap_normalized_power_w,
                 "avg_hr_bpm": row.avg_hr_bpm if row.avg_hr_bpm is not None else derived_metrics["avg_hr_bpm"],
                 "min_hr_bpm": derived_metrics["min_hr_bpm"],
                 "max_hr_bpm": row.max_hr_bpm if row.max_hr_bpm is not None else derived_metrics["max_hr_bpm"],
@@ -2949,6 +3018,16 @@ def get_activity_detail(user_id: int, activity_id: int) -> dict[str, Any]:
 
     for lap in payload["laps"]:
         lap.pop("_elapsed_to_s", None)
+
+    if lap_np_backfills:
+        with SessionLocal() as backfill_session:
+            for lap_id, lap_normalized_power_w in lap_np_backfills:
+                backfill_session.execute(
+                    update(ActivityLap)
+                    .where(ActivityLap.id == lap_id, ActivityLap.normalized_power_w.is_(None))
+                    .values(normalized_power_w=lap_normalized_power_w)
+                )
+            backfill_session.commit()
 
     return payload
 

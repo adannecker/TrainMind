@@ -276,6 +276,7 @@ def _upsert_laps_for_activity(session, activity_id: int, summary_payload: dict[s
         duration_s = _get_duration_seconds(split)
         distance_m = split.get("distance")
         avg_speed = split.get("averageSpeed") or split.get("averageMovingSpeed")
+        normalized_power = _pick_value(split, "normalizedPower", "normPower", "normalizedPowerInWatts", "weightedAveragePower")
 
         existing = session.scalar(
             select(ActivityLap.id).where(
@@ -300,6 +301,11 @@ def _upsert_laps_for_activity(session, activity_id: int, summary_payload: dict[s
                 ),
                 max_power_w=(
                     float(split.get("maxPower")) if split.get("maxPower") is not None else None
+                ),
+                normalized_power_w=(
+                    float(normalized_power)
+                    if normalized_power is not None
+                    else None
                 ),
                 avg_hr_bpm=(
                     float(split.get("averageHR")) if split.get("averageHR") is not None else None

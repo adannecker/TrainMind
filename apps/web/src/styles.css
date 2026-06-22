@@ -259,6 +259,7 @@ body {
 .content {
   padding: 1.4rem;
   height: 100vh;
+  min-width: 0;
   overflow: auto;
   background: linear-gradient(180deg, rgba(243, 248, 246, 0.18) 0%, rgba(243, 248, 246, 0.06) 100%);
 }
@@ -8920,6 +8921,8 @@ input[type="range"] {
   --analytics-red: #c9574f;
   --analytics-slate: #58677d;
   color: var(--analytics-text);
+  min-width: 0;
+  overflow-x: clip;
 }
 
 .analytics-scope-nav {
@@ -8962,6 +8965,7 @@ input[type="range"] {
 .analytics-header h1,
 .analytics-card h2 {
   letter-spacing: 0;
+  color: var(--analytics-text);
 }
 
 .analytics-subtitle {
@@ -8992,7 +8996,7 @@ input[type="range"] {
 
 .analytics-kpi-grid {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(10.5rem, 100%), 1fr));
   gap: 0.85rem;
 }
 
@@ -9504,6 +9508,12 @@ input[type="range"] {
 }
 
 .analytics-donut-wrap {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  padding: 0;
   min-height: 13rem;
   display: grid;
   grid-template-columns: 8rem minmax(0, 1fr);
@@ -9807,29 +9817,5 @@ input[type="range"] {
 
   .analytics-donut-legend {
     width: 100%;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  .analytics-page {
-    --analytics-panel: rgba(25, 32, 43, 0.88);
-    --analytics-panel-strong: rgba(31, 40, 53, 0.94);
-    --analytics-line: rgba(149, 164, 190, 0.28);
-    --analytics-text: #edf2f7;
-    --analytics-soft: #a9b5c8;
-  }
-
-  .analytics-header,
-  .analytics-card,
-  .analytics-kpi-card,
-  .analytics-progress-card,
-  .analytics-record-card {
-    background: var(--analytics-panel);
-  }
-
-  .analytics-line-chart svg,
-  .analytics-insight-list p,
-  .analytics-segmented button.active {
-    background: rgba(255, 255, 255, 0.08);
   }
 }

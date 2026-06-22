@@ -123,6 +123,7 @@ type ActivityLapRow = {
   avg_speed_kmh: number | null;
   avg_power_w: number | null;
   max_power_w: number | null;
+  normalized_power_w: number | null;
   avg_hr_bpm: number | null;
   min_hr_bpm: number | null;
   max_hr_bpm: number | null;
@@ -1392,6 +1393,56 @@ function formatSeconds(value: number | null): string {
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
   return hours > 0 ? `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}` : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatClipboardNumber(value: number | null, digits = 0): string {
+  if (value == null) return "";
+  return value.toFixed(digits);
+}
+
+function formatClipboardCell(value: string): string {
+  return value.replace(/\t|\r?\n/g, " ").trim();
+}
+
+function buildActivityLapClipboardText(laps: ActivityLapRow[]): string {
+  const headers = ["Runde", "Start", "Dauer", "Distanz km", "Ø km/h", "Ø Watt", "NP", "Max Watt", "Ø HF", "Min HF", "Max HF"];
+  const rows = laps.map((lap) => [
+    String(lap.lap_index),
+    formatDateTime(lap.start_time),
+    lap.duration_label ?? formatSeconds(lap.total_timer_time_s ?? lap.total_elapsed_time_s),
+    formatClipboardNumber(lap.total_distance_m == null ? null : lap.total_distance_m / 1000, 1),
+    formatClipboardNumber(lap.avg_speed_kmh, 1),
+    formatClipboardNumber(lap.avg_power_w, 0),
+    formatClipboardNumber(lap.normalized_power_w, 0),
+    formatClipboardNumber(lap.max_power_w, 0),
+    formatClipboardNumber(lap.avg_hr_bpm, 0),
+    formatClipboardNumber(lap.min_hr_bpm, 0),
+    formatClipboardNumber(lap.max_hr_bpm, 0),
+  ]);
+  return [headers, ...rows].map((row) => row.map(formatClipboardCell).join("\t")).join("\n");
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  textarea.style.top = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    if (!document.execCommand("copy")) {
+      throw new Error("Clipboard copy failed.");
+    }
+  } finally {
+    document.body.removeChild(textarea);
+  }
 }
 
 function formatAxisTime(totalSeconds: number): string {
@@ -3572,6 +3623,8 @@ export function ActivityDetailPage() {
   const [llmAnalysis, setLlmAnalysis] = useState<ActivityLlmResponse | null>(null);
   const [llmLoading, setLlmLoading] = useState(false);
   const [llmError, setLlmError] = useState<string | null>(null);
+  const lapCopyFeedbackTimeoutRef = useRef<number | null>(null);
+  const [lapCopyFeedback, setLapCopyFeedback] = useState<"idle" | "copied" | "error">("idle");
 
   async function loadActivityDetail({ pageLoading = false, analysisRefresh = false } = {}) {
     if (!activityId) return;
@@ -3605,6 +3658,34 @@ export function ActivityDetailPage() {
   useEffect(() => {
     void loadActivityDetail({ pageLoading: true });
   }, [activityId]);
+
+  useEffect(() => {
+    return () => {
+      if (lapCopyFeedbackTimeoutRef.current != null) {
+        window.clearTimeout(lapCopyFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  async function handleCopyLapsToClipboard() {
+    const laps = data?.laps ?? [];
+    if (!laps.length) return;
+
+    try {
+      await writeClipboardText(buildActivityLapClipboardText(laps));
+      setLapCopyFeedback("copied");
+    } catch {
+      setLapCopyFeedback("error");
+    }
+
+    if (lapCopyFeedbackTimeoutRef.current != null) {
+      window.clearTimeout(lapCopyFeedbackTimeoutRef.current);
+    }
+    lapCopyFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setLapCopyFeedback("idle");
+      lapCopyFeedbackTimeoutRef.current = null;
+    }, 2200);
+  }
 
   const normalizedRecords = useMemo(() => normalizeRecordTimeline(data?.records ?? []), [data?.records]);
   const routePoints = useMemo(() => buildRoutePoints(normalizedRecords), [normalizedRecords]);
@@ -4007,6 +4088,15 @@ export function ActivityDetailPage() {
                 <div className="card rides-table-wrap">
                   <div className="table-toolbar">
                     <h2>Runden</h2>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      onClick={() => void handleCopyLapsToClipboard()}
+                      disabled={data.laps.length === 0}
+                      aria-label="Runden in die Zwischenablage kopieren"
+                    >
+                      {lapCopyFeedback === "copied" ? "Kopiert" : lapCopyFeedback === "error" ? "Kopieren fehlgeschlagen" : "Runden kopieren"}
+                    </button>
                   </div>
                   <div className="table-scroll">
                     <table className="rides-table">
@@ -4018,6 +4108,7 @@ export function ActivityDetailPage() {
                           <th>Distanz</th>
                           <th>Ø km/h</th>
                           <th>Ø Watt</th>
+                          <th>NP</th>
                           <th>Max Watt</th>
                           <th>Ø HF</th>
                           <th>Min HF</th>
@@ -4027,7 +4118,7 @@ export function ActivityDetailPage() {
                       <tbody>
                         {data.laps.length === 0 ? (
                           <tr>
-                            <td colSpan={10}>Noch keine Rundendaten vorhanden.</td>
+                            <td colSpan={11}>Noch keine Rundendaten vorhanden.</td>
                           </tr>
                         ) : (
                           data.laps.map((lap) => (
@@ -4038,6 +4129,7 @@ export function ActivityDetailPage() {
                               <td>{formatDistanceMeters(lap.total_distance_m)}</td>
                               <td>{formatNumber(lap.avg_speed_kmh, 1)}</td>
                               <td>{formatNumber(lap.avg_power_w, 0, " W")}</td>
+                              <td>{formatNumber(lap.normalized_power_w, 0, " W")}</td>
                               <td>{formatNumber(lap.max_power_w, 0, " W")}</td>
                               <td>{formatNumber(lap.avg_hr_bpm, 0, " bpm")}</td>
                               <td>{formatNumber(lap.min_hr_bpm, 0, " bpm")}</td>
