@@ -12,6 +12,8 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable
 
+from garminconnect import Garmin
+
 from dotenv import load_dotenv
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from apps.api.achievement_service import ACHIEVEMENT_RECHECK_PASSES, rebuild_activity_achievement_checks, reset_achievement_data
 from apps.api.activity_service import _hydrate_activity_streams_from_fit, clear_activity_list_cache
 from apps.api.training_service import create_imported_max_hr_metric_if_new_peak, rebuild_hf_development_cache
-from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, UserTrainingMetric
+from packages.db.models import Activity, ActivityLap, FitFile, FitFilePayload, GarminDailyHealth, UserTrainingMetric
 from packages.db.session import SessionLocal
 
 
@@ -411,7 +413,19 @@ def _download_fit_bytes(client: NodeGarminClient, activity_id: int) -> bytes:
 
 
 def get_garmin_session_status(user_id: int) -> dict[str, Any]:
-    email, password = _load_env_credentials()
+    try:
+        email, password = _load_env_credentials()
+    except ValueError:
+        token_root_has_session = _GARMIN_TOKENSTORE_ROOT.exists() and any(_GARMIN_TOKENSTORE_ROOT.glob(f"user-{user_id}-*/*.json"))
+        return {
+            "provider": "garmin",
+            "active_source": "token" if token_root_has_session else "none",
+            "email_configured": False,
+            "token_files_present": token_root_has_session,
+            "tokenstore_path": str(_GARMIN_TOKENSTORE_ROOT),
+            "auth_mode": "token_present" if token_root_has_session else None,
+            "login_ok": None,
+        }
     client = _build_client_for_credentials(
         user_id=user_id,
         email=email,
@@ -428,6 +442,31 @@ def get_garmin_session_status(user_id: int) -> dict[str, Any]:
         "auth_mode": status["auth_mode"],
         "login_ok": status["login_ok"],
     }
+
+
+def refresh_garmin_session_with_credentials(user_id: int, email: str, password: str) -> dict[str, Any]:
+    clean_email = email.strip()
+    clean_password = password.strip()
+    if not clean_email or not clean_password:
+        raise ValueError("Garmin E-Mail und Passwort sind erforderlich.")
+    client = _build_client_for_credentials(
+        user_id=user_id,
+        email=clean_email,
+        password=clean_password,
+        source_label="temporary",
+    )
+    status = client.get_session_status(check_login=True)
+    return {
+        "provider": "garmin",
+        "status": "refreshed",
+        "credentials_stored": False,
+        "email_configured": status["email_configured"],
+        "token_files_present": status["token_files_present"],
+        "tokenstore_path": status["tokenstore_path"],
+        "auth_mode": status["auth_mode"],
+        "login_ok": status["login_ok"],
+    }
+
 
 
 def get_missing_garmin_rides(user_id: int, limit: int = 50) -> dict[str, Any]:
@@ -464,6 +503,197 @@ def get_missing_garmin_rides(user_id: int, limit: int = 50) -> dict[str, Any]:
         "rides": missing,
     }
 
+
+
+def _parse_date(value: str | None, fallback: datetime) -> datetime:
+    if not value:
+        return fallback
+    try:
+        return datetime.strptime(value[:10], "%Y-%m-%d")
+    except ValueError:
+        return fallback
+
+
+def _safe_number(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        parsed = float(value)
+        return parsed if parsed == parsed else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _sleep_seconds(payload: dict[str, Any]) -> int | None:
+    dto = payload.get("dailySleepDTO") if isinstance(payload, dict) else None
+    if not isinstance(dto, dict):
+        return None
+    for key in ("sleepTimeSeconds", "totalSleepSeconds", "sleepDurationSeconds"):
+        value = _safe_number(dto.get(key))
+        if value is not None:
+            return int(value)
+    start = _safe_number(dto.get("sleepStartTimestampGMT"))
+    end = _safe_number(dto.get("sleepEndTimestampGMT"))
+    if start is not None and end is not None and end > start:
+        return int((end - start) / 1000 if end > 100000000000 else end - start)
+    return None
+
+
+def _body_battery_average(payload: Any) -> float | None:
+    values: list[float] = []
+    candidates = payload if isinstance(payload, list) else [payload]
+    for item in candidates:
+        if isinstance(item, dict):
+            arrays = item.get("bodyBatteryValuesArray") or item.get("bodyBatteryValueDescriptorsDTOList") or item.get("bodyBatteryValues")
+            if isinstance(arrays, list):
+                for row in arrays:
+                    if isinstance(row, list) and len(row) >= 2:
+                        value = _safe_number(row[1])
+                    elif isinstance(row, dict):
+                        value = _safe_number(row.get("bodyBatteryLevel") or row.get("value"))
+                    else:
+                        value = None
+                    if value is not None and value >= 0:
+                        values.append(value)
+            value = _safe_number(item.get("charged") or item.get("bodyBatteryLevel") or item.get("value"))
+            if value is not None and value >= 0:
+                values.append(value)
+        elif isinstance(item, list) and len(item) >= 2:
+            value = _safe_number(item[1])
+            if value is not None and value >= 0:
+                values.append(value)
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def _serialize_garmin_daily_health(row: GarminDailyHealth) -> dict[str, Any]:
+    return {
+        "date": row.date.isoformat(),
+        "steps": row.steps,
+        "sleep_hours": row.sleep_hours,
+        "stress_avg": row.stress_avg,
+        "stress_max": row.stress_max,
+        "body_battery_avg": row.body_battery_avg,
+        "synced_at": row.synced_at.isoformat() if row.synced_at else None,
+    }
+
+
+def _read_stored_garmin_health_daily(user_id: int, start_dt: datetime, days: int) -> list[dict[str, Any]]:
+    start_date = start_dt.date()
+    end_date = start_date + timedelta(days=days - 1)
+    with SessionLocal() as session:
+        rows = session.scalars(
+            select(GarminDailyHealth)
+            .where(
+                GarminDailyHealth.user_id == int(user_id),
+                GarminDailyHealth.date >= start_date,
+                GarminDailyHealth.date <= end_date,
+            )
+            .order_by(GarminDailyHealth.date.asc())
+        ).all()
+    return [_serialize_garmin_daily_health(row) for row in rows]
+
+
+def _store_garmin_health_rows(user_id: int, rows: list[dict[str, Any]]) -> dict[str, int]:
+    created = 0
+    updated = 0
+    now = datetime.utcnow()
+    with SessionLocal() as session:
+        for row in rows:
+            day = datetime.strptime(str(row["date"])[:10], "%Y-%m-%d").date()
+            existing = session.scalar(
+                select(GarminDailyHealth).where(
+                    GarminDailyHealth.user_id == int(user_id),
+                    GarminDailyHealth.date == day,
+                )
+            )
+            if existing is None:
+                existing = GarminDailyHealth(
+                    user_id=int(user_id),
+                    date=day,
+                    created_at=now,
+                    updated_at=now,
+                    synced_at=now,
+                )
+                session.add(existing)
+                created += 1
+            else:
+                existing.updated_at = now
+                existing.synced_at = now
+                updated += 1
+            existing.steps = int(row["steps"]) if row.get("steps") is not None else None
+            existing.sleep_hours = _safe_number(row.get("sleep_hours"))
+            existing.stress_avg = _safe_number(row.get("stress_avg"))
+            existing.stress_max = _safe_number(row.get("stress_max"))
+            existing.body_battery_avg = _safe_number(row.get("body_battery_avg"))
+        session.commit()
+    return {"created": created, "updated": updated}
+
+
+def _fetch_garmin_health_daily_from_provider(start_dt: datetime, days: int) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    email, password = _load_env_credentials()
+    client = Garmin(email, password)
+    client.login()
+    rows: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+    for index in range(days):
+        day = start_dt.date() + timedelta(days=index)
+        day_s = day.isoformat()
+        row: dict[str, Any] = {"date": day_s, "steps": None, "sleep_hours": None, "stress_avg": None, "stress_max": None, "body_battery_avg": None}
+        try:
+            steps_data = client.get_steps_data(day_s)
+            if isinstance(steps_data, list):
+                row["steps"] = int(sum(int(item.get("steps") or 0) for item in steps_data if isinstance(item, dict)))
+        except Exception as exc:
+            errors.append({"date": day_s, "source": "steps", "error": str(exc)[:180]})
+        try:
+            sleep_data = client.get_sleep_data(day_s)
+            seconds = _sleep_seconds(sleep_data if isinstance(sleep_data, dict) else {})
+            row["sleep_hours"] = round(seconds / 3600, 2) if seconds is not None else None
+        except Exception as exc:
+            errors.append({"date": day_s, "source": "sleep", "error": str(exc)[:180]})
+        try:
+            stress_data = client.get_stress_data(day_s)
+            if isinstance(stress_data, dict):
+                row["stress_avg"] = _safe_number(stress_data.get("avgStressLevel"))
+                row["stress_max"] = _safe_number(stress_data.get("maxStressLevel"))
+        except Exception as exc:
+            errors.append({"date": day_s, "source": "stress", "error": str(exc)[:180]})
+        try:
+            body_data = client.get_body_battery(day_s)
+            row["body_battery_avg"] = _body_battery_average(body_data)
+        except Exception as exc:
+            errors.append({"date": day_s, "source": "body_battery", "error": str(exc)[:180]})
+        rows.append(row)
+    return rows, errors
+
+
+def get_garmin_health_daily(user_id: int, from_iso: str | None = None, to_iso: str | None = None, sync: bool = False) -> dict[str, Any]:
+    end_dt = _parse_date(to_iso, datetime.utcnow())
+    start_dt = _parse_date(from_iso, end_dt - timedelta(days=29))
+    if end_dt < start_dt:
+        raise ValueError("to must be on or after from.")
+    days = min(90, (end_dt.date() - start_dt.date()).days + 1)
+    errors: list[dict[str, str]] = []
+    sync_import = {"created": 0, "updated": 0}
+    source = "database"
+    if sync:
+        fetched_rows, errors = _fetch_garmin_health_daily_from_provider(start_dt, days)
+        sync_import = _store_garmin_health_rows(user_id, fetched_rows)
+        source = "garmin_sync"
+    rows = _read_stored_garmin_health_daily(user_id, start_dt, days)
+    return {
+        "status": "ok",
+        "provider": "garmin",
+        "connected": True,
+        "source": source,
+        "from": start_dt.date().isoformat(),
+        "to": (start_dt.date() + timedelta(days=days - 1)).isoformat(),
+        "count": len(rows),
+        "days_limited": days,
+        "measurements": rows,
+        "sync_import": sync_import,
+        "errors": errors[:20],
+    }
 
 def get_missing_garmin_rides_for_period(
     user_id: int,

@@ -16,6 +16,8 @@ import { CreateFitFilePage } from "./pages/CreateFitFilePage";
 import { FindRidesOnMapPage } from "./pages/FindRidesOnMapPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { FitTrimPage } from "./pages/FitTrimPage";
+import { GarminHealthPage } from "./pages/GarminHealthPage";
+import { HealthPage } from "./pages/HealthPage";
 import { HomePage } from "./pages/HomePage";
 import { ImportFilesPage } from "./pages/ImportFilesPage";
 import { IngredientsPage } from "./pages/IngredientsPage";
@@ -102,6 +104,16 @@ const navGroups: NavGroup[] = [
       { label: "Zutaten", to: "/nutrition/ingredients" },
       { label: "Produkte", to: "/nutrition/products" },
       { label: "Rezepte", to: "/nutrition/recipes" },
+    ],
+  },
+  {
+    key: "health",
+    label: "Gesundheit",
+    items: [
+      { label: "Gewicht", to: "/health/weight" },
+      { label: "Schlaf", to: "/health/sleep" },
+      { label: "Schritte", to: "/health/steps" },
+      { label: "Stress & Erholung", to: "/health/stress" },
     ],
   },
   {
@@ -323,6 +335,7 @@ function Layout() {
     tools: true,
     activities: true,
     nutrition: true,
+    health: true,
     training: true,
     achievements: true,
   });
@@ -642,6 +655,11 @@ function Layout() {
               <Route path="/nutrition/ingredients" element={<IngredientsPage initialKind="base_ingredient" />} />
               <Route path="/nutrition/products" element={<IngredientsPage initialKind="product" />} />
               <Route path="/nutrition/recipes" element={<RecipesPage />} />
+              <Route path="/health" element={<Navigate to="/health/weight" replace />} />
+              <Route path="/health/weight" element={<HealthPage />} />
+              <Route path="/health/sleep" element={<GarminHealthPage mode="sleep" />} />
+              <Route path="/health/steps" element={<GarminHealthPage mode="steps" />} />
+              <Route path="/health/stress" element={<GarminHealthPage mode="stress" />} />
               <Route path="/training/basics" element={<TrainingBasicsPage />} />
               <Route path="/training/analysis" element={<TrainingAnalysisPage />} />
               <Route path="/training/analysis/hf-development" element={<TrainingHfDevelopmentPage />} />

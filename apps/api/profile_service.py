@@ -10,7 +10,7 @@ from packages.db.models import User, UserProfile, UserWeightLog
 from packages.db.session import SessionLocal
 
 
-DEFAULT_NAV_GROUP_ORDER = ["setup", "activities", "nutrition", "training", "achievements"]
+DEFAULT_NAV_GROUP_ORDER = ["setup", "helper", "tools", "activities", "nutrition", "health", "training", "achievements"]
 VALID_NAV_GROUP_KEYS = set(DEFAULT_NAV_GROUP_ORDER)
 TRAINING_CONFIG_SECTION_KEYS = ("profile", "goals", "week", "sources")
 
@@ -41,6 +41,15 @@ def _parse_date(value: str | None) -> date | None:
 
 def _serialize_date(value: date | None) -> str | None:
     return value.isoformat() if value else None
+
+
+def _validate_height(value: float | None, field_name: str) -> float | None:
+    if value is None:
+        return None
+    parsed = float(value)
+    if parsed <= 0 or parsed > 260:
+        raise ValueError(f"{field_name} must be > 0 and <= 260.")
+    return parsed
 
 
 def _validate_weight(value: float | None, field_name: str) -> float | None:
@@ -168,11 +177,14 @@ def _normalize_training_plan(value: Any) -> dict[str, Any] | None:
 
 def _profile_payload(profile: UserProfile | None, user: User | None = None) -> dict[str, Any]:
     display_name = (user.display_name or "") if user is not None else ""
+    email = (user.email or "") if user is not None else ""
     if profile is None:
         return {
+            "email": email,
             "display_name": display_name,
             "date_of_birth": None,
             "gender": None,
+            "height_cm": None,
             "current_weight_kg": None,
             "target_weight_kg": None,
             "start_weight_kg": None,
@@ -190,9 +202,11 @@ def _profile_payload(profile: UserProfile | None, user: User | None = None) -> d
     if profile.goal_start_date and profile.goal_end_date:
         goal_period_days = int((profile.goal_end_date - profile.goal_start_date).days)
     return {
+        "email": email,
         "display_name": display_name,
         "date_of_birth": _serialize_date(profile.date_of_birth),
         "gender": _normalize_gender(profile.gender),
+        "height_cm": profile.height_cm,
         "current_weight_kg": profile.current_weight_kg,
         "target_weight_kg": profile.target_weight_kg,
         "start_weight_kg": profile.start_weight_kg,
@@ -237,6 +251,8 @@ def upsert_user_profile(user_id: int, payload: dict[str, Any]) -> dict[str, Any]
             profile.date_of_birth = _parse_date(str(payload.get("date_of_birth") or "")) if payload.get("date_of_birth") else None
         if "gender" in payload:
             profile.gender = _normalize_gender(payload.get("gender"))
+        if "height_cm" in payload:
+            profile.height_cm = _validate_height(payload.get("height_cm"), "height_cm")
         if "current_weight_kg" in payload:
             profile.current_weight_kg = _validate_weight(payload.get("current_weight_kg"), "current_weight_kg")
         if "target_weight_kg" in payload:

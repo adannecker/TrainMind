@@ -90,6 +90,7 @@ type NumericFields = {
 };
 
 type DetailField = { key: string; label: string; unit: string };
+type EnrichResponse = { status: string; item: Partial<FoodItem> & { details?: Record<string, unknown> } };
 
 const NUMERIC_FIELDS: Array<{ key: keyof NumericFields; label: string }> = [
   { key: "kcal_per_100g", label: "kcal / 100g" },
@@ -242,7 +243,8 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
   const [sourceUrl, setSourceUrl] = useState("");
   const [numbers, setNumbers] = useState<NumericFields>(emptyNumbers());
   const [detailValues, setDetailValues] = useState<Record<string, string>>(emptyDetails());
-  const [llmRawText, setLlmRawText] = useState("");
+  const [enriching, setEnriching] = useState<"usda" | "llm" | null>(null);
+  const [llmFallbackAvailable, setLlmFallbackAvailable] = useState(false);
   const suggestionRequestRef = useRef(0);
   const countRequestRef = useRef(0);
 
@@ -265,7 +267,7 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     setSourceUrl("");
     setNumbers(emptyNumbers());
     setDetailValues(emptyDetails());
-    setLlmRawText("");
+    setLlmFallbackAvailable(false);
   };
 
   const loadIntoForm = (item: FoodItem) => {
@@ -350,14 +352,12 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     }
   };
 
-  const loadSuggestions = async (nextQuery = query, nextKind = selectedKind) => {
+  const loadSuggestions = async (nextQuery = query, nextKind = selectedKind, nextCategory = selectedCategory) => {
     const requestId = ++suggestionRequestRef.current;
-    if (nextQuery.trim().length < 2) {
-      setSuggestions([]);
-      return;
-    }
     try {
-      const params = new URLSearchParams({ q: nextQuery, limit: "8", item_kind: nextKind });
+      const params = new URLSearchParams({ limit: "30", item_kind: nextKind });
+      if (nextQuery.trim()) params.set("q", nextQuery.trim());
+      if (nextCategory && nextCategory !== "Alle") params.set("category", nextCategory);
       const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items?${params.toString()}`);
       const body = await parseJsonSafely<{ items: FoodItem[] }>(response);
       if (requestId !== suggestionRequestRef.current) return;
@@ -397,48 +397,71 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
     await loadSuggestions(saved.name, selectedKind);
   };
 
-  const copyLlmPrompt = async () => {
-    const lookupName = nameEn.trim() || name.trim();
+  const detailGroupOneMissing = DETAIL_GROUP_ONE.every((field) => !detailValues[field.key]);
+  const detailGroupTwoMissing = DETAIL_GROUP_TWO.every((field) => !detailValues[field.key]);
+  const canEnrichDetails = detailGroupOneMissing || detailGroupTwoMissing;
+
+  const applyEnrichedItem = (item: Partial<FoodItem> & { details?: Record<string, unknown> }) => {
+    if (item.name_de || item.name) setName(item.name_de || item.name || "");
+    if (item.name_en) setNameEn(item.name_en);
+    if (item.category && activeCategories.includes(item.category)) setCategory(item.category);
+    if (item.brand != null) setBrand(item.brand || "");
+    if (item.barcode != null) setBarcode(item.barcode || "");
+    if (item.origin_type) setOriginType(item.origin_type);
+    if (item.trust_level) setTrustLevel(item.trust_level);
+    if (item.verification_status) setVerificationStatus(item.verification_status);
+    if (item.usda_status) setUsdaStatus(item.usda_status);
+    if (item.health_indicator) setHealthIndicator(item.health_indicator);
+    if (item.source_label != null) setSourceLabel(item.source_label || "");
+    if (item.source_url != null) setSourceUrl(item.source_url || "");
+    setNumbers((prev) => ({
+      ...prev,
+      kcal_per_100g: item.kcal_per_100g == null ? prev.kcal_per_100g : String(item.kcal_per_100g),
+      protein_per_100g: item.protein_per_100g == null ? prev.protein_per_100g : String(item.protein_per_100g),
+      carbs_per_100g: item.carbs_per_100g == null ? prev.carbs_per_100g : String(item.carbs_per_100g),
+      fat_per_100g: item.fat_per_100g == null ? prev.fat_per_100g : String(item.fat_per_100g),
+      fiber_per_100g: item.fiber_per_100g == null ? prev.fiber_per_100g : String(item.fiber_per_100g),
+      sugar_per_100g: item.sugar_per_100g == null ? prev.sugar_per_100g : String(item.sugar_per_100g),
+      starch_per_100g: item.starch_per_100g == null ? prev.starch_per_100g : String(item.starch_per_100g),
+      saturated_fat_per_100g: item.saturated_fat_per_100g == null ? prev.saturated_fat_per_100g : String(item.saturated_fat_per_100g),
+      monounsaturated_fat_per_100g: item.monounsaturated_fat_per_100g == null ? prev.monounsaturated_fat_per_100g : String(item.monounsaturated_fat_per_100g),
+      polyunsaturated_fat_per_100g: item.polyunsaturated_fat_per_100g == null ? prev.polyunsaturated_fat_per_100g : String(item.polyunsaturated_fat_per_100g),
+      sodium_mg_per_100g: item.sodium_mg_per_100g == null ? prev.sodium_mg_per_100g : String(item.sodium_mg_per_100g),
+      potassium_mg_per_100g: item.potassium_mg_per_100g == null ? prev.potassium_mg_per_100g : String(item.potassium_mg_per_100g),
+    }));
+    if (item.details) {
+      setDetailValues((prev) => ({ ...prev, ...mapDetailsToState(item.details || {}) }));
+    }
+  };
+
+  const enrichFrom = async (source: "usda" | "llm") => {
+    const lookupName = nameEn.trim() || name.trim() || query.trim();
     if (!lookupName) {
       setError("Bitte zuerst einen Namen eingeben.");
       return;
     }
-    const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/llm-prompt`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: lookupName, brand: brand.trim() || null, category: category || null }),
-    });
-    const body = await parseJsonSafely<{ prompt: string } | { detail?: string }>(response);
-    if (!response.ok || !body || !("prompt" in body)) {
-      setError(body && "detail" in body && body.detail ? body.detail : "Prompt konnte nicht erzeugt werden.");
-      return;
+    setError(null);
+    setMessage(null);
+    setEnriching(source);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/enrich-${source}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: lookupName, brand: brand.trim() || null, category: category || null, item_kind: selectedKind }),
+      });
+      const body = await parseJsonSafely<EnrichResponse | { detail?: string }>(response);
+      if (!response.ok || !body || !("item" in body)) {
+        if (source === "usda") setLlmFallbackAvailable(true);
+        throw new Error(body && "detail" in body && body.detail ? body.detail : "Anreicherung fehlgeschlagen.");
+      }
+      applyEnrichedItem(body.item);
+      setLlmFallbackAvailable(false);
+      setMessage(source === "usda" ? "USDA-Werte übernommen. Bitte prüfen und speichern." : "LLM-Werte übernommen. Bitte prüfen und speichern.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setEnriching(null);
     }
-    await navigator.clipboard.writeText(body.prompt);
-    setMessage("LLM-Prompt in die Zwischenablage kopiert.");
-  };
-
-  const importFromLlm = async () => {
-    if (!llmRawText.trim()) {
-      setError("Bitte LLM-JSON einfügen.");
-      return;
-    }
-    const response = await apiFetch(`${API_BASE_URL}/nutrition/food-items/import-llm`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ raw_text: llmRawText }),
-    });
-    const body = await parseJsonSafely<FoodItem | { detail?: string }>(response);
-    if (!response.ok) {
-      setError(body && "detail" in body && body.detail ? body.detail : "Import fehlgeschlagen.");
-      return;
-    }
-    const imported = body as FoodItem;
-    loadIntoForm(imported);
-    setQuery(imported.name);
-    setLlmRawText("");
-    setMessage("Zutat aus LLM-JSON importiert.");
-    await loadCounts(imported.name, selectedKind);
-    await loadSuggestions(imported.name, selectedKind);
   };
 
   useEffect(() => {
@@ -449,10 +472,10 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
   useEffect(() => {
     const timer = setTimeout(() => {
       void loadCounts(query, selectedKind);
-      void loadSuggestions(query, selectedKind);
+      void loadSuggestions(query, selectedKind, selectedCategory);
     }, 180);
     return () => clearTimeout(timer);
-  }, [activeCategories, query, selectedKind]);
+  }, [activeCategories, query, selectedKind, selectedCategory]);
 
   const renderNumberField = (key: keyof NumericFields, label: string) => (
     <label className="settings-label" key={key}>
@@ -555,6 +578,29 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
       </div>
 
       <form className="ingredients-editor" onSubmit={(event) => void saveItem(event)}>
+        <aside className="card ingredients-relevant-list" aria-label="Relevante Treffer">
+          <div className="section-title-row">
+            <h2>Relevante Treffer</h2>
+          </div>
+          <div className="ingredients-relevant-scroll">
+            {suggestions.length === 0 ? <p className="info-text">Keine passenden Einträge.</p> : null}
+            {suggestions.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`ingredients-relevant-item ${selectedItem?.id === item.id ? "active" : ""}`}
+                onClick={() => {
+                  setQuery(item.name);
+                  loadIntoForm(item);
+                }}
+              >
+                <strong>{item.name}</strong>
+                <span>{[item.category, item.item_kind === "product" ? item.brand : null, item.source_label || item.source_type].filter(Boolean).join(" · ")}</span>
+              </button>
+            ))}
+          </div>
+        </aside>
+
         <section className="card ingredients-section">
           <div className="section-title-row">
             <div>
@@ -732,14 +778,21 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
         <section className="card ingredients-section">
           <div className="section-title-row">
             <div>
-              <h2>LLM</h2>
-              <p className="lead">Prompt erzeugen, JSON einfügen und strukturierte Werte direkt übernehmen.</p>
+              <h2>Speichern und anreichern</h2>
+              <p className="lead">Fehlende Inhaltsstoffe können zuerst über USDA und danach bei Bedarf über den hinterlegten LLM-Key gefüllt werden.</p>
             </div>
           </div>
-          <label className="settings-label">
-            LLM JSON
-            <textarea className="settings-input" rows={10} value={llmRawText} onChange={(event) => setLlmRawText(event.target.value)} />
-          </label>
+          {canEnrichDetails ? (
+            <div className="settings-note-card">
+              <p className="info-text">
+                {detailGroupOneMissing && detailGroupTwoMissing
+                  ? "Inhaltsstoffe 1 und 2 sind noch leer."
+                  : detailGroupOneMissing
+                    ? "Inhaltsstoffe 1 sind noch leer."
+                    : "Inhaltsstoffe 2 sind noch leer."}
+              </p>
+            </div>
+          ) : null}
           <div className="settings-actions">
             <button className="primary-button" type="submit">
               {selectedItem ? (isProductsView ? "Produkt aktualisieren" : "Zutat aktualisieren") : isProductsView ? "Produkt speichern" : "Zutat speichern"}
@@ -747,12 +800,16 @@ export function IngredientsPage({ initialKind = "base_ingredient" }: Ingredients
             <button className="secondary-button" type="button" onClick={resetForm}>
               {isProductsView ? "Neues Produkt" : "Neue Zutat"}
             </button>
-            <button className="secondary-button" type="button" onClick={() => void copyLlmPrompt()}>
-              Prompt kopieren
-            </button>
-            <button className="secondary-button" type="button" onClick={() => void importFromLlm()}>
-              JSON importieren
-            </button>
+            {canEnrichDetails ? (
+              <button className="secondary-button" type="button" onClick={() => void enrichFrom("usda")} disabled={enriching !== null}>
+                {enriching === "usda" ? "Hole USDA..." : "Inhaltsstoffe via USDA holen"}
+              </button>
+            ) : null}
+            {llmFallbackAvailable ? (
+              <button className="secondary-button" type="button" onClick={() => void enrichFrom("llm")} disabled={enriching !== null}>
+                {enriching === "llm" ? "Frage LLM..." : "Mit LLM versuchen"}
+              </button>
+            ) : null}
           </div>
           {selectedItem ? (
             <p className="info-text">

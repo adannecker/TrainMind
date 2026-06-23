@@ -26,9 +26,60 @@ type SummaryFieldAnalysis = {
   note: string | null;
 };
 
+type DuplicateActivity = {
+  id: number;
+  provider: string;
+  external_id: string;
+  name: string | null;
+  sport: string | null;
+  started_at: string | null;
+  duration_s: number | null;
+  distance_m: number | null;
+  avg_power_w: number | null;
+  avg_hr_bpm: number | null;
+};
+
+type DuplicateCandidate = {
+  activity: DuplicateActivity;
+  start_delta_seconds: number | null;
+};
+
+type SimilarValuesCandidate = DuplicateCandidate & {
+  similarity_score: number;
+  compared_fields: Array<{
+    key: string;
+    score: number;
+  }>;
+};
+
+type DuplicateAnalysis = {
+  possible_garmin_id: string | null;
+  checks: {
+    garmin_id_match: {
+      found: boolean;
+      activity: DuplicateActivity | null;
+    };
+    date_time_match: {
+      found: boolean;
+      candidates: DuplicateCandidate[];
+    };
+    similar_values_match: {
+      found: boolean;
+      best_candidate: SimilarValuesCandidate | null;
+    };
+  };
+  probability: number;
+  probability_percent: number;
+  verdict: string;
+};
+
 type FitInspectResponse = {
   file_name: string;
+  start_time: string;
   duration_seconds: number;
+  distance_m: number | null;
+  avg_hr_bpm: number | null;
+  sport: string | null;
   record_count: number;
   power_record_count: number;
   avg_power: number;
@@ -39,6 +90,8 @@ type FitInspectResponse = {
   intensity_factor: number | null;
   training_stress_score: number | null;
   ftp_inferred_w: number | null;
+  possible_garmin_id: string | null;
+  duplicate_analysis: DuplicateAnalysis;
   power_records: PowerRecord[];
   power_series: PowerSeriesBucket[];
   summary_fields: SummaryFieldAnalysis[];
@@ -80,6 +133,27 @@ function formatSeconds(totalSeconds: number): string {
     return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatDateTime(value: string | null): string {
+  if (!value) return "-";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("de-DE", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+}
+
+function formatDistanceMeters(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "-";
+  return `${(value / 1000).toFixed(2)} km`;
+}
+
+function formatDeltaSeconds(value: number | null): string {
+  if (value === null) return "-";
+  if (value < 60) return `${value}s`;
+  return `${Math.round((value / 60) * 10) / 10} min`;
 }
 
 function applyAdjustments(power: number, offsetSeconds: number, adjustments: PowerAdjustment[]): number {
@@ -533,6 +607,14 @@ export function FitRepairPage() {
       };
     });
   }, [inspectData, viewEnd, viewStart]);
+  const duplicateAnalysis = inspectData?.duplicate_analysis ?? null;
+  const bestDuplicateCandidate = duplicateAnalysis?.checks.similar_values_match.best_candidate ?? null;
+  const duplicateToneClass =
+    (duplicateAnalysis?.probability_percent ?? 0) >= 90
+      ? "fit-duplicate-card-danger"
+      : (duplicateAnalysis?.probability_percent ?? 0) >= 70
+        ? "fit-duplicate-card-warn"
+        : "fit-duplicate-card-safe";
 
   return (
     <section className="page">
@@ -614,10 +696,32 @@ export function FitRepairPage() {
                     {inspectData.file_name}
                   </span>
                 </div>
+                <div className="fit-detail-list">
+                  <div className="fit-detail-row">
+                    <span>Datei:</span>
+                    <strong>{inspectData.file_name}</strong>
+                  </div>
+                  <div className="fit-detail-row">
+                    <span>Start:</span>
+                    <strong>{formatDateTime(inspectData.start_time)}</strong>
+                  </div>
+                  <div className="fit-detail-row">
+                    <span>Sport:</span>
+                    <strong>{inspectData.sport || "-"}</strong>
+                  </div>
+                  <div className="fit-detail-row">
+                    <span>Mögliche Garmin ID:</span>
+                    <strong>{inspectData.possible_garmin_id || "Nicht gefunden"}</strong>
+                  </div>
+                </div>
                 <div className="settings-status-grid">
                   <div className="settings-status-chip">
                     <span>Dauer</span>
                     <strong>{formatSeconds(inspectData.duration_seconds)}</strong>
+                  </div>
+                  <div className="settings-status-chip">
+                    <span>Distanz</span>
+                    <strong>{formatDistanceMeters(inspectData.distance_m)}</strong>
                   </div>
                   <div className="settings-status-chip">
                     <span>Power-Records</span>
@@ -644,10 +748,94 @@ export function FitRepairPage() {
                     <strong>{inspectData.estimated_calories} kcal</strong>
                   </div>
                   <div className="settings-status-chip">
+                    <span>Ø HF</span>
+                    <strong>{inspectData.avg_hr_bpm ? `${Math.round(inspectData.avg_hr_bpm)} bpm` : "-"}</strong>
+                  </div>
+                  <div className="settings-status-chip">
                     <span>FTP ableitbar</span>
                     <strong>{inspectData.ftp_inferred_w ? `${Math.round(inspectData.ftp_inferred_w)} W` : "Nein"}</strong>
                   </div>
                 </div>
+                {duplicateAnalysis ? (
+                  <div className={`fit-duplicate-card ${duplicateToneClass}`}>
+                    <div className="fit-duplicate-head">
+                      <div>
+                        <h3>Doubletten-Prüfung</h3>
+                        <p>
+                          Wahrscheinlichkeit: <strong>{duplicateAnalysis.probability_percent}%</strong> · {duplicateAnalysis.verdict}
+                        </p>
+                      </div>
+                      <span className="fit-repair-pill">{duplicateAnalysis.verdict}</span>
+                    </div>
+                    <div className="fit-duplicate-grid">
+                      <article className="fit-duplicate-item">
+                        <strong>1. Garmin-ID Treffer</strong>
+                        <p>{duplicateAnalysis.checks.garmin_id_match.found ? "Ja, Aktivität mit dieser ID existiert bereits." : "Nein, keine Aktivität mit dieser Garmin-ID gefunden."}</p>
+                        {duplicateAnalysis.checks.garmin_id_match.activity ? (
+                          <p>
+                            {duplicateAnalysis.checks.garmin_id_match.activity.name || "Ohne Namen"} · {formatDateTime(duplicateAnalysis.checks.garmin_id_match.activity.started_at)}
+                          </p>
+                        ) : null}
+                      </article>
+                      <article className="fit-duplicate-item">
+                        <strong>2. Datum / Zeit Treffer</strong>
+                        <p>{duplicateAnalysis.checks.date_time_match.found ? "Ja, es gibt Aktivitäten in der Nähe von Datum und Uhrzeit." : "Nein, keine Aktivität im Zeitfenster gefunden."}</p>
+                        {duplicateAnalysis.checks.date_time_match.candidates[0] ? (
+                          <p>
+                            Nächster Treffer: {duplicateAnalysis.checks.date_time_match.candidates[0].activity.name || "Ohne Namen"} · Abweichung {formatDeltaSeconds(duplicateAnalysis.checks.date_time_match.candidates[0].start_delta_seconds)}
+                          </p>
+                        ) : null}
+                      </article>
+                      <article className="fit-duplicate-item">
+                        <strong>3. Gleiche / ähnliche Werte</strong>
+                        <p>{duplicateAnalysis.checks.similar_values_match.found ? "Ja, die Werte passen stark zu einer bestehenden Aktivität." : "Nein, keine ausreichend ähnliche Aktivität gefunden."}</p>
+                        {bestDuplicateCandidate ? (
+                          <p>
+                            Bester Treffer: {bestDuplicateCandidate.activity.name || "Ohne Namen"} · Ahnlichkeit {Math.round(bestDuplicateCandidate.similarity_score * 100)}%
+                          </p>
+                        ) : null}
+                      </article>
+                    </div>
+                    {bestDuplicateCandidate ? (
+                      <div className="fit-duplicate-match">
+                        <strong>Vergleich mit bestem Treffer</strong>
+                        <div className="fit-detail-list fit-detail-list-compact">
+                          <div className="fit-detail-row">
+                            <span>Aktivität:</span>
+                            <strong>{bestDuplicateCandidate.activity.name || "Ohne Namen"}</strong>
+                          </div>
+                          <div className="fit-detail-row">
+                            <span>Start:</span>
+                            <strong>{formatDateTime(bestDuplicateCandidate.activity.started_at)}</strong>
+                          </div>
+                          <div className="fit-detail-row">
+                            <span>Zeitabweichung:</span>
+                            <strong>{formatDeltaSeconds(bestDuplicateCandidate.start_delta_seconds)}</strong>
+                          </div>
+                          <div className="fit-detail-row">
+                            <span>Distanz:</span>
+                            <strong>{formatDistanceMeters(bestDuplicateCandidate.activity.distance_m)}</strong>
+                          </div>
+                          <div className="fit-detail-row">
+                            <span>Ø Watt:</span>
+                            <strong>{bestDuplicateCandidate.activity.avg_power_w ? `${Math.round(bestDuplicateCandidate.activity.avg_power_w)} W` : "-"}</strong>
+                          </div>
+                          <div className="fit-detail-row">
+                            <span>Ø HF:</span>
+                            <strong>{bestDuplicateCandidate.activity.avg_hr_bpm ? `${Math.round(bestDuplicateCandidate.activity.avg_hr_bpm)} bpm` : "-"}</strong>
+                          </div>
+                        </div>
+                        <div className="fit-duplicate-scores">
+                          {bestDuplicateCandidate.compared_fields.map((field) => (
+                            <span key={field.key} className="fit-repair-pill">
+                              {field.key}: {Math.round(field.score * 100)}%
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
 
                 <div className="fit-chart-toolbar">
                   <div className="fit-chart-meta">

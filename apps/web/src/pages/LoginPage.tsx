@@ -59,9 +59,7 @@ export function LoginPage({ onLoggedIn }: { onLoggedIn: () => void }) {
   return (
     <section className="page login-page">
       <div className="card login-card">
-        <p className="eyebrow">TrainMind Hub</p>
-        <h1>Login</h1>
-        <p className="lead">Bitte mit deinem lokalen TrainMind-Account anmelden.</p>
+        <h1>TrainMind</h1>
         {error ? <p className="error-text">{error}</p> : null}
         <form className="settings-form" onSubmit={(e) => void handleSubmit(e)}>
           <label className="settings-label">

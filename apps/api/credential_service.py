@@ -92,6 +92,46 @@ def set_service_credentials(provider: str, username: str, password: str, user_id
     return {"provider": cleaned_provider, "status": "saved"}
 
 
+def set_service_secret(provider: str, secret: str, user_id: int, *, username: str = "token") -> dict[str, str]:
+    cleaned_provider = provider.strip().lower()
+    cleaned_username = username.strip() or "token"
+    cleaned_secret = secret.strip()
+    if not cleaned_provider:
+        raise ValueError("Provider is required.")
+    if not cleaned_secret:
+        raise ValueError("Secret is required.")
+
+    now = datetime.utcnow()
+    encrypted_username = _encrypt(cleaned_username)
+    encrypted_secret = _encrypt(cleaned_secret)
+
+    with SessionLocal() as session:
+        existing = session.scalar(
+            select(ServiceCredential).where(
+                ServiceCredential.provider == cleaned_provider,
+                ServiceCredential.user_id == user_id,
+            )
+        )
+        if existing is None:
+            session.add(
+                ServiceCredential(
+                    user_id=user_id,
+                    provider=cleaned_provider,
+                    username_encrypted=encrypted_username,
+                    password_encrypted=encrypted_secret,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        else:
+            existing.username_encrypted = encrypted_username
+            existing.password_encrypted = encrypted_secret
+            existing.updated_at = now
+        session.commit()
+
+    return {"provider": cleaned_provider, "status": "saved"}
+
+
 def get_service_credentials(provider: str, user_id: int) -> tuple[str, str] | None:
     cleaned_provider = provider.strip().lower()
     if not cleaned_provider:
@@ -107,6 +147,32 @@ def get_service_credentials(provider: str, user_id: int) -> tuple[str, str] | No
         if record is None:
             return None
         return (_decrypt(record.username_encrypted), _decrypt(record.password_encrypted))
+
+
+def get_service_secret(provider: str, user_id: int) -> str | None:
+    credentials = get_service_credentials(provider=provider, user_id=user_id)
+    if credentials is None:
+        return None
+    return credentials[1]
+
+
+def delete_service_credentials(provider: str, user_id: int) -> dict[str, str]:
+    cleaned_provider = provider.strip().lower()
+    if not cleaned_provider:
+        raise ValueError("Provider is required.")
+
+    with SessionLocal() as session:
+        record = session.scalar(
+            select(ServiceCredential).where(
+                ServiceCredential.provider == cleaned_provider,
+                ServiceCredential.user_id == user_id,
+            )
+        )
+        if record is not None:
+            session.delete(record)
+            session.commit()
+
+    return {"provider": cleaned_provider, "status": "deleted"}
 
 
 def get_service_credentials_status(provider: str, user_id: int) -> dict[str, str | bool]:

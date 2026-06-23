@@ -1,13 +1,17 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+import requests
 from uuid import uuid4
 
 from sqlalchemy import func, or_, select
 
+from apps.api.llm_service import openai_chat_completion
 from packages.db.models import (
     NutritionFoodItem,
     NutritionFoodItemOverride,
@@ -1485,12 +1489,12 @@ def build_food_item_llm_prompt(name: str, brand: str | None = None, category: st
     return {"prompt": prompt}
 
 
-def import_food_item_from_llm(user_id: int, raw_text: str) -> dict[str, Any]:
-    text = (raw_text or "").strip()
-    if not text:
-        raise ValueError("raw_text is required.")
 
-    cleaned = text
+
+def _coerce_json_object(text: str) -> dict[str, Any]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        raise ValueError("raw_text is required.")
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
         if cleaned.startswith("json"):
@@ -1498,6 +1502,171 @@ def import_food_item_from_llm(user_id: int, raw_text: str) -> dict[str, Any]:
     data = json.loads(cleaned)
     if not isinstance(data, dict):
         raise ValueError("Imported content must be a JSON object.")
+    return data
+
+
+USDA_NUTRIENT_MAP = {
+    "Energy": ("kcal_per_100g", "kcal"),
+    "Protein": ("protein_per_100g", "g"),
+    "Carbohydrate, by difference": ("carbs_per_100g", "g"),
+    "Total lipid (fat)": ("fat_per_100g", "g"),
+    "Fiber, total dietary": ("fiber_per_100g", "g"),
+    "Total Sugars": ("sugar_per_100g", "g"),
+    "Sugars, total including NLEA": ("sugar_per_100g", "g"),
+    "Starch": ("starch_per_100g", "g"),
+    "Fatty acids, total saturated": ("saturated_fat_per_100g", "g"),
+    "Fatty acids, total monounsaturated": ("monounsaturated_fat_per_100g", "g"),
+    "Fatty acids, total polyunsaturated": ("polyunsaturated_fat_per_100g", "g"),
+    "Sodium, Na": ("sodium_mg_per_100g", "mg"),
+    "Potassium, K": ("potassium_mg_per_100g", "mg"),
+    "Fatty acids, total trans": ("trans_fat_per_100g", "g"),
+    "Cholesterol": ("cholesterol_mg_per_100g", "mg"),
+    "Calcium, Ca": ("calcium_mg_per_100g", "mg"),
+    "Magnesium, Mg": ("magnesium_mg_per_100g", "mg"),
+    "Phosphorus, P": ("phosphorus_mg_per_100g", "mg"),
+    "Iron, Fe": ("iron_mg_per_100g", "mg"),
+    "Zinc, Zn": ("zinc_mg_per_100g", "mg"),
+    "Copper, Cu": ("copper_mg_per_100g", "mg"),
+    "Manganese, Mn": ("manganese_mg_per_100g", "mg"),
+    "Selenium, Se": ("selenium_ug_per_100g", "ug"),
+    "Vitamin A, RAE": ("vitamin_a_ug_per_100g", "ug"),
+    "Thiamin": ("vitamin_b1_mg_per_100g", "mg"),
+    "Riboflavin": ("vitamin_b2_mg_per_100g", "mg"),
+    "Niacin": ("vitamin_b3_mg_per_100g", "mg"),
+    "Pantothenic acid": ("vitamin_b5_mg_per_100g", "mg"),
+    "Vitamin B-6": ("vitamin_b6_mg_per_100g", "mg"),
+    "Folate, total": ("folate_ug_per_100g", "ug"),
+    "Vitamin B-12": ("vitamin_b12_ug_per_100g", "ug"),
+    "Vitamin C, total ascorbic acid": ("vitamin_c_mg_per_100g", "mg"),
+    "Vitamin D (D2 + D3)": ("vitamin_d_ug_per_100g", "ug"),
+    "Vitamin E (alpha-tocopherol)": ("vitamin_e_mg_per_100g", "mg"),
+    "Vitamin K (phylloquinone)": ("vitamin_k_ug_per_100g", "ug"),
+}
+
+
+def _empty_food_payload(name: str, brand: str | None, category: str | None, item_kind: str | None) -> dict[str, Any]:
+    return {
+        "name": name,
+        "name_en": None,
+        "name_de": name,
+        "item_kind": item_kind or "base_ingredient",
+        "category": category,
+        "brand": brand,
+        "barcode": None,
+        "origin_type": "trusted_source",
+        "trust_level": "high",
+        "verification_status": "source_linked",
+        "usda_status": "valid",
+        "health_indicator": "neutral",
+        "source_type": "trusted_source",
+        "source_label": "USDA FoodData Central",
+        "source_url": "https://fdc.nal.usda.gov/",
+        "details": {},
+    }
+
+
+def _assign_usda_nutrient(payload: dict[str, Any], nutrient: dict[str, Any]) -> None:
+    name = str(nutrient.get("nutrientName") or nutrient.get("name") or "").strip()
+    if not name:
+        return
+    mapped = USDA_NUTRIENT_MAP.get(name)
+    if not mapped:
+        return
+    key, expected_unit = mapped
+    value = nutrient.get("value")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return
+    unit = str(nutrient.get("unitName") or "").strip().lower().replace("µ", "u")
+    if key == "kcal_per_100g" and unit and unit != "kcal":
+        return
+    if key.endswith("_mg_per_100g") and unit == "g":
+        parsed *= 1000
+    if key.endswith("_ug_per_100g") and unit == "mg":
+        parsed *= 1000
+    if key in {"kcal_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g", "fiber_per_100g", "sugar_per_100g", "starch_per_100g", "saturated_fat_per_100g", "monounsaturated_fat_per_100g", "polyunsaturated_fat_per_100g", "sodium_mg_per_100g", "potassium_mg_per_100g"}:
+        payload[key] = round(parsed, 4)
+    else:
+        payload.setdefault("details", {})[key] = round(parsed, 4)
+
+
+def fetch_food_item_from_usda(name: str, brand: str | None = None, category: str | None = None, item_kind: str | None = None) -> dict[str, Any]:
+    query = " ".join(part for part in [name.strip(), (brand or "").strip()] if part)
+    if not query:
+        raise ValueError("name is required.")
+    api_key = os.getenv("USDA_API_KEY", "").strip()
+    if not api_key:
+        raise ValueError("USDA_API_KEY is not configured.")
+    response = requests.get(
+        "https://api.nal.usda.gov/fdc/v1/foods/search",
+        params={"api_key": api_key, "query": query, "pageSize": 1},
+        timeout=20,
+    )
+    try:
+        body = response.json()
+    except ValueError:
+        body = {}
+    if response.status_code >= 400:
+        detail = body.get("error", {}).get("message") if isinstance(body, dict) else None
+        raise RuntimeError(detail or response.text.strip() or "USDA request failed.")
+    foods = body.get("foods") if isinstance(body, dict) else None
+    if not isinstance(foods, list) or not foods:
+        raise ValueError("USDA hat keinen passenden Treffer geliefert.")
+    food = foods[0]
+    payload = _empty_food_payload(name=name.strip(), brand=brand, category=category, item_kind=item_kind)
+    description = str(food.get("description") or "").strip()
+    fdc_id = food.get("fdcId")
+    payload["name_en"] = description or payload["name_en"]
+    if fdc_id:
+        payload["source_url"] = f"https://fdc.nal.usda.gov/fdc-app.html#/food-details/{fdc_id}/nutrients"
+    payload["details"] = {
+        "usda": {
+            "fdc_id": fdc_id,
+            "description": description,
+            "data_type": food.get("dataType"),
+            "published_date": food.get("publishedDate"),
+        }
+    }
+    for nutrient in food.get("foodNutrients") or []:
+        if isinstance(nutrient, dict):
+            _assign_usda_nutrient(payload, nutrient)
+    return {"status": "matched", "item": payload}
+
+
+def derive_food_item_with_llm(user_id: int, name: str, brand: str | None = None, category: str | None = None, item_kind: str | None = None) -> dict[str, Any]:
+    prompt = build_food_item_llm_prompt(name=name, brand=brand, category=category)["prompt"].replace('"item_kind": "base_ingredient"', f'"item_kind": "{item_kind or "base_ingredient"}"')
+    response = openai_chat_completion(
+        user_id=user_id,
+        feature_key="nutrition:food_item_enrich",
+        system_prompt="Du bist ein präziser Nutrition-Datenassistent. Antworte ausschließlich mit validem JSON nach dem angeforderten Schema.",
+        user_prompt=prompt,
+        temperature=0.2,
+        timeout=45,
+    )
+    choices = response.get("choices") if isinstance(response, dict) else None
+    content = None
+    if isinstance(choices, list) and choices:
+        message = choices[0].get("message") if isinstance(choices[0], dict) else None
+        if isinstance(message, dict):
+            content = message.get("content")
+    data = _coerce_json_object(str(content or ""))
+    data["origin_type"] = data.get("origin_type") or "llm"
+    data["trust_level"] = data.get("trust_level") or "low"
+    data["verification_status"] = data.get("verification_status") or "unverified"
+    data["usda_status"] = data.get("usda_status") or "unknown"
+    data["item_kind"] = data.get("item_kind") or item_kind or "base_ingredient"
+    data["category"] = data.get("category") or category
+    data["brand"] = data.get("brand") or brand
+    return {"status": "derived", "item": data}
+
+
+def import_food_item_from_llm(user_id: int, raw_text: str) -> dict[str, Any]:
+    text = (raw_text or "").strip()
+    if not text:
+        raise ValueError("raw_text is required.")
+
+    data = _coerce_json_object(text)
 
     payload = {
         "name": data.get("name"),

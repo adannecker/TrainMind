@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import io
 import math
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from statistics import mean
 from typing import Any
 
 from fit_tool.fit_file import FitFile as WritableFitFile
 from fitparse import FitFile as ParsedFitFile
+from sqlalchemy import select
+
+from packages.db.models import Activity
+from packages.db.session import SessionLocal
 
 
 class FitFixError(ValueError):
@@ -66,6 +70,14 @@ def _ensure_datetime(value: Any) -> datetime:
     raise FitFixError("Die FIT-Datei enthält keine lesbaren Zeitstempel.")
 
 
+def _to_utc_naive(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 def _collect_record_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], datetime]:
     fit = ParsedFitFile(io.BytesIO(file_bytes))
     records: list[dict[str, Any]] = []
@@ -92,6 +104,216 @@ def _collect_record_rows(file_bytes: bytes) -> tuple[list[dict[str, Any]], datet
         raise FitFixError("In der FIT-Datei wurden keine Record-Daten gefunden.")
 
     return records, start_ts
+
+
+def _parse_session_summary(file_bytes: bytes) -> dict[str, Any]:
+    fit = ParsedFitFile(io.BytesIO(file_bytes))
+    session_message = next(iter(fit.get_messages("session")), None)
+    if session_message is None:
+        return {}
+
+    return {
+        "start_time": _fit_datetime(session_message.get_value("start_time")) or _fit_datetime(session_message.get_value("timestamp")),
+        "total_distance_m": _fit_float(session_message.get_value("total_distance")),
+        "avg_power_w": _fit_float(session_message.get_value("avg_power") or session_message.get_value("total_average_power")),
+        "max_power_w": _fit_float(session_message.get_value("max_power")),
+        "avg_hr_bpm": _fit_float(session_message.get_value("avg_heart_rate") or session_message.get_value("total_average_heart_rate")),
+        "max_hr_bpm": _fit_float(session_message.get_value("max_heart_rate")),
+        "sport": session_message.get_value("sport"),
+        "sub_sport": session_message.get_value("sub_sport"),
+    }
+
+
+def _fit_datetime(value: Any) -> datetime | None:
+    return value if isinstance(value, datetime) else None
+
+
+def _fit_float(value: Any) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalize_possible_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        text = str(int(value))
+    except (TypeError, ValueError):
+        text = str(value).strip()
+    digits = "".join(char for char in text if char.isdigit())
+    if len(digits) < 6:
+        return None
+    return digits
+
+
+def _extract_possible_garmin_id(file_bytes: bytes) -> str | None:
+    fit = ParsedFitFile(io.BytesIO(file_bytes))
+    preferred_field_names = {
+        "garmin_activity_id",
+        "activity_id",
+        "external_activity_id",
+    }
+    for message in fit.get_messages():
+        for field in getattr(message, "fields", []):
+            field_name = str(getattr(field, "name", "") or "").strip().lower()
+            if field_name in preferred_field_names or ("activity" in field_name and field_name.endswith("_id")):
+                normalized = _normalize_possible_id(getattr(field, "value", None))
+                if normalized:
+                    return normalized
+    return None
+
+
+def _activity_payload(row: Activity) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "provider": row.provider,
+        "external_id": row.external_id,
+        "name": row.name,
+        "sport": row.sport,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "duration_s": row.duration_s,
+        "distance_m": row.distance_m,
+        "avg_power_w": row.avg_power_w,
+        "avg_hr_bpm": row.avg_hr_bpm,
+    }
+
+
+def _closeness_ratio(a: float | None, b: float | None, floor: float) -> float | None:
+    if a is None or b is None:
+        return None
+    scale = max(abs(a), abs(b), floor)
+    if scale <= 0:
+        return None
+    return max(0.0, 1.0 - (abs(a - b) / scale))
+
+
+def _evaluate_candidate_similarity(fit_summary: dict[str, Any], activity: Activity) -> dict[str, Any]:
+    fit_start = _to_utc_naive(fit_summary.get("start_time"))
+    activity_start = _to_utc_naive(activity.started_at)
+    start_delta_seconds = abs((activity_start - fit_start).total_seconds()) if fit_start and activity_start else None
+    time_similarity = None if start_delta_seconds is None else max(0.0, 1.0 - (start_delta_seconds / 600.0))
+
+    parts = [
+        ("duration", _closeness_ratio(float(fit_summary["duration_seconds"]), float(activity.duration_s), 60.0) if activity.duration_s is not None else None, 0.28),
+        ("distance", _closeness_ratio(fit_summary.get("distance_m"), activity.distance_m, 1000.0), 0.28),
+        ("avg_power", _closeness_ratio(float(fit_summary["avg_power"]), activity.avg_power_w, 40.0) if activity.avg_power_w is not None else None, 0.22),
+        ("avg_hr", _closeness_ratio(fit_summary.get("avg_hr_bpm"), activity.avg_hr_bpm, 15.0), 0.12),
+        ("start_time", time_similarity, 0.10),
+    ]
+
+    available_parts = [(name, score, weight) for name, score, weight in parts if score is not None]
+    weighted_sum = sum(score * weight for _, score, weight in available_parts)
+    total_weight = sum(weight for _, _, weight in available_parts)
+    similarity_score = weighted_sum / total_weight if total_weight > 0 else 0.0
+
+    compared_fields = [
+        {
+            "key": name,
+            "score": round(score, 3),
+        }
+        for name, score, _ in available_parts
+    ]
+
+    return {
+        "activity": _activity_payload(activity),
+        "start_delta_seconds": int(round(start_delta_seconds)) if start_delta_seconds is not None else None,
+        "similarity_score": round(similarity_score, 3),
+        "compared_fields": compared_fields,
+    }
+
+
+def _build_duplicate_analysis(user_id: int | None, fit_summary: dict[str, Any]) -> dict[str, Any]:
+    possible_garmin_id = fit_summary.get("possible_garmin_id")
+    empty_result = {
+        "possible_garmin_id": possible_garmin_id,
+        "checks": {
+            "garmin_id_match": {"found": False, "activity": None},
+            "date_time_match": {"found": False, "candidates": []},
+            "similar_values_match": {"found": False, "best_candidate": None},
+        },
+        "probability": 0.0,
+        "probability_percent": 0,
+        "verdict": "Keine Hinweise",
+    }
+    if user_id is None:
+        return empty_result
+
+    fit_start = _to_utc_naive(fit_summary.get("start_time"))
+    with SessionLocal() as session:
+        garmin_match = None
+        if possible_garmin_id:
+            garmin_match = session.scalar(
+                select(Activity).where(
+                    Activity.user_id == user_id,
+                    Activity.provider == "garmin",
+                    Activity.external_id == possible_garmin_id,
+                )
+            )
+
+        time_candidates: list[Activity] = []
+        if fit_start is not None:
+            window_start = fit_start - timedelta(minutes=10)
+            window_end = fit_start + timedelta(minutes=10)
+            time_candidates = session.scalars(
+                select(Activity)
+                .where(
+                    Activity.user_id == user_id,
+                    Activity.started_at.is_not(None),
+                    Activity.started_at >= window_start,
+                    Activity.started_at <= window_end,
+                )
+                .order_by(Activity.started_at.asc())
+            ).all()
+
+        candidate_evaluations = [_evaluate_candidate_similarity(fit_summary, row) for row in time_candidates]
+        best_candidate = max(candidate_evaluations, key=lambda item: item["similarity_score"], default=None)
+
+    probability = 0.03
+    if garmin_match is not None:
+        probability = 0.99
+    elif best_candidate is not None:
+        start_delta = best_candidate.get("start_delta_seconds")
+        time_bonus = 0.0
+        if start_delta is not None:
+            time_bonus = max(0.0, 1.0 - (float(start_delta) / 600.0))
+        probability = min(0.97, 0.18 + (best_candidate["similarity_score"] * 0.67) + (time_bonus * 0.12))
+
+    verdict = "Niedrig"
+    if probability >= 0.9:
+        verdict = "Sehr wahrscheinlich"
+    elif probability >= 0.7:
+        verdict = "Wahrscheinlich"
+    elif probability >= 0.4:
+        verdict = "Mittel"
+
+    return {
+        "possible_garmin_id": possible_garmin_id,
+        "checks": {
+            "garmin_id_match": {
+                "found": garmin_match is not None,
+                "activity": _activity_payload(garmin_match) if garmin_match is not None else None,
+            },
+            "date_time_match": {
+                "found": bool(time_candidates),
+                "candidates": [
+                    {
+                        "activity": item["activity"],
+                        "start_delta_seconds": item["start_delta_seconds"],
+                    }
+                    for item in candidate_evaluations[:5]
+                ],
+            },
+            "similar_values_match": {
+                "found": bool(best_candidate and best_candidate["similarity_score"] >= 0.72),
+                "best_candidate": best_candidate,
+            },
+        },
+        "probability": round(probability, 3),
+        "probability_percent": int(round(probability * 100)),
+        "verdict": verdict,
+    }
 
 
 def _sample_power_series(power_records: list[dict[str, Any]], duration_seconds: int, bucket_target: int = 160) -> list[dict[str, int]]:
@@ -310,15 +532,31 @@ def _update_message_fields(message: Any, field_names: tuple[str, ...], value: An
     return updated
 
 
-def inspect_fit_file(file_bytes: bytes, filename: str) -> dict[str, Any]:
-    records, _ = _collect_record_rows(file_bytes)
+def inspect_fit_file(file_bytes: bytes, filename: str, user_id: int | None = None) -> dict[str, Any]:
+    records, start_ts = _collect_record_rows(file_bytes)
     duration_seconds = int(records[-1]["offset_seconds"])
     metric_summary = _build_metric_summary(records)
     summary_messages = _parse_summary_messages(file_bytes)
     ftp_w = _infer_ftp_w(summary_messages, duration_seconds)
+    session_summary = _parse_session_summary(file_bytes)
+    start_time = session_summary.get("start_time") or start_ts
+    distance_m = session_summary.get("total_distance_m")
+    possible_garmin_id = _extract_possible_garmin_id(file_bytes)
+    fit_summary = {
+        "start_time": start_time,
+        "duration_seconds": duration_seconds,
+        "distance_m": distance_m,
+        "avg_power": metric_summary["avg_power"],
+        "avg_hr_bpm": session_summary.get("avg_hr_bpm"),
+        "possible_garmin_id": possible_garmin_id,
+    }
     return {
         "file_name": filename,
+        "start_time": start_time.isoformat(),
         "duration_seconds": duration_seconds,
+        "distance_m": distance_m,
+        "avg_hr_bpm": session_summary.get("avg_hr_bpm"),
+        "sport": str(session_summary.get("sport")) if session_summary.get("sport") is not None else None,
         "record_count": len(records),
         "power_record_count": metric_summary["power_record_count"],
         "avg_power": metric_summary["avg_power"],
@@ -329,6 +567,8 @@ def inspect_fit_file(file_bytes: bytes, filename: str) -> dict[str, Any]:
         "intensity_factor": metric_summary["intensity_factor"],
         "training_stress_score": metric_summary["training_stress_score"],
         "ftp_inferred_w": round(ftp_w, 1) if ftp_w is not None else None,
+        "possible_garmin_id": possible_garmin_id,
+        "duplicate_analysis": _build_duplicate_analysis(user_id=user_id, fit_summary=fit_summary),
         "power_records": [row for row in records if row["power"] is not None],
         "power_series": _sample_power_series([row for row in records if row["power"] is not None], duration_seconds),
         "summary_fields": _build_summary_field_analysis(summary_messages, metric_summary, ftp_w),

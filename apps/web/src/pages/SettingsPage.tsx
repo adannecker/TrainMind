@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { apiFetch } from "../api";
 import { API_BASE_URL } from "../config";
 
-type SettingsTab = "personal" | "garmin" | "weight" | "llm" | "admin";
+type SettingsTab = "personal" | "garmin" | "withings" | "llm" | "admin";
 
 type CredentialStatus = {
   provider: string;
@@ -21,10 +21,29 @@ type GarminSessionStatus = {
   login_ok: boolean | null;
 };
 
+type WithingsStatus = {
+  provider: string;
+  configured: boolean;
+  connected: boolean;
+  redirect_uri: string | null;
+  redirect_configured?: boolean;
+  credential_source?: "user" | "env" | "none";
+  has_user_app_credentials?: boolean;
+  has_env_app_credentials?: boolean;
+  client_id_hint?: string | null;
+  scopes: string;
+  userid: string | null;
+  scope: string | null;
+  expires_at: string | null;
+};
+
 type LlmStatus = {
   provider: string;
   configured: boolean;
   key_hint: string | null;
+  key_source?: "user" | "env" | "none";
+  has_user_key?: boolean;
+  has_env_key?: boolean;
   model: string | null;
   admin_key_configured: boolean;
   balance_available: boolean;
@@ -72,9 +91,11 @@ type LlmRecentEvent = {
 };
 
 type UserProfile = {
+  email?: string;
   display_name: string;
   date_of_birth: string | null;
   gender: string | null;
+  height_cm: number | null;
   current_weight_kg: number | null;
   target_weight_kg: number | null;
   start_weight_kg: number | null;
@@ -102,16 +123,6 @@ type UserProfile = {
   updated_at: string | null;
 };
 
-type WeightLog = {
-  id: number;
-  recorded_at: string;
-  weight_kg: number;
-  source_type: string;
-  source_label: string | null;
-  notes: string | null;
-  created_at: string;
-};
-
 type AdminUser = {
   id: number;
   email: string;
@@ -137,7 +148,7 @@ type AuthMe = {
 const baseTabs: Array<{ id: Exclude<SettingsTab, "admin">; label: string; description: string }> = [
   { id: "personal", label: "Persönliche Daten", description: "Name und Zielrahmen pflegen" },
   { id: "garmin", label: "Garmin Zugang", description: ".env-Status und Verbindung pruefen" },
-  { id: "weight", label: "Gewicht", description: "Verlauf und Messpunkte verwalten" },
+  { id: "withings", label: "Withings Zugang", description: "OAuth, Callback und Waage" },
   { id: "llm", label: "LLM Zugang", description: "OpenAI-Konfiguration prüfen" },
 ];
 
@@ -210,12 +221,21 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [withingsStatus, setWithingsStatus] = useState<WithingsStatus | null>(null);
+  const [withingsLoading, setWithingsLoading] = useState(true);
+  const [withingsConnecting, setWithingsConnecting] = useState(false);
+  const [withingsError, setWithingsError] = useState<string | null>(null);
+  const [withingsClientId, setWithingsClientId] = useState("");
+  const [withingsClientSecret, setWithingsClientSecret] = useState("");
+  const [withingsSaving, setWithingsSaving] = useState(false);
+  const [withingsMessage, setWithingsMessage] = useState<string | null>(null);
+  const [settingsHelp, setSettingsHelp] = useState<"withings" | "openai" | null>(null);
+
   const [llmStatus, setLlmStatus] = useState<LlmStatus | null>(null);
   const [llmLoading, setLlmLoading] = useState(true);
   const [llmError, setLlmError] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [weightLogs, setWeightLogs] = useState<WeightLog[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMessage, setProfileMessage] = useState<string | null>(null);
@@ -223,6 +243,7 @@ export function SettingsPage() {
   const [displayName, setDisplayName] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [gender, setGender] = useState("unknown");
+  const [heightCm, setHeightCm] = useState("");
   const [currentWeight, setCurrentWeight] = useState("");
   const [targetWeight, setTargetWeight] = useState("");
   const [startWeight, setStartWeight] = useState("");
@@ -230,9 +251,13 @@ export function SettingsPage() {
   const [goalEndDate, setGoalEndDate] = useState("");
   const [weeklyTargetHours, setWeeklyTargetHours] = useState("");
   const [weeklyTargetStress, setWeeklyTargetStress] = useState("");
-  const [logWeight, setLogWeight] = useState("");
-  const [logDate, setLogDate] = useState("");
-  const [logNotes, setLogNotes] = useState("");
+  const [garminEmail, setGarminEmail] = useState("");
+  const [garminPassword, setGarminPassword] = useState("");
+  const [garminRefreshing, setGarminRefreshing] = useState(false);
+  const [garminMessage, setGarminMessage] = useState<string | null>(null);
+  const [openAiKey, setOpenAiKey] = useState("");
+  const [openAiSaving, setOpenAiSaving] = useState(false);
+  const [openAiMessage, setOpenAiMessage] = useState<string | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminUser[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminSaving, setAdminSaving] = useState(false);
@@ -247,7 +272,8 @@ export function SettingsPage() {
   const personalDataChanged =
     normalizeTextValue(displayName) !== normalizeTextValue(profile?.display_name) ||
     dateOfBirth !== (profile?.date_of_birth || "") ||
-    normalizeGender(gender) !== normalizeGender(profile?.gender);
+    normalizeGender(gender) !== normalizeGender(profile?.gender) ||
+    heightCm !== (profile?.height_cm == null ? "" : String(profile.height_cm));
 
   const trainingConfigSections = (Object.keys(trainingConfigSectionLabels) as Array<keyof typeof trainingConfigSectionLabels>).map((key) => ({
     key,
@@ -285,6 +311,86 @@ export function SettingsPage() {
     }
   }
 
+  async function loadWithingsStatus() {
+    setWithingsLoading(true);
+    setWithingsError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/withings/status`);
+      const payload = await parseJsonSafely<WithingsStatus | { detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Withings-Status konnte nicht geladen werden.");
+      }
+      setWithingsStatus(payload as WithingsStatus);
+    } catch (err) {
+      setWithingsError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setWithingsLoading(false);
+    }
+  }
+
+  async function saveWithingsAppCredentials(e: FormEvent) {
+    e.preventDefault();
+    if (withingsSaving || !withingsClientId.trim() || !withingsClientSecret.trim()) return;
+    setWithingsSaving(true);
+    setWithingsError(null);
+    setWithingsMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/withings/app-credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: withingsClientId.trim(), client_secret: withingsClientSecret.trim() }),
+      });
+      const payload = await parseJsonSafely<{ detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Withings Client-Daten konnten nicht gespeichert werden.");
+      }
+      setWithingsClientSecret("");
+      setWithingsMessage("Withings Client-Daten gespeichert.");
+      await loadWithingsStatus();
+    } catch (err) {
+      setWithingsError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setWithingsSaving(false);
+    }
+  }
+
+  async function deleteWithingsAppCredentials() {
+    setWithingsSaving(true);
+    setWithingsError(null);
+    setWithingsMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/withings/app-credentials`, { method: "DELETE" });
+      const payload = await parseJsonSafely<{ detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Withings Client-Daten konnten nicht gelöscht werden.");
+      }
+      setWithingsClientId("");
+      setWithingsClientSecret("");
+      setWithingsMessage("Gespeicherte Withings Client-Daten gelöscht.");
+      await loadWithingsStatus();
+    } catch (err) {
+      setWithingsError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setWithingsSaving(false);
+    }
+  }
+
+  async function connectWithings() {
+    setWithingsConnecting(true);
+    setWithingsError(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/withings/login`);
+      const payload = await parseJsonSafely<{ authorize_url?: string; detail?: string }>(response);
+      if (!response.ok || !payload?.authorize_url) {
+        throw new Error(payload?.detail || "Withings-Verbindung konnte nicht gestartet werden.");
+      }
+      window.location.href = payload.authorize_url;
+    } catch (err) {
+      setWithingsError(err instanceof Error ? err.message : "Unknown error");
+      setWithingsConnecting(false);
+    }
+  }
+
   async function loadLlmStatus() {
     setLlmLoading(true);
     setLlmError(null);
@@ -306,23 +412,17 @@ export function SettingsPage() {
     setProfileLoading(true);
     setProfileError(null);
     try {
-      const [profileRes, logsRes] = await Promise.all([
-        apiFetch(`${API_BASE_URL}/profile`),
-        apiFetch(`${API_BASE_URL}/profile/weight-logs?limit=30`),
-      ]);
+      const profileRes = await apiFetch(`${API_BASE_URL}/profile`);
       const profileBody = await parseJsonSafely<UserProfile | { detail?: string }>(profileRes);
-      const logsBody = await parseJsonSafely<{ weight_logs: WeightLog[] } | { detail?: string }>(logsRes);
       if (!profileRes.ok) {
         throw new Error(typeof profileBody === "object" && profileBody && "detail" in profileBody && profileBody.detail ? profileBody.detail : "Profil konnte nicht geladen werden.");
-      }
-      if (!logsRes.ok) {
-        throw new Error(typeof logsBody === "object" && logsBody && "detail" in logsBody && logsBody.detail ? logsBody.detail : "Gewichtsverlauf konnte nicht geladen werden.");
       }
       const p = profileBody as UserProfile;
       setProfile(p);
       setDisplayName(p.display_name || "");
       setDateOfBirth(p.date_of_birth || "");
       setGender(normalizeGender(p.gender));
+      setHeightCm(p.height_cm == null ? "" : String(p.height_cm));
       setCurrentWeight(p.current_weight_kg == null ? "" : String(p.current_weight_kg));
       setTargetWeight(p.target_weight_kg == null ? "" : String(p.target_weight_kg));
       setStartWeight(p.start_weight_kg == null ? "" : String(p.start_weight_kg));
@@ -330,7 +430,6 @@ export function SettingsPage() {
       setGoalEndDate(toLocalInputValue(p.goal_end_date));
       setWeeklyTargetHours(p.weekly_target_hours == null ? "" : String(p.weekly_target_hours));
       setWeeklyTargetStress(p.weekly_target_stress == null ? "" : String(p.weekly_target_stress));
-      setWeightLogs(((logsBody as { weight_logs: WeightLog[] }).weight_logs ?? []).slice());
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -441,6 +540,78 @@ export function SettingsPage() {
   }
 
 
+  async function refreshGarminSession(e: FormEvent) {
+    e.preventDefault();
+    if (garminRefreshing) return;
+    setGarminRefreshing(true);
+    setError(null);
+    setGarminMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/garmin/session-refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: garminEmail.trim(), password: garminPassword }),
+      });
+      const payload = await parseJsonSafely<{ login_ok?: boolean; auth_mode?: string | null; detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(payload?.detail || "Garmin-Session konnte nicht aktualisiert werden.");
+      }
+      setGarminPassword("");
+      setGarminMessage(`Garmin-Session aktualisiert (${payload?.auth_mode || "Token gespeichert"}). Passwort wurde nicht gespeichert.`);
+      await loadStatus();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setGarminRefreshing(false);
+    }
+  }
+
+  async function saveOpenAiKey(e: FormEvent) {
+    e.preventDefault();
+    if (openAiSaving || !openAiKey.trim()) return;
+    setOpenAiSaving(true);
+    setLlmError(null);
+    setOpenAiMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/llm/openai-key`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ api_key: openAiKey.trim() }),
+      });
+      const payload = await parseJsonSafely<{ detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(payload?.detail || "OpenAI-Key konnte nicht gespeichert werden.");
+      }
+      setOpenAiKey("");
+      setOpenAiMessage("OpenAI-Key gespeichert.");
+      await loadLlmStatus();
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setOpenAiSaving(false);
+    }
+  }
+
+  async function deleteOpenAiKey() {
+    setOpenAiSaving(true);
+    setLlmError(null);
+    setOpenAiMessage(null);
+    try {
+      const response = await apiFetch(`${API_BASE_URL}/llm/openai-key`, { method: "DELETE" });
+      const payload = await parseJsonSafely<{ detail?: string }>(response);
+      if (!response.ok) {
+        throw new Error(payload?.detail || "OpenAI-Key konnte nicht gelöscht werden.");
+      }
+      setOpenAiMessage("Gespeicherter OpenAI-Key gelöscht.");
+      await loadLlmStatus();
+    } catch (err) {
+      setLlmError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setOpenAiSaving(false);
+    }
+  }
+
+
   async function saveProfile(e: FormEvent) {
     e.preventDefault();
     if (profileSaving) return;
@@ -461,6 +632,7 @@ export function SettingsPage() {
           display_name: displayName.trim() || null,
           date_of_birth: dateOfBirth || null,
           gender: normalizeGender(gender),
+          height_cm: toNumberOrNull(heightCm),
           current_weight_kg: toNumberOrNull(currentWeight),
           target_weight_kg: toNumberOrNull(targetWeight),
           start_weight_kg: toNumberOrNull(startWeight),
@@ -479,6 +651,7 @@ export function SettingsPage() {
       setDisplayName(next.display_name || "");
       setDateOfBirth(next.date_of_birth || "");
       setGender(normalizeGender(next.gender));
+      setHeightCm(next.height_cm == null ? "" : String(next.height_cm));
       setCurrentWeight(next.current_weight_kg == null ? "" : String(next.current_weight_kg));
       setTargetWeight(next.target_weight_kg == null ? "" : String(next.target_weight_kg));
       setStartWeight(next.start_weight_kg == null ? "" : String(next.start_weight_kg));
@@ -495,44 +668,13 @@ export function SettingsPage() {
     }
   }
 
-  async function addLog(e: FormEvent) {
-    e.preventDefault();
-    const w = Number(logWeight);
-    if (!Number.isFinite(w) || w <= 0) {
-      setProfileError("Bitte ein gültiges Gewicht eingeben.");
-      return;
-    }
-    setProfileError(null);
-    setProfileMessage(null);
-    try {
-      const response = await apiFetch(`${API_BASE_URL}/profile/weight-logs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          recorded_at: logDate || null,
-          weight_kg: w,
-          notes: logNotes.trim() || null,
-          source_type: "manual",
-        }),
-      });
-      const payload = await parseJsonSafely<WeightLog | { detail?: string }>(response);
-      if (!response.ok) {
-        throw new Error(typeof payload === "object" && payload && "detail" in payload && payload.detail ? payload.detail : "Gewichtseintrag konnte nicht gespeichert werden.");
-      }
-      setLogWeight("");
-      setLogDate("");
-      setLogNotes("");
-      setProfileMessage("Gewichtseintrag gespeichert.");
-      await loadProfile();
-    } catch (err) {
-      setProfileError(err instanceof Error ? err.message : "Unknown error");
-    }
-  }
+
 
   useEffect(() => {
     void loadAuthMe();
     if (!isAdmin) {
       void loadStatus();
+      void loadWithingsStatus();
       void loadProfile();
       void loadLlmStatus();
     }
@@ -585,6 +727,10 @@ export function SettingsPage() {
 
               <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
                 <label className="settings-label">
+                  E-Mail
+                  <input className="settings-input" type="email" value={profile?.email || ""} readOnly />
+                </label>
+                <label className="settings-label">
                   Name
                   <input className="settings-input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="z. B. Achim" />
                 </label>
@@ -599,6 +745,10 @@ export function SettingsPage() {
                     <option value="male">Männlich</option>
                     <option value="female">Weiblich</option>
                   </select>
+                </label>
+                <label className="settings-label">
+                  Größe (cm)
+                  <input className="settings-input" type="number" min="80" max="260" step="0.1" value={heightCm} onChange={(e) => setHeightCm(e.target.value)} placeholder="z. B. 180" />
                 </label>
                 <div className="settings-actions nutrition-span-2">
                   <button className="primary-button" type="submit" disabled={profileSaving || !personalDataChanged}>
@@ -684,109 +834,121 @@ export function SettingsPage() {
               ) : null}
               {error ? <p className="error-text">{error}</p> : null}
               <p className="info-text">
-                Garmin nutzt aktuell nur <code>GARMIN_EMAIL</code> und <code>GARMIN_PASSWORD</code> aus der <code>.env</code>.
-                Das Speichern im Service ist vorerst deaktiviert.
+                Garmin-Zugangsdaten werden hier nur einmalig für den Login verwendet. Gespeichert werden nur die erzeugten Session-Token im Tokenstore.
               </p>
               {sessionStatus?.tokenstore_path ? (
                 <p className="info-text">Tokenstore: <code>{sessionStatus.tokenstore_path}</code></p>
               ) : null}
-              <div className="settings-actions">
-                <button className="secondary-button" type="button" disabled={loading} onClick={() => void loadStatus()}>
-                  Status aktualisieren
-                </button>
-              </div>
+              {garminMessage ? <p className="info-text">{garminMessage}</p> : null}
+              <form className="nutrition-form" onSubmit={(e) => void refreshGarminSession(e)}>
+                <label className="settings-label">
+                  Garmin E-Mail
+                  <input className="settings-input" type="email" value={garminEmail} onChange={(e) => setGarminEmail(e.target.value)} autoComplete="username" />
+                </label>
+                <label className="settings-label">
+                  Garmin Passwort
+                  <input className="settings-input" type="password" value={garminPassword} onChange={(e) => setGarminPassword(e.target.value)} autoComplete="current-password" />
+                </label>
+                <div className="settings-actions nutrition-span-2">
+                  <button className="primary-button" type="submit" disabled={garminRefreshing || !garminEmail.trim() || !garminPassword}>
+                    {garminRefreshing ? "Aktualisiere..." : "Session aktualisieren"}
+                  </button>
+                  <button className="secondary-button" type="button" disabled={loading || garminRefreshing} onClick={() => void loadStatus()}>
+                    Status aktualisieren
+                  </button>
+                </div>
+              </form>
             </div>
           ) : null}
 
-          {activeTab === "weight" ? (
-            <div className="settings-weight-stack">
-              <div className="card">
-                <div className="section-title-row">
-                  <h2>Gewicht und Ziele</h2>
-                </div>
-                {profileError ? <p className="error-text">{profileError}</p> : null}
-                {profileMessage ? <p className="info-text">{profileMessage}</p> : null}
-                <form className="nutrition-form" onSubmit={(e) => void saveProfile(e)}>
-                  <label className="settings-label">
-                    Aktuelles Gewicht (kg)
-                    <input className="settings-input" type="number" step="0.1" value={currentWeight} onChange={(e) => setCurrentWeight(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Zielgewicht (kg)
-                    <input className="settings-input" type="number" step="0.1" value={targetWeight} onChange={(e) => setTargetWeight(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Startgewicht (kg)
-                    <input className="settings-input" type="number" step="0.1" value={startWeight} onChange={(e) => setStartWeight(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Ziel-Start
-                    <input className="settings-input" type="datetime-local" value={goalStartDate} onChange={(e) => setGoalStartDate(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Ziel-Ende
-                    <input className="settings-input" type="datetime-local" value={goalEndDate} onChange={(e) => setGoalEndDate(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Wochenziel Zeit (h)
-                    <input className="settings-input" type="number" step="0.1" value={weeklyTargetHours} onChange={(e) => setWeeklyTargetHours(e.target.value)} />
-                  </label>
-                  <label className="settings-label">
-                    Wochenziel Trainingsreiz
-                    <input className="settings-input" type="number" step="1" value={weeklyTargetStress} onChange={(e) => setWeeklyTargetStress(e.target.value)} />
-                  </label>
-                  <div className="settings-label">
-                    Zeitraum
-                    <div className="settings-input settings-static-field">
-                      {profile?.goal_period_days != null ? `${profile.goal_period_days} Tage` : "-"}
+          {activeTab === "withings" ? (
+            <div className="card">
+              <div className="section-title-row">
+                <h2>Withings Zugang</h2>
+                <button className="settings-help-button" type="button" onClick={() => setSettingsHelp(settingsHelp === "withings" ? null : "withings")} aria-label="Withings Hilfe">?</button>
+              </div>
+              {withingsLoading ? <p>Withings-Status wird geladen...</p> : null}
+              {withingsError ? <p className="error-text">{withingsError}</p> : null}
+              {!withingsLoading && withingsStatus ? (
+                <>
+                  <div className="settings-status-grid">
+                    <div className="settings-status-chip">
+                      <span>Konfiguriert</span>
+                      <strong>{withingsStatus.configured ? "Ja" : "Nein"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Client-Quelle</span>
+                      <strong>{withingsStatus.credential_source ?? "none"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Client ID</span>
+                      <strong>{withingsStatus.client_id_hint ?? "-"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>OAuth-Session</span>
+                      <strong>{withingsStatus.connected ? "Verbunden" : "Nicht verbunden"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Withings User</span>
+                      <strong>{withingsStatus.userid ?? "-"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Token gültig bis</span>
+                      <strong>{withingsStatus.expires_at ? new Date(withingsStatus.expires_at).toLocaleString() : "-"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Scopes</span>
+                      <strong>{withingsStatus.scope || withingsStatus.scopes || "-"}</strong>
+                    </div>
+                    <div className="settings-status-chip">
+                      <span>Callback</span>
+                      <strong>{withingsStatus.redirect_uri ? "OK" : "Fehlt"}</strong>
                     </div>
                   </div>
-                  <div className="settings-actions nutrition-span-2">
-                    <button className="primary-button" type="submit" disabled={profileSaving}>
-                      {profileSaving ? "Speichere..." : "Gewicht und Ziele speichern"}
+                  {settingsHelp === "withings" ? (
+                    <div className="settings-help-card">
+                      <strong>Withings Client ID und Secret bekommen</strong>
+                      <p>Lege im Withings Developer Dashboard eine App an, kopiere Client ID und Consumer Secret hier hinein und trage dort exakt die Redirect URI ein, die unten angezeigt wird.</p>
+                      <p>Die Redirect URI kommt aus <code>WITHINGS_REDIRECT_URI</code> und muss bei Withings identisch hinterlegt sein, sonst schlägt OAuth fehl.</p>
+                    </div>
+                  ) : null}
+                  {withingsMessage ? <p className="info-text">{withingsMessage}</p> : null}
+                  <form className="nutrition-form settings-subsection-title" onSubmit={(e) => void saveWithingsAppCredentials(e)}>
+                    <label className="settings-label">
+                      Withings Client ID
+                      <input className="settings-input" value={withingsClientId} onChange={(e) => setWithingsClientId(e.target.value)} placeholder={withingsStatus.has_user_app_credentials ? "Gespeichert" : "Client ID"} autoComplete="off" />
+                    </label>
+                    <label className="settings-label">
+                      Withings Client Secret
+                      <input className="settings-input" type="password" value={withingsClientSecret} onChange={(e) => setWithingsClientSecret(e.target.value)} placeholder={withingsStatus.has_user_app_credentials ? "Gespeichert" : "Client Secret"} autoComplete="off" />
+                    </label>
+                    <div className="settings-actions nutrition-span-2">
+                      <button className="primary-button" type="submit" disabled={withingsSaving || !withingsClientId.trim() || !withingsClientSecret.trim()}>
+                        {withingsSaving ? "Speichere..." : "Withings Client-Daten speichern"}
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => void deleteWithingsAppCredentials()} disabled={withingsSaving || !withingsStatus.has_user_app_credentials}>
+                        Gespeicherte Client-Daten löschen
+                      </button>
+                    </div>
+                  </form>
+                  {withingsStatus.redirect_uri ? <p className="info-text">Redirect URI: <code>{withingsStatus.redirect_uri}</code></p> : null}
+                  <p className="info-text">
+                    Withings nutzt OAuth mit Access- und Refresh-Token. Eine dauerhafte Passwort-Session wie bei Garmin gibt es hier nicht; die Verbindung wird über den Refresh-Token erneuert.
+                  </p>
+                  <div className="settings-note-card">
+                    <strong>Geplante Datenbereiche</strong>
+                    <p className="info-text">Gewicht und Körpermesswerte, Aktivität/Schritte sowie Schlafdaten können nach Freigabe über die Withings API synchronisiert werden.</p>
+                  </div>
+                  <div className="settings-actions">
+                    <button className="primary-button" type="button" onClick={() => void connectWithings()} disabled={withingsConnecting || !withingsStatus.configured}>
+                      {withingsConnecting ? "Öffne Withings..." : withingsStatus.connected ? "Withings neu verbinden" : "Withings verbinden"}
                     </button>
-                    <button className="secondary-button" type="button" onClick={() => void loadProfile()} disabled={profileLoading || profileSaving}>
-                      Aktualisieren
+                    <button className="secondary-button" type="button" onClick={() => void loadWithingsStatus()} disabled={withingsLoading}>
+                      Status aktualisieren
                     </button>
                   </div>
-                </form>
-
-                <form className="nutrition-form" onSubmit={(e) => void addLog(e)}>
-                  <label className="settings-label">
-                    Gewicht (kg)
-                    <input className="settings-input" type="number" step="0.1" value={logWeight} onChange={(e) => setLogWeight(e.target.value)} required />
-                  </label>
-                  <label className="settings-label">
-                    Zeitpunkt
-                    <input className="settings-input" type="datetime-local" value={logDate} onChange={(e) => setLogDate(e.target.value)} />
-                  </label>
-                  <label className="settings-label nutrition-span-2">
-                    Notiz
-                    <input className="settings-input" value={logNotes} onChange={(e) => setLogNotes(e.target.value)} placeholder="optional" />
-                  </label>
-                  <div className="settings-actions nutrition-span-2">
-                    <button className="primary-button" type="submit">Gewicht eintragen</button>
-                  </div>
-                </form>
-              </div>
-
-              <div className="card">
-                <div className="section-title-row">
-                  <h2>Gewichtsverlauf</h2>
-                </div>
-                <div className="nutrition-list settings-weight-list">
-                  {weightLogs.length === 0 ? <p>Noch keine Einträge.</p> : null}
-                  {weightLogs.map((row) => (
-                    <article className="nutrition-entry" key={row.id}>
-                      <div className="nutrition-entry-head">
-                        <strong>{row.weight_kg.toFixed(1)} kg</strong>
-                        <span>{new Date(row.recorded_at).toLocaleString()}</span>
-                      </div>
-                      {row.notes ? <p className="nutrition-notes">{row.notes}</p> : null}
-                    </article>
-                  ))}
-                </div>
-              </div>
+                </>
+              ) : null}
             </div>
           ) : null}
 
@@ -794,6 +956,7 @@ export function SettingsPage() {
             <div className="card">
               <div className="section-title-row">
                 <h2>LLM Zugang</h2>
+                <button className="settings-help-button" type="button" onClick={() => setSettingsHelp(settingsHelp === "openai" ? null : "openai")} aria-label="OpenAI Hilfe">?</button>
               </div>
               {llmLoading ? <p>LLM-Status wird geladen...</p> : null}
               {llmError ? <p className="error-text">{llmError}</p> : null}
@@ -813,6 +976,10 @@ export function SettingsPage() {
                       <strong>{llmStatus.key_hint ?? "-"}</strong>
                     </div>
                     <div className="settings-status-chip">
+                      <span>Aktive Quelle</span>
+                      <strong>{llmStatus.key_source ?? (llmStatus.configured ? "env" : "none")}</strong>
+                    </div>
+                    <div className="settings-status-chip">
                       <span>Modell</span>
                       <strong>{llmStatus.model ?? "-"}</strong>
                     </div>
@@ -829,12 +996,35 @@ export function SettingsPage() {
                       </strong>
                     </div>
                   </div>
+                  {settingsHelp === "openai" ? (
+                    <div className="settings-help-card">
+                      <strong>OpenAI API Key bekommen</strong>
+                      <p>Öffne die OpenAI Platform, lege unter API Keys einen neuen Secret Key an und kopiere ihn direkt hier hinein. Der Key wird nur einmal vollständig angezeigt.</p>
+                      <p>Für Kosten-/Usage-Daten ist ein separater Admin-Key nötig; normale API Keys reichen für LLM-Funktionen wie Training und Nutrition.</p>
+                    </div>
+                  ) : null}
                   <div className="settings-note-card">
                     <p className="info-text">
-                      Der OpenAI-Schlüssel wird serverseitig aus `.env` gelesen. Änderungen an `.env` werden nach einem API-Neustart sichtbar.
+                      Ein gespeicherter Nutzer-Key wird verschlüsselt abgelegt und überschreibt den `.env`-Fallback nur für deinen Account.
                     </p>
+                    {openAiMessage ? <p className="info-text">{openAiMessage}</p> : null}
                     {llmStatus.balance_note ? <p className="info-text">{llmStatus.balance_note}</p> : null}
                   </div>
+
+                  <form className="nutrition-form settings-subsection-title" onSubmit={(e) => void saveOpenAiKey(e)}>
+                    <label className="settings-label nutrition-span-2">
+                      OpenAI API Key
+                      <input className="settings-input" type="password" value={openAiKey} onChange={(e) => setOpenAiKey(e.target.value)} placeholder={llmStatus.has_user_key ? "Gespeicherter Key vorhanden" : "sk-..."} autoComplete="off" />
+                    </label>
+                    <div className="settings-actions nutrition-span-2">
+                      <button className="primary-button" type="submit" disabled={openAiSaving || !openAiKey.trim()}>
+                        {openAiSaving ? "Speichere..." : "OpenAI-Key speichern"}
+                      </button>
+                      <button className="secondary-button" type="button" onClick={() => void deleteOpenAiKey()} disabled={openAiSaving || !llmStatus.has_user_key}>
+                        Gespeicherten Key löschen
+                      </button>
+                    </div>
+                  </form>
 
                   <div className="section-title-row settings-subsection-title">
                     <h3>Lokale Nutzung</h3>

@@ -58,6 +58,14 @@ class User(Base):
         cascade="all, delete-orphan",
     )
     weight_logs: Mapped[list["UserWeightLog"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    withings_body_measurements: Mapped[list["WithingsBodyMeasurement"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+    garmin_daily_health: Mapped[list["GarminDailyHealth"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
     training_metrics: Mapped[list["UserTrainingMetric"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     training_zone_settings: Mapped[list["UserTrainingZoneSetting"]] = relationship(
         back_populates="user",
@@ -131,6 +139,7 @@ class UserProfile(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), primary_key=True)
     date_of_birth: Mapped[date | None] = mapped_column(Date, nullable=True)
     gender: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     start_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -164,6 +173,35 @@ class UserWeightLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="weight_logs")
+
+
+class WithingsBodyMeasurement(Base):
+    __tablename__ = "withings_body_measurements"
+    __table_args__ = (
+        UniqueConstraint("user_id", "measured_at", name="uq_withings_body_measurements_user_measured"),
+        Index("ix_withings_body_measurements_user_measured", "user_id", "measured_at"),
+        {"schema": CORE_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    withings_grpid: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    attrib: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    category: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    raw_types_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_ratio_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    visceral_fat_index: Mapped[float | None] = mapped_column(Float, nullable=True)
+    muscle_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bone_mass_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    hydration_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="withings_body_measurements")
 
 
 class UserTrainingMetric(Base):
@@ -393,6 +431,29 @@ class ActivityDashboardCache(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="activity_dashboard_caches")
+
+
+class GarminDailyHealth(Base):
+    __tablename__ = "daily_health"
+    __table_args__ = (
+        UniqueConstraint("user_id", "date", name="uq_garmin_daily_health_user_date"),
+        Index("ix_garmin_daily_health_user_date", "user_id", "date"),
+        {"schema": GARMIN_SCHEMA},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey(f"{CORE_SCHEMA}.users.id", ondelete="CASCADE"), nullable=False)
+    date: Mapped[date] = mapped_column(Date, nullable=False)
+    steps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sleep_hours: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stress_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    body_battery_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    user: Mapped[User] = relationship(back_populates="garmin_daily_health")
 
 
 class ActivitySession(Base):

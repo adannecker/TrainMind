@@ -10,7 +10,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from dotenv import load_dotenv
@@ -49,17 +49,19 @@ from apps.api.climb_compare_service import (
 )
 from apps.api.garmin_service import (
     ingest_recent_garmin_rides,
+    refresh_garmin_session_with_credentials,
     get_imported_garmin_summary,
     get_missing_garmin_rides,
     get_missing_garmin_rides_for_period,
     get_garmin_session_status,
+    get_garmin_health_daily,
     import_selected_garmin_rides,
     postprocess_imported_garmin_rides,
     reset_imported_garmin_data,
 )
 from apps.api.garmin_file_import_service import analyze_fit_dump_zip, analyze_saved_fit_dump_zip, import_fit_dump_zip, list_saved_fit_dump_archives
 from apps.api.fit_create_llm_service import derive_fit_create_from_description
-from apps.api.llm_service import get_llm_status
+from apps.api.llm_service import delete_user_openai_key, get_llm_status, save_user_openai_key
 from apps.api.nutrition_service import (
     build_food_item_llm_prompt,
     create_entry,
@@ -70,6 +72,8 @@ from apps.api.nutrition_service import (
     delete_recipe,
     delete_entry,
     get_food_item_category_counts,
+    derive_food_item_with_llm,
+    fetch_food_item_from_usda,
     import_food_item_from_llm,
     list_entries,
     list_food_items,
@@ -81,6 +85,7 @@ from apps.api.nutrition_service import (
 )
 from apps.api.profile_service import add_weight_log, get_user_profile, list_weight_logs, upsert_user_profile
 from apps.api.ride_analysis_service import RideAnalysisError, analyze_ride_file_no_import
+from apps.api.withings_service import build_withings_login_url, delete_withings_app_credentials, fetch_withings_body_measures, get_withings_status, handle_withings_callback, save_withings_app_credentials
 from apps.api.training_service import (
     build_athlete_profile_prompt,
     build_training_config_prompt,
@@ -610,6 +615,7 @@ class UserProfileUpdateRequest(BaseModel):
     display_name: str | None = None
     date_of_birth: str | None = None
     gender: str | None = None
+    height_cm: float | None = None
     current_weight_kg: float | None = None
     target_weight_kg: float | None = None
     start_weight_kg: float | None = None
@@ -816,6 +822,147 @@ def llm_status(current_user: dict = Depends(get_current_user)) -> dict:
     )
 
 
+@app.post("/llm/openai-key")
+def llm_openai_key_save(payload: OpenAiKeySaveRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        result = save_user_openai_key(user_id=int(current_user["id"]), api_key=payload.api_key)
+        result["key_stored"] = True
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected LLM credential error: {exc}") from exc
+
+
+@app.delete("/llm/openai-key")
+def llm_openai_key_delete(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_user_openai_key(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected LLM credential error: {exc}") from exc
+
+
+
+
+@app.get("/withings/status")
+def withings_status(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_withings_status(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Withings status error: {exc}") from exc
+
+
+@app.post("/withings/app-credentials")
+def withings_app_credentials_save(payload: WithingsAppCredentialsRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        result = save_withings_app_credentials(
+            user_id=int(current_user["id"]),
+            client_id=payload.client_id,
+            client_secret=payload.client_secret,
+        )
+        result["credentials_stored"] = True
+        return result
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Withings credential error: {exc}") from exc
+
+
+@app.delete("/withings/app-credentials")
+def withings_app_credentials_delete(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return delete_withings_app_credentials(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Withings credential error: {exc}") from exc
+
+
+@app.get("/withings/login")
+def withings_login(current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return build_withings_login_url(user_id=int(current_user["id"]))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Withings login error: {exc}") from exc
+
+
+@app.head("/withings/callback")
+def withings_callback_head() -> Response:
+    return Response(status_code=200)
+
+
+@app.get("/withings/callback", response_class=HTMLResponse)
+def withings_callback(
+    code: str | None = Query(default=None),
+    state: str | None = Query(default=None),
+    error: str | None = Query(default=None),
+) -> HTMLResponse:
+    if not code and not error:
+        return HTMLResponse(
+            """
+            <!doctype html><html><head><meta charset="utf-8"><title>Withings Callback</title></head>
+            <body><h1>Withings Callback bereit</h1><p>Diese URL ist fuer die Withings OAuth-Rueckleitung vorbereitet.</p></body></html>
+            """
+        )
+    try:
+        result = handle_withings_callback(code=code, state=state, error=error)
+    except ValueError as exc:
+        return HTMLResponse(
+            f"""
+            <!doctype html><html><head><meta charset=\"utf-8\"><title>Withings Fehler</title></head>
+            <body><h1>Withings konnte nicht verbunden werden</h1><p>{str(exc)}</p><p><a href=\"/health/weight\">Zurueck zu Gesundheit</a></p></body></html>
+            """,
+            status_code=400,
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            f"""
+            <!doctype html><html><head><meta charset=\"utf-8\"><title>Withings Fehler</title></head>
+            <body><h1>Withings konnte nicht verbunden werden</h1><p>{str(exc)}</p><p><a href=\"/health/weight\">Zurueck zu Gesundheit</a></p></body></html>
+            """,
+            status_code=502,
+        )
+    userid = result.get("userid") or "verbunden"
+    return HTMLResponse(
+        f"""
+        <!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"refresh\" content=\"1; url=/health/weight\"><title>Withings verbunden</title></head>
+        <body><h1>Withings verbunden</h1><p>User-ID: {userid}</p><p>Du wirst zur Gesundheitsseite weitergeleitet.</p></body></html>
+        """
+    )
+
+
+@app.get("/withings/body-measures")
+def withings_body_measures(
+    limit: int = Query(default=1000, ge=1, le=5000),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return fetch_withings_body_measures(user_id=int(current_user["id"]), limit=limit, sync_weight=False)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unexpected Withings error: {exc}") from exc
+
+
+@app.post("/withings/sync-weight")
+def withings_sync_weight(
+    limit: int = Query(default=5000, ge=1, le=5000),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return fetch_withings_body_measures(user_id=int(current_user["id"]), limit=limit, sync_weight=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unexpected Withings error: {exc}") from exc
+
+
 @app.get("/profile/weight-logs")
 def profile_weight_logs(
     limit: int = Query(default=100, ge=1, le=500),
@@ -839,6 +986,21 @@ def profile_add_weight_log(payload: WeightLogCreateRequest, current_user: dict =
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected profile error: {exc}") from exc
+
+
+@app.get("/garmin/health-daily")
+def garmin_health_daily(
+    from_: str | None = Query(default=None, alias="from"),
+    to: str | None = Query(default=None),
+    sync: bool = Query(default=False),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    try:
+        return get_garmin_health_daily(user_id=int(current_user["id"]), from_iso=from_, to_iso=to, sync=sync)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Unexpected Garmin health error: {exc}") from exc
 
 
 @app.get("/garmin/new-rides")
@@ -885,6 +1047,20 @@ def garmin_imported_summary(current_user: dict = Depends(get_current_user)) -> d
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin error: {exc}") from exc
+
+
+class GarminSessionRefreshRequest(BaseModel):
+    email: str
+    password: str
+
+
+class OpenAiKeySaveRequest(BaseModel):
+    api_key: str
+
+
+class WithingsAppCredentialsRequest(BaseModel):
+    client_id: str
+    client_secret: str
 
 
 class GarminImportRequest(BaseModel):
@@ -1030,6 +1206,13 @@ class NutritionFoodItemImportRequest(BaseModel):
     raw_text: str
 
 
+class NutritionFoodItemEnrichRequest(BaseModel):
+    name: str
+    brand: str | None = None
+    category: str | None = None
+    item_kind: str | None = "base_ingredient"
+
+
 class NutritionRecipeItemRequest(BaseModel):
     id: str | None = None
     food_item_id: str
@@ -1164,6 +1347,22 @@ def garmin_session_status(current_user: dict = Depends(get_current_user)) -> dic
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected Garmin session error: {exc}") from exc
+
+
+@app.post("/garmin/session-refresh")
+def garmin_session_refresh(payload: GarminSessionRefreshRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return refresh_garmin_session_with_credentials(
+            user_id=int(current_user["id"]),
+            email=payload.email,
+            password=payload.password,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected Garmin session refresh error: {exc}") from exc
 
 
 @app.get("/training/metrics")
@@ -1613,12 +1812,15 @@ def achievements_section(section_key: str, current_user: dict = Depends(get_curr
 
 @app.post("/fit-fix/inspect")
 async def fit_fix_inspect(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
-    _ = current_user
     try:
         file_bytes = await file.read()
         if not file_bytes:
             raise FitFixError("Bitte eine FIT-Datei auswählen.")
-        return inspect_fit_file(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+        return inspect_fit_file(
+            file_bytes=file_bytes,
+            filename=file.filename or "uploaded.fit",
+            user_id=int(current_user["id"]),
+        )
     except FitFixError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -2281,6 +2483,44 @@ def nutrition_food_item_import_llm(payload: NutritionFoodItemImportRequest, curr
         raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}") from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected nutrition error: {exc}") from exc
+
+
+@app.post("/nutrition/food-items/enrich-usda")
+def nutrition_food_item_enrich_usda(payload: NutritionFoodItemEnrichRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        return fetch_food_item_from_usda(
+            name=payload.name,
+            brand=payload.brand,
+            category=payload.category,
+            item_kind=payload.item_kind,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected nutrition USDA error: {exc}") from exc
+
+
+@app.post("/nutrition/food-items/enrich-llm")
+def nutrition_food_item_enrich_llm(payload: NutritionFoodItemEnrichRequest, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return derive_food_item_with_llm(
+            user_id=int(current_user["id"]),
+            name=payload.name,
+            brand=payload.brand,
+            category=payload.category,
+            item_kind=payload.item_kind,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        status_code = 503 if "OpenAI API key" in detail else 400
+        raise HTTPException(status_code=status_code, detail=detail) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected nutrition LLM error: {exc}") from exc
 
 
 @app.get("/nutrition/recipes")

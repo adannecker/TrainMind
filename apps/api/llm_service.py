@@ -8,6 +8,7 @@ from typing import Any
 import requests
 from sqlalchemy import func, select
 
+from apps.api.credential_service import delete_service_credentials, get_service_secret, set_service_secret
 from packages.db.models import LlmUsageEvent
 from packages.db.session import SessionLocal
 
@@ -87,6 +88,27 @@ def log_llm_usage_event(
         session.commit()
 
 
+def _get_openai_api_key(user_id: int) -> tuple[str, str]:
+    user_key = (get_service_secret("openai", user_id) or "").strip()
+    if user_key:
+        return user_key, "user"
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if env_key:
+        return env_key, "env"
+    return "", "none"
+
+
+def save_user_openai_key(user_id: int, api_key: str) -> dict[str, str]:
+    clean_key = api_key.strip()
+    if not clean_key:
+        raise ValueError("OpenAI API key is required.")
+    return set_service_secret("openai", clean_key, user_id, username="api_key")
+
+
+def delete_user_openai_key(user_id: int) -> dict[str, str]:
+    return delete_service_credentials("openai", user_id)
+
+
 def openai_chat_completion(
     *,
     user_id: int,
@@ -96,9 +118,9 @@ def openai_chat_completion(
     temperature: float = 0.5,
     timeout: int = 45,
 ) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key, key_source = _get_openai_api_key(user_id)
     if not api_key:
-        raise ValueError("OPENAI_API_KEY is not configured.")
+        raise ValueError("OpenAI API key is not configured.")
 
     model = os.getenv("OPENAI_MODEL", "").strip() or DEFAULT_OPENAI_MODEL
     started_at = _utcnow()
@@ -141,6 +163,7 @@ def openai_chat_completion(
     usage = _extract_usage_metrics(body if isinstance(body, dict) else {})
     metadata = {
         "http_status": response.status_code,
+        "key_source": key_source,
     }
 
     if response.status_code >= 400:
@@ -281,7 +304,8 @@ def fetch_openai_cost_summary(days: int) -> dict[str, Any]:
 
 
 def get_llm_status(user_id: int, *, include_org_costs: bool) -> dict[str, Any]:
-    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    api_key, key_source = _get_openai_api_key(user_id)
+    env_key = os.getenv("OPENAI_API_KEY", "").strip()
     model = os.getenv("OPENAI_MODEL", "").strip() or DEFAULT_OPENAI_MODEL
     now = _utcnow()
     since_7d = now - timedelta(days=7)
@@ -344,6 +368,9 @@ def get_llm_status(user_id: int, *, include_org_costs: bool) -> dict[str, Any]:
         "provider": "openai",
         "configured": bool(api_key),
         "key_hint": f"...{api_key[-6:]}" if len(api_key) >= 6 else None,
+        "key_source": key_source,
+        "has_user_key": key_source == "user",
+        "has_env_key": bool(env_key),
         "model": model,
         "admin_key_configured": bool(os.getenv("OPENAI_ADMIN_KEY", "").strip()),
         "balance_available": False,

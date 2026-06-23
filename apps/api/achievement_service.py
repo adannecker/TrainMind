@@ -9,7 +9,7 @@ from typing import Any, Callable
 from sqlalchemy import delete, select
 
 from apps.api.training_service import get_user_zone_model_settings, get_zone_model
-from packages.db.models import Activity, ActivityLap, ActivityRecord, ActivitySession, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
+from packages.db.models import Activity, ActivityRecord, UserAchievement, UserAchievementRecordEvent, UserTrainingMetric
 from packages.db.session import SessionLocal
 
 ACHIEVEMENT_RECHECK_PASSES = 7
@@ -300,7 +300,7 @@ def _parse_hf_achievement_key(key: str) -> tuple[str, int] | None:
 
 def _compute_hf_bucket_matrix(
     activities: list[Activity],
-    records_by_activity: dict[int, list[ActivityRecord]],
+    record_loader: Callable[[int], list[ActivityRecord]],
     progress_callback: Callable[[int, int], None] | None = None,
 ) -> dict[str, Any]:
     best_by_cell: dict[tuple[str, int], dict[str, Any]] = {}
@@ -311,7 +311,7 @@ def _compute_hf_bucket_matrix(
         progress_callback(0, total_activities)
 
     for index, activity in enumerate(activities, start=1):
-        activity_records = records_by_activity.get(activity.id, [])
+        activity_records = record_loader(int(activity.id))
         power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
         hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
         series_length = min(len(power_series), len(hr_series))
@@ -570,15 +570,13 @@ def rebuild_activity_achievement_checks(
         metrics = session.scalars(
             select(UserTrainingMetric).where(UserTrainingMetric.user_id == user_id).order_by(UserTrainingMetric.recorded_at.asc(), UserTrainingMetric.id.asc())
         ).all()
-        records = session.scalars(
-            select(ActivityRecord).join(Activity, Activity.id == ActivityRecord.activity_id).where(Activity.user_id == user_id).order_by(ActivityRecord.activity_id.asc(), ActivityRecord.record_index.asc())
-        ).all()
-        sessions = session.scalars(
-            select(ActivitySession).join(Activity, Activity.id == ActivitySession.activity_id).where(Activity.user_id == user_id).order_by(ActivitySession.activity_id.asc(), ActivitySession.session_index.asc())
-        ).all()
-        laps = session.scalars(
-            select(ActivityLap).join(Activity, Activity.id == ActivityLap.activity_id).where(Activity.user_id == user_id).order_by(ActivityLap.activity_id.asc(), ActivityLap.lap_index.asc())
-        ).all()
+
+        def load_activity_records(activity_id: int) -> list[ActivityRecord]:
+            return session.scalars(
+                select(ActivityRecord)
+                .where(ActivityRecord.activity_id == int(activity_id))
+                .order_by(ActivityRecord.elapsed_s.asc(), ActivityRecord.record_index.asc())
+            ).all()
 
         checked_before = sum(
             1
@@ -586,16 +584,6 @@ def rebuild_activity_achievement_checks(
             if (activity.achievements_check_version or 0) >= ACHIEVEMENT_CHECK_VERSION and activity.achievements_checked_at is not None
         )
         open_before = len(activities) - checked_before
-
-        records_by_activity: dict[int, list[ActivityRecord]] = defaultdict(list)
-        for record in records:
-            records_by_activity[record.activity_id].append(record)
-        sessions_by_activity: dict[int, list[ActivitySession]] = defaultdict(list)
-        for row in sessions:
-            sessions_by_activity[row.activity_id].append(row)
-        laps_by_activity: dict[int, list[ActivityLap]] = defaultdict(list)
-        for row in laps:
-            laps_by_activity[row.activity_id].append(row)
 
         summaries = {activity.id: _empty_activity_check_summary(activity) for activity in activities}
 
@@ -707,7 +695,7 @@ def rebuild_activity_achievement_checks(
 
         for index, activity in enumerate(activities, start=1):
             zone1_seconds = _longest_zone1_seconds(
-                records_by_activity.get(activity.id, []),
+                load_activity_records(int(activity.id)),
                 _effective_max_hr(metrics, activity.started_at),
                 max_hr_zone_model_key,
             )
@@ -731,7 +719,7 @@ def rebuild_activity_achievement_checks(
             progress_callback("Records", 4, ACHIEVEMENT_RECHECK_PASSES, 0, total_activities)
 
         for index, activity in enumerate(activities, start=1):
-            activity_records = records_by_activity.get(activity.id, [])
+            activity_records = load_activity_records(int(activity.id))
             power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
             hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
             max_power = max(power_series) if power_series else None
@@ -768,7 +756,7 @@ def rebuild_activity_achievement_checks(
 
         hf_bucket_matrix = _compute_hf_bucket_matrix(
             activities,
-            records_by_activity,
+            load_activity_records,
             progress_callback=(
                 None
                 if progress_callback is None
@@ -818,7 +806,7 @@ def rebuild_activity_achievement_checks(
             user_id=user_id,
             activities=activities,
             metrics=metrics,
-            records_by_activity=records_by_activity,
+            record_loader=load_activity_records,
             hf_bucket_matrix=hf_bucket_matrix,
             progress_callback=progress_callback,
             pass_index=7,
@@ -1057,7 +1045,7 @@ def _compute_cycling_payload(user_id: int) -> dict[str, Any]:
         for row in event_rows:
             events_by_key[row.achievement_key].append(row)
 
-        hf_bucket_matrix = _compute_hf_bucket_matrix(activities, records_by_activity)
+        hf_bucket_matrix = _compute_hf_bucket_matrix(activities, lambda activity_id: records_by_activity.get(int(activity_id), []))
 
         categories: list[dict[str, Any]] = []
         for category_id, label, description in CYCLING_CATEGORIES:
@@ -1088,7 +1076,7 @@ def _persist_cycling_achievements(
     user_id: int,
     activities: list[Activity],
     metrics: list[UserTrainingMetric],
-    records_by_activity: dict[int, list[ActivityRecord]],
+    record_loader: Callable[[int], list[ActivityRecord]],
     hf_bucket_matrix: dict[str, Any],
     progress_callback: Callable[[str, int, int, int, int], None] | None = None,
     pass_index: int = 7,
@@ -1138,7 +1126,7 @@ def _persist_cycling_achievements(
     longest_zone1_minutes = 0.0
     for activity in activities:
         zone1_seconds = _longest_zone1_seconds(
-            records_by_activity.get(activity.id, []),
+            record_loader(int(activity.id)),
             _effective_max_hr(metrics, activity.started_at),
             max_hr_zone_model_key,
         )
@@ -1226,7 +1214,7 @@ def _persist_cycling_achievements(
 
     record_values: dict[str, float] = {}
     for activity in activities:
-        activity_records = records_by_activity.get(activity.id, [])
+        activity_records = record_loader(int(activity.id))
         power_series = _expand_series(_records_to_series(activity_records, "power_w"), activity.duration_s)
         hr_series = _expand_series(_records_to_series(activity_records, "heart_rate_bpm"), activity.duration_s)
         max_power = max(power_series) if power_series else None
