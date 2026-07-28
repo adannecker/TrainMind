@@ -102,6 +102,7 @@ from apps.api.training_service import (
     upsert_training_zone_setting,
 )
 from packages.fit.fit_create_service import FitCreateError, generate_indoor_bike_fit
+from packages.fit.fit_enhance_service import FIT_ENHANCE_EXPORTER_VERSION, FitEnhanceError, enhance_fit_file, inspect_fit_for_enhance, normalize_enhance_segment
 from packages.fit.fit_fix_service import FitFixError, apply_power_adjustments, inspect_fit_file, normalize_adjustments
 from packages.fit.fit_trim_service import FitTrimError, inspect_fit_for_trim, normalize_delete_segments, trim_fit_file
 
@@ -1841,6 +1842,20 @@ async def fit_trim_inspect(file: UploadFile = File(...), current_user: dict = De
         raise HTTPException(status_code=500, detail=f"Unexpected FIT trim error: {exc}") from exc
 
 
+@app.post("/fit-enhance/inspect")
+async def fit_enhance_inspect(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitEnhanceError("Bitte eine FIT-Datei auswählen.")
+        return inspect_fit_for_enhance(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+    except FitEnhanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT enhance error: {exc}") from exc
+
+
 @app.post("/ride-analysis/no-import/analyze")
 async def ride_analysis_no_import_analyze(file: UploadFile = File(...), current_user: dict = Depends(get_current_user)) -> dict:
     _ = current_user
@@ -2045,6 +2060,77 @@ async def fit_trim_apply(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Unexpected FIT trim error: {exc}") from exc
+
+
+@app.post("/fit-enhance/preview")
+async def fit_enhance_preview(
+    file: UploadFile = File(...),
+    segment_json: str = Form(...),
+    system_mass_kg: float = Form(83.0),
+    crr: float = Form(0.004),
+    cda_m2: float = Form(0.32),
+    current_user: dict = Depends(get_current_user),
+) -> dict:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitEnhanceError("Bitte eine FIT-Datei auswählen.")
+        inspected = inspect_fit_for_enhance(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+        segment = normalize_enhance_segment(json.loads(segment_json), int(inspected["duration_seconds"]))
+        _, summary = enhance_fit_file(file_bytes=file_bytes, segment=segment, mass_kg=system_mass_kg, crr=crr, cda_m2=cda_m2)
+        return summary
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Ungültiges Segment-JSON: {exc}") from exc
+    except FitEnhanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT enhance error: {exc}") from exc
+
+
+@app.post("/fit-enhance/apply")
+async def fit_enhance_apply(
+    file: UploadFile = File(...),
+    segment_json: str = Form(...),
+    system_mass_kg: float = Form(83.0),
+    crr: float = Form(0.004),
+    cda_m2: float = Form(0.32),
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    _ = current_user
+    try:
+        file_bytes = await file.read()
+        if not file_bytes:
+            raise FitEnhanceError("Bitte eine FIT-Datei auswählen.")
+        inspected = inspect_fit_for_enhance(file_bytes=file_bytes, filename=file.filename or "uploaded.fit")
+        segment = normalize_enhance_segment(json.loads(segment_json), int(inspected["duration_seconds"]))
+        output_bytes, summary = enhance_fit_file(
+            file_bytes=file_bytes,
+            segment=segment,
+            mass_kg=system_mass_kg,
+            crr=crr,
+            cda_m2=cda_m2,
+        )
+        source_name = (file.filename or "uploaded.fit").strip() or "uploaded.fit"
+        base_name = source_name[:-4] if source_name.lower().endswith(".fit") else source_name
+        download_name = f"{base_name}_enhanced_{FIT_ENHANCE_EXPORTER_VERSION}.fit"
+        headers = {
+            "Content-Disposition": f"attachment; filename=\"{download_name}\"",
+            "X-TrainMind-Original-Duration-Seconds": str(summary["original_duration_seconds"]),
+            "X-TrainMind-Duration-Seconds": str(summary["duration_seconds"]),
+            "X-TrainMind-Segment-Original-Duration-Seconds": str(summary["segment_original_duration_seconds"]),
+            "X-TrainMind-Segment-Duration-Seconds": str(summary["segment_duration_seconds"]),
+            "X-TrainMind-Segment-Avg-Power-Before": str(summary["segment_avg_power_before"] or ""),
+            "X-TrainMind-Segment-Avg-Power-After": str(summary["segment_avg_power_after"] or ""),
+            "X-TrainMind-Updated-Fields": ",".join(summary["updated_fields"]),
+        }
+        return Response(content=output_bytes, media_type="application/octet-stream", headers=headers)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail=f"Ungültiges Segment-JSON: {exc}") from exc
+    except FitEnhanceError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected FIT enhance error: {exc}") from exc
 
 
 @app.get("/activities/week")

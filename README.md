@@ -47,6 +47,11 @@ docker compose -f infra/docker/docker-compose.yml down
 - Garmin-Credentials werden pro User in `core.service_credentials` verschlüsselt abgelegt.
 - Importierte Garmin-Fahrten können im Hub komplett gelöscht und anschließend erneut importiert werden.
 - Für sichtbare deutsche UI-Texte bitte normale Umlaute und `ß` verwenden; ASCII-Schreibweisen wie `ae`, `oe`, `ue` nur bei technischem Grund.
+- Unter `Tools > Fit Fixer > Enhance FIT File` kann ein Zeitsegment einer FIT-Fahrt gestreckt oder gestaucht werden:
+  - Karte sowie Höhen-, Power- und HF-Zeitachsen mit gemeinsamer Auswahl
+  - `Shift` + Ziehen für Zoom, verschiebbare Auswahlränder und Zoom-Reset
+  - physikalische Watt-Vorschau vor dem Export
+  - zeit-, geschwindigkeits- und leistungsangepasster FIT-Download
 - Im Hub unter `Setup > Fix FIT file` gibt es jetzt einen ersten FIT-Korrekturflow:
   - FIT-Datei hochladen
   - Power-Verlauf analysieren

@@ -84,6 +84,31 @@ Beispiel-Body:
     - `X-TrainMind-Avg-Power`
     - `X-TrainMind-Max-Power`
 
+
+## FIT Enhance Endpoints
+
+- `POST /fit-enhance/inspect`
+- `POST /fit-enhance/preview`
+- `POST /fit-enhance/apply`
+
+### FIT Enhance Workflow
+
+Der Bereich **Tools > Fit Fixer > Enhance FIT File** verändert die Zeitbasis eines markierten Ride-Segments, ohne den Ride zu zerlegen:
+
+1. Eine FIT-Datei laden. Karte, Höhenprofil, Leistung und Herzfrequenz erscheinen auf einer gemeinsamen Zeitachse.
+2. Mit normalem Ziehen einen Bereich markieren. Die orangefarbenen Ränder können anschließend einzeln verschoben werden.
+3. Mit `Shift` + Ziehen in einen Zeitbereich zoomen; **Zoom zurücksetzen** stellt die Gesamtansicht wieder her.
+4. Die gewünschte Segmentdauer in Prozent angeben, etwa `80` für 20 % kürzere Dauer.
+5. **Vorschau aktualisieren** berechnet die resultierende Ride-/Segmentdauer und die Segmentleistung mit Geschwindigkeit, Steigung und Fahrwiderstand.
+6. Erst danach ist **Enhance FIT speichern** aktiv. Der Export verwendet exakt die Werte aus dieser Vorschau.
+
+Alle drei Endpunkte erwarten `multipart/form-data` mit `file`. Für Vorschau und Export zusätzlich:
+
+- `segment_json`: Objekt mit `start_second`, `end_second` und `duration_percent`
+- optional `system_mass_kg` (Default: `83`), `crr` (Default: `0.004`) und `cda_m2` (Default: `0.32`)
+
+Der Export aktualisiert die bekannten Zeit-, Leistungs-, Geschwindigkeits- und Zusammenfassungsfelder und erhält übrige Standard- und Developer-Felder bytegenau. FIT-Dateien mit komprimierten Zeitstempeln werden bewusst abgelehnt, weil eine verlustfreie Zeitverzerrung dieser Datenform noch nicht implementiert ist.
+
 ## Activities-Endpoints
 
 - `GET /activities/week`

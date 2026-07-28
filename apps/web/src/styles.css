@@ -10914,3 +10914,132 @@ input[type="range"] {
   font-size: 0.9rem;
   line-height: 1.45;
 }
+
+
+/* FIT Enhance */
+.enhance-fit-map {
+  height: 440px;
+  border: 1px solid #d7e7e0;
+  border-radius: 1rem;
+  overflow: hidden;
+}
+
+.enhance-fit-chart-shell {
+  margin-top: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  padding: 0.7rem 0.8rem 0.6rem;
+  background: #fbfdfc;
+}
+
+.enhance-fit-chart {
+  width: 100%;
+  display: block;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.enhance-fit-chart line {
+  stroke: #dbe8e2;
+  stroke-width: 2;
+}
+
+.enhance-fit-chart polyline {
+  fill: none;
+  stroke-width: 5;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+
+.enhance-fit-selection-handle {
+  stroke: #d86f1f;
+  stroke-width: 12;
+  stroke-linecap: round;
+  cursor: ew-resize;
+  opacity: 0.94;
+}
+
+.enhance-fit-chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+}
+
+.enhance-fit-chart-shell kbd {
+  border: 1px solid #c9d9d2;
+  border-radius: 0.3rem;
+  padding: 0.05rem 0.3rem;
+  background: #fff;
+  color: #315b52;
+  font: inherit;
+  font-weight: 800;
+}
+
+.enhance-fit-axis {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-soft);
+  font-size: 0.78rem;
+  margin-top: 0.2rem;
+}
+
+.enhance-fit-chart-shell small {
+  display: block;
+  margin-top: 0.4rem;
+  color: var(--text-soft);
+}
+
+.enhance-fit-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  margin-top: 0.8rem;
+}
+
+.enhance-fit-controls label {
+  display: grid;
+  grid-template-columns: auto minmax(5rem, 7rem) auto;
+  align-items: center;
+  gap: 0.45rem;
+  color: #315b52;
+  font-weight: 700;
+}
+
+.enhance-fit-controls input {
+  width: 100%;
+}
+
+.enhance-fit-comparison {
+  margin-top: 1rem;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.enhance-fit-comparison div {
+  border: 1px solid #d7e7e0;
+  border-radius: 0.85rem;
+  padding: 0.7rem;
+  background: #f8fcfa;
+  display: grid;
+  gap: 0.3rem;
+}
+
+.enhance-fit-comparison span {
+  color: var(--text-soft);
+  font-size: 0.8rem;
+}
+
+.enhance-fit-comparison strong {
+  color: #173d35;
+}
+
+@media (max-width: 700px) {
+  .enhance-fit-map { height: 340px; }
+  .enhance-fit-comparison { grid-template-columns: 1fr; }
+  .enhance-fit-controls label { grid-template-columns: 1fr auto; }
+  .enhance-fit-controls label input { grid-column: 1 / 2; }
+}

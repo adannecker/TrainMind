@@ -13,6 +13,7 @@ import { ActivitiesWeekPage } from "./pages/ActivitiesWeekPage";
 import { CheckRidesPage } from "./pages/CheckRidesPage";
 import { ClimbComparePage } from "./pages/ClimbComparePage";
 import { CreateFitFilePage } from "./pages/CreateFitFilePage";
+import { EnhanceFitFilePage } from "./pages/EnhanceFitFilePage";
 import { FindRidesOnMapPage } from "./pages/FindRidesOnMapPage";
 import { FitRepairPage } from "./pages/FitRepairPage";
 import { FitTrimPage } from "./pages/FitTrimPage";
@@ -77,11 +78,17 @@ const navGroups: NavGroup[] = [
     key: "tools",
     label: "Tools",
     items: [
-      { label: "Create FIT File", to: "/tools/create-fit-file" },
+      {
+        label: "Fit Fixer",
+        children: [
+          { label: "Create FIT File", to: "/tools/create-fit-file" },
+          { label: "Fix FIT File", to: "/tools/fix-fit-file" },
+          { label: "FIT File kürzen", to: "/tools/trim-fit-file" },
+          { label: "Enhance FIT File", to: "/tools/enhance-fit-file" },
+        ],
+      },
       { label: "Import Files", to: "/tools/import-files" },
       { label: "Analyse Ride (no import)", to: "/tools/analyze-ride-no-import" },
-      { label: "Fix FIT file", to: "/tools/fix-fit-file" },
-      { label: "FIT file kürzen", to: "/tools/trim-fit-file" },
     ],
   },
   {
@@ -645,6 +652,7 @@ function Layout() {
               <Route path="/tools/fix-fit-file" element={<FitRepairPage />} />
               <Route path="/tools/create-fit-file" element={<CreateFitFilePage />} />
               <Route path="/tools/trim-fit-file" element={<FitTrimPage />} />
+              <Route path="/tools/enhance-fit-file" element={<EnhanceFitFilePage />} />
               <Route path="/activities/dashboard" element={<ActivitiesDashboardPage />} />
               <Route path="/activities/week" element={<ActivitiesWeekPage />} />
               <Route path="/activities/month" element={<ActivitiesMonthPage />} />
